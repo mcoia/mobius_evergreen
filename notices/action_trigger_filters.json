@@ -1,0 +1,30 @@
+{
+"checkout.due" :
+    { "context_org" : "circ_lib",
+      "filter"      :
+            { "checkin_time"  : null,
+              "-or"           :
+                    [ { "stop_fines"  : ["MAXFINES", "LONGOVERDUE"] },
+                      { "stop_fines"  : null }
+                    ]
+            }
+    },
+    "hold_request.shelf_expires_soon" : {
+        "context_org": "pickup_lib",
+        "filter": {
+            "shelf_expire_time": {"!=": null},
+            "capture_time": {"!=": null},
+            "current_copy": {"!=": null},
+            "shelf_time": {"!=": null},
+            "cancel_time": null
+        }
+    },
+    "hold_request.long_wait" : {
+        "context_org": "pickup_lib",
+        "filter": {
+            "frozen": "f",
+            "cancel_time": null,
+            "capture_time": null
+        }
+    }
+}
