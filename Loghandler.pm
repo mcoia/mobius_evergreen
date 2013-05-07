@@ -22,6 +22,7 @@ package Loghandler;
 
 use DateTime;
 use Mobiusutil;
+use utf8;
 
 sub new
 {
@@ -74,7 +75,7 @@ sub addLogLine
 {
 	my ($fileName) = @_[0];
 	my $file = $fileName->{_file};	
-	my $dt   = DateTime->now;   # Stores current date and time as datetime object
+	my $dt   = DateTime->now(time_zone => "local");   # Stores current date and time as datetime object
 	my $date = $dt->ymd;   # Retrieves date as a string in 'yyyy-mm-dd' format
 	my $time = $dt->hms;   # Retrieves time as a string in 'hh:mm:ss' format
 
@@ -84,6 +85,7 @@ sub addLogLine
 	$datetime = $mobutil->makeEvenWidth($datetime,20);
 	undef $mobutil;
 	open(OUTPUT, '>> '.$file) or die $!;
+	binmode(OUTPUT, ":utf8");
 	print OUTPUT $datetime,": $line\n";
 	close(OUTPUT);
 }
@@ -105,6 +107,7 @@ sub truncFile
 	my $file = $fileName->{_file};
 	my $line = @_[1];
 	open(OUTPUT, '> '.$file) or die $!;
+	binmode(OUTPUT, ":utf8");
 	print OUTPUT "$line\n";
 	close(OUTPUT);
 }
