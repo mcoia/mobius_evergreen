@@ -41,7 +41,7 @@ package DBhandler;
  use DBD::Pg;
  use Loghandler;
  use strict; 
- use Unicode::Normalize;
+ #use Unicode::Normalize;
  use Encode;
  use utf8;
  use Data::Dumper;
