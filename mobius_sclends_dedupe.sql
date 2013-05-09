@@ -72,7 +72,7 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 
 		my $logf = new Loghandler("/tmp/log.log");
 
-		$logf->addLine('Script running.....');
+		#$logf->addLine('Script running.....');
 
 		my $get_quality = sub {
 			my $marc = shift;
@@ -107,7 +107,7 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 			import MARC::File::XML (BinaryEncoding => 'utf8');
 			return;
 		}
-		$logf->addLine("Success Parse $bibid: $@");
+		#$logf->addLine("Success Parse $bibid: $@");
 		my @f245 = $marc->field('245');
 		return unless @f245; # must have 245
 		my $norm_title = norm_title($f245[0]);
@@ -389,49 +389,51 @@ CREATE OR REPLACE FUNCTION m_dedupe.melt856s(bib_id BIGINT,marc_primary TEXT, su
 				$urls{$u} = $otherField;
 			}
 		}
-#my		$dump1=Dumper(\%urls);
-		#$logf->addLine("$dump1");
-#		$logf->addLine("Melted\n{");
+my		$dump1=Dumper(\%urls);
+		$logf->addLine("$dump1");
+		$logf->addLine("Melted\n{");
 		my @remove = $marc->field('856');
-#		$logf->addLine("Removing ".$#remove." 856 records");
+		$logf->addLine("Removing ".$#remove." 856 records");
 		$marc->delete_fields(@remove);
 
 
 		while ((my $internal, my $mvalue ) = each(%urls))
 			{
 #LOGGING METHODS
-#			$logf->addLine("\t{");
+			$logf->addLine("\t{");
 				@eights = $mvalue->subfield('u');
-#				$logf->addLine("\tu fields:");
+				$logf->addLine("\tu fields:");
 				foreach(@eights)
 				{
-#					$logf->addLine("\t\t$_");
+					$logf->addLine("\t\t$_");
 				}
 				@eights = $mvalue->subfield('z');
-#				$logf->addLine("\tz fields:");
+				$logf->addLine("\tz fields:");
 				foreach(@eights)
 				{
-#					$logf->addLine("\t\t$_");
+					$logf->addLine("\t\t$_");
 				}
 				@eights = $mvalue->subfield('9');
-#				$logf->addLine("\t9 fields:");
+				$logf->addLine("\t9 fields:");
 				foreach(@eights)
 				{
-#					$logf->addLine("\t\t$_");
+					$logf->addLine("\t\t$_");
 				}
-#				$logf->addLine("\t}");
+				$logf->addLine("\t}");
 #LOGGING METHODS ENDING
 				$marc->insert_grouped_field( $mvalue );
-#				$logf->addLine("Inserted 856 back in");
+				$logf->addLine("Inserted 856 back in");
 			}
-#		$logf->addLine("}");
-		my $mobutil = new Mobiusutil();
-		my @errors = @{$mobutil->compare2MARCObjects($marc,$marc2)};
-						my $errors;
-						foreach(@errors)
-						{
-							$errors.= $_."\r\n";
-						}
+		$logf->addLine("}");
+
+# Compare the 2 marc records for debugging
+#		my $mobutil = new Mobiusutil();
+#		my @errors = @{$mobutil->compare2MARCObjects($marc,$marc2)};
+#						my $errors;
+#						foreach(@errors)
+#						{
+#							$errors.= $_."\r\n";
+#						}
 		#$logf->addLine("$errors");
 		my $returning = $marc->as_xml_record();
 		$returning =~ s/\n//g;
@@ -689,10 +691,10 @@ from m_dedupe.merge_map mm) as a;
 
 -- Perhaps this is not required because this is supposedly the soon-to-be-deleted record
 -- But just for assurance! But at a cost of time!
-SELECT * FROM 
-(SELECT m_dedupe.update_sub(
-mm.id,mm.sub_bibid)
-from m_dedupe.merge_map mm) as a;
+--SELECT * FROM 
+--(SELECT m_dedupe.update_sub(
+--mm.id,mm.sub_bibid)
+--from m_dedupe.merge_map mm) as a;
 -- Get rid of the trigger because we only needed it for the updating marc xml
 DROP FUNCTION m_dedupe.updateboth() CASCADE;
 
