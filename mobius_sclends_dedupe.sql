@@ -123,7 +123,7 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 		my @norm_isbns = norm_isbns(\@isbns, $logf);
 		#$logf->addLine("I recieved these isbns from subroutine: ".$#norm_isbns);
 		foreach my $isbn (@norm_isbns) {
-		$logf->addLine("$isbn, $norm_title, $qual, $bibid");
+		#$logf->addLine("$isbn, $norm_title, $qual, $bibid");
 			return_next({ norm_isbn => $isbn, norm_title => $norm_title, qual => $qual, bibid => $bibid });
 		}
 		return undef;
@@ -707,7 +707,7 @@ FROM m_dedupe.merge_map WHERE id in (
   SELECT id FROM m_dedupe.merge_map
   WHERE done = false
   ORDER BY id
-  LIMIT 1000
+  LIMIT 50
 );
 
 UPDATE m_dedupe.merge_map set done = true
@@ -715,6 +715,6 @@ WHERE id in (
   SELECT id FROM m_dedupe.merge_map
   WHERE done = false
   ORDER BY id
-  LIMIT 1000
+  LIMIT 50
 );
 
