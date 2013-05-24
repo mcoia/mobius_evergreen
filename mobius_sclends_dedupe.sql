@@ -282,6 +282,7 @@ CREATE OR REPLACE FUNCTION m_dedupe.melt856s(bib_id BIGINT,marc_primary TEXT, su
 		my @eight56s = $marc->field("856");
 		my @eight56s_2 = $marc2->field("856");
 		my @eights;
+		my $original856 = $#eight56s + 1;
 		
 #LOGGING
 #	$logf->addLine("First 856's (DB ID: $bibid)\n{");
@@ -348,50 +349,59 @@ CREATE OR REPLACE FUNCTION m_dedupe.melt856s(bib_id BIGINT,marc_primary TEXT, su
 			my $z = $thisField->subfield("z");
 		#$logf->addLine("I got u = $u and z = $z");
 			
-			
-			if(!exists $urls{$u})
+			if(exists $u) #needs to be defined because it's the key
 			{
-				$urls{$u} = $thisField;
-			}
-			else
-			{
-				my @nines = $thisField->subfield("9");
-				my $otherField = $urls{$u};
-				my @otherNines = $otherField->subfield("9");
-				my $otherZ = $otherField->subfield("z");		
-				if(!$otherZ)
+				if(!exists $urls{$u})
 				{
-#				$logf->addLine("z didnt exist");
-					if($z)
-					{
-						$otherField->add_subfields('z'=>$z);
-#						$logf->addLine("it exists here, so im adding it to og");
-					}
+					$urls{$u} = $thisField;
 				}
-				foreach(@nines)
+				else
 				{
-					my $looking = $_;
-					my $found = 0;
-					foreach(@otherNines)
+					my @nines = $thisField->subfield("9");
+					my $otherField = $urls{$u};
+					my @otherNines = $otherField->subfield("9");
+					my $otherZ = $otherField->subfield("z");		
+					if(!$otherZ)
 					{
-#					$logf->addLine("Searching for $looking");
-						if($looking eq $_)
+	#				$logf->addLine("z didnt exist");
+						if($z)
 						{
-							$found=1;
+							$otherField->add_subfields('z'=>$z);
+	#						$logf->addLine("it exists here, so im adding it to og");
 						}
 					}
-					if($found==0)
+					foreach(@nines)
 					{
-#					$logf->addLine("Didnt find $looking so adding it to og");
-						$otherField->add_subfields('9' => $looking);
+						my $looking = $_;
+						my $found = 0;
+						foreach(@otherNines)
+						{
+	#					$logf->addLine("Searching for $looking");
+							if($looking eq $_)
+							{
+								$found=1;
+							}
+						}
+						if($found==0)
+						{
+	#					$logf->addLine("Didnt find $looking so adding it to og");
+							$otherField->add_subfields('9' => $looking);
+						}
 					}
+					$urls{$u} = $otherField;
 				}
-				$urls{$u} = $otherField;
 			}
 		}
-my		$dump1=Dumper(\%urls);
-		$logf->addLine("$dump1");
-		$logf->addLine("Melted\n{");
+		
+		my $finalCount = scalar keys %urls;
+		if($original856 != $finalCount)
+		{
+			$logf->addLine("There is a difference here!");
+		}
+		
+		my $dump1=Dumper(\%urls);
+#		$logf->addLine("$dump1");
+#		$logf->addLine("Melted\n{");
 		my @remove = $marc->field('856');
 		$logf->addLine("Removing ".$#remove." 856 records");
 		$marc->delete_fields(@remove);
@@ -400,31 +410,31 @@ my		$dump1=Dumper(\%urls);
 		while ((my $internal, my $mvalue ) = each(%urls))
 			{
 #LOGGING METHODS
-			$logf->addLine("\t{");
-				@eights = $mvalue->subfield('u');
-				$logf->addLine("\tu fields:");
-				foreach(@eights)
-				{
-					$logf->addLine("\t\t$_");
-				}
-				@eights = $mvalue->subfield('z');
-				$logf->addLine("\tz fields:");
-				foreach(@eights)
-				{
-					$logf->addLine("\t\t$_");
-				}
-				@eights = $mvalue->subfield('9');
-				$logf->addLine("\t9 fields:");
-				foreach(@eights)
-				{
-					$logf->addLine("\t\t$_");
-				}
-				$logf->addLine("\t}");
+#			$logf->addLine("\t{");
+#				@eights = $mvalue->subfield('u');
+#				$logf->addLine("\tu fields:");
+#				foreach(@eights)
+#				{
+#					$logf->addLine("\t\t$_");
+#				}
+#				@eights = $mvalue->subfield('z');
+#				$logf->addLine("\tz fields:");
+#				foreach(@eights)
+#				{
+#					$logf->addLine("\t\t$_");
+#				}
+#				@eights = $mvalue->subfield('9');
+#				$logf->addLine("\t9 fields:");
+#				foreach(@eights)
+#				{
+#					$logf->addLine("\t\t$_");
+#				}
+#				$logf->addLine("\t}");
 #LOGGING METHODS ENDING
 				$marc->insert_grouped_field( $mvalue );
-				$logf->addLine("Inserted 856 back in");
+#				$logf->addLine("Inserted 856 back in");
 			}
-		$logf->addLine("}");
+#		$logf->addLine("}");
 
 # Compare the 2 marc records for debugging
 #		my $mobutil = new Mobiusutil();
@@ -467,6 +477,12 @@ BEGIN
 			) as b WHERE b.bibid=bre.id
 		)
 		WHERE bre.id = thisbidid;
+		UPDATE m_dedupe.merge_map mm SET lead_marc=
+		(
+			SELECT marc FROM biblio.record_entry
+			 as bre WHERE bre.id=thisbidid
+		)
+		WHERE lead_bibid = thisbidid;
 --Return nothing because the work has been done
 RETURN '';
 END;
@@ -522,9 +538,15 @@ SELECT  (a.get_isbn_match_key::mig_isbn_match).norm_isbn,
         (a.get_isbn_match_key::mig_isbn_match).bibid                                                                                 
 FROM (
     SELECT m_dedupe.get_isbn_match_key(bre.id, bre.marc)
-    FROM biblio.record_entry bre
-    JOIN m_dedupe.bibs_to_check c ON (c.bib_id = bre.id)
+    FROM biblio.record_entry bre 
+	JOIN m_dedupe.bibs_to_check c ON (c.bib_id = bre.id)
+	--limit 50000    
 ) a;
+--Testing data:
+--where bre.id in (205274, 137203, 82168, 453346, 343583, 264869, 463343,
+--233768, 233781, 233783, 233782,
+--503837, 503836, 501518, 53369, 459486, 427765, 197769, 183426)
+
 
 CREATE INDEX norm_idx on m_dedupe.match_keys(norm_isbn, norm_title);
 CREATE INDEX qual_idx on m_dedupe.match_keys(qual);
@@ -707,7 +729,7 @@ FROM m_dedupe.merge_map WHERE id in (
   SELECT id FROM m_dedupe.merge_map
   WHERE done = false
   ORDER BY id
-  LIMIT 50
+  --LIMIT 50
 );
 
 UPDATE m_dedupe.merge_map set done = true
@@ -715,6 +737,6 @@ WHERE id in (
   SELECT id FROM m_dedupe.merge_map
   WHERE done = false
   ORDER BY id
-  LIMIT 50
+  --LIMIT 50
 );
 
