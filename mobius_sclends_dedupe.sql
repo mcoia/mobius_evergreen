@@ -65,6 +65,7 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 		use MARC::File::XML (BinaryEncoding => 'utf8');
 		use Business::ISBN;
 		use Loghandler;
+		use Data::Dumper;
 
 		binmode(STDERR, ':bytes');
 		binmode(STDOUT, ':utf8');
@@ -76,20 +77,29 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 
 		my $get_quality = sub {
 			my $marc = shift;
+			my $logf = shift;
+			
+			my $score = 0;
+			$score+= score($marc,2,100,400,$logf,'245');
+			$score+= score($marc,1,1,150,$logf,'100');
+			$score+= score($marc,1,1.1,150,$logf,'110');
+			$score+= score($marc,0,50,200,$logf,'6..');
+			$score+= score($marc,0,50,100,$logf,'02.');
+			
+			$score+= score($marc,0,100,200,$logf,'246');
+			$score+= score($marc,0,100,100,$logf,'130');
+			$score+= score($marc,0,100,100,$logf,'010');
+			$score+= score($marc,0,100,200,$logf,'490');
+			$score+= score($marc,0,10,50,$logf,'830');
+			
+			$score+= score($marc,1,.5,50,$logf,'300');
+			$score+= score($marc,0,1,100,$logf,'7..');
+			$score+= score($marc,2,2,100,$logf,'50.');
+			$score+= score($marc,2,2,100,$logf,'52.');
+			
+			$score+= score($marc,2,.5,200,$logf,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
 
-			my $has003 = (scalar($marc->field('003'))) ? '1' : '0';
-
-			return join('', $has003,
-							count_field($marc, '02.'),
-							count_field($marc, '24.'),
-							field_length($marc, '300'),               
-							field_length($marc, '100'),               
-							count_field($marc, '010'),
-							count_field($marc, '50.', '51.', '52.', '53.', '54.', '55.', '56.', '57.', '58.'),
-							count_field($marc, '6..'),
-							count_field($marc, '440', '490', '830'),
-							count_field($marc, '7..'),
-						);
+			return $score;
 		};
 
 
@@ -116,7 +126,7 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 		my @isbns = $marc->field('020');
 		return unless @isbns; # must have at least 020
 
-		my $qual = $get_quality->($marc);
+		my $qual = $get_quality->($marc, $logf);
 
 #		$logf->addLine("quality = $qual");
 
@@ -129,27 +139,95 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 		return undef;
 
 
-		sub count_field {
+		sub score
+		{
 			my ($marc) = shift;
+			my ($type) = shift;
+			my ($weight) = shift;
+			my ($cap) = shift;
+			my ($logf) = shift;
 			my @tags = @_;
+			my $ou = Dumper(@tags);
+			$logf->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
+			my $score = 0;			
+			if($type == 0) #0 is field count
+			{
+				$logf->addLine("Calling count_field");
+				$score = count_field($marc,$logf,\@tags);
+			}
+			elsif($type == 1) #1 is length of field
+			{
+				$logf->addLine("Calling field_length");
+				$score = field_length($marc,$logf,\@tags);
+			}
+			elsif($type == 2) #2 is subfield count
+			{
+				$logf->addLine("Calling count_subfield");
+				$score = count_subfield($marc,$logf,\@tags);
+			}
+			$score = $score * $weight;
+			if($score > $cap)
+			{
+				$score = $cap;
+			}
+			$score = int($score);
+			$logf->addLine("Weight and cap applied\nScore is: $score");
+			return $score;
+		}
+		
+		sub count_subfield
+		{
+			my ($marc) = $_[0];
+			my $logf = $_[1];
+			my @tags = @{$_[2]};
 			my $total = 0;
-			foreach my $tag (@tags) {
+			$logf->addLine("Starting count_subfield");
+			foreach my $tag (@tags) 
+			{
+				my @f = $marc->field($tag);
+				foreach my $field (@f)
+				{
+					my @subs = $field->subfields();
+					my $ou = Dumper(@subs);
+					$logf->addLine($ou);
+					if(@subs)
+					{
+						$total += scalar(@subs);
+					}
+				}
+			}
+			$logf->addLine("Total Subfields: $total");
+			return $total;
+			
+		}	
+		
+		sub count_field 
+		{
+			my ($marc) = $_[0];
+			my $logf = $_[1];
+			my @tags = @{$_[2]};
+			my $total = 0;
+			foreach my $tag (@tags) 
+			{
 				my @f = $marc->field($tag);
 				$total += scalar(@f);
 			}
-			$total = 99 if $total > 99;
-			return sprintf("%-02.2d", $total);
+			return $total;
 		}
 
-		sub field_length {
-			my $marc = shift;
-			my $tag = shift;
+		sub field_length 
+		{
+			my ($marc) = $_[0];
+			my $logf = $_[1];
+			my @tags = @{$_[2]};
 
-			my @f = $marc->field($tag);
-			return '00' unless @f;
+			my @f = $marc->field(@tags[0]);
+			return 0 unless @f;
 			my $len = length($f[0]->as_string);
-			$len = 99 if $len > 99;
-			return sprintf("%-02.2d", $len);
+			my $ou = Dumper(@f);
+			$logf->addLine($ou);
+			$logf->addLine("Field Length: $len");
+			return $len;
 		}
 
 		sub norm_title {
@@ -176,8 +254,8 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 		}
 
 		sub norm_isbns {
-			my @isbns = @{@_[0]};
-			my $logf = @_[1];
+			my @isbns = @{$_[0]};
+			my $logf = $_[1];
 		#$logf->addLine("SUBROUTINE: I recieved these isbns: ".$#isbns);
 			my %uniq_isbns = ();
 			foreach my $field (@isbns) {
@@ -195,8 +273,8 @@ CREATE OR REPLACE FUNCTION m_dedupe.get_isbn_match_key (bib_id BIGINT, marc TEXT
 		}
 
 		sub norm_isbn {
-			my $str = @_[0];
-			my $logf = @_[1];
+			my $str = $_[0];
+			my $logf = $_[1];
 			my $norm = '';
 			return '' unless defined $str;
 		#added because our test data only has 1 digit
@@ -349,9 +427,9 @@ CREATE OR REPLACE FUNCTION m_dedupe.melt856s(bib_id BIGINT,marc_primary TEXT, su
 			my $z = $thisField->subfield("z");
 		#$logf->addLine("I got u = $u and z = $z");
 			
-			if(exists $u) #needs to be defined because it's the key
+			if($u) #needs to be defined because its the key
 			{
-				if(!exists $urls{$u})
+				if(!$urls{$u})
 				{
 					$urls{$u} = $thisField;
 				}
@@ -583,7 +661,7 @@ WHERE not acn.deleted
 --and not ac.deleted
 GROUP BY bibid, a.norm_isbn, a.norm_title, b.max_qual;
 
--- now populate the counts and 0 for no items (instead of null which is why so my subqueries)
+-- now populate the counts and 0 for no items (instead of null which is why so many subqueries)
 
 update m_dedupe.prospective_leads mdpl set copy_count = (case when 
 		(select (case when count is null then 0 else count end) as count from(
@@ -729,7 +807,7 @@ FROM m_dedupe.merge_map WHERE id in (
   SELECT id FROM m_dedupe.merge_map
   WHERE done = false
   ORDER BY id
-  --LIMIT 50
+  LIMIT 50
 );
 
 UPDATE m_dedupe.merge_map set done = true
@@ -737,6 +815,6 @@ WHERE id in (
   SELECT id FROM m_dedupe.merge_map
   WHERE done = false
   ORDER BY id
-  --LIMIT 50
+  LIMIT 50
 );
 
