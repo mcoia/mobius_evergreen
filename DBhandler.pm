@@ -76,9 +76,19 @@ package DBhandler;
 	my $login = $self->{login};
 	my $pass = $self->{password};
 	my $port = $self->{port};
-	$conn =  DBI->connect("DBI:Pg:dbname=$dbname;host=$host;port=$port", $login, $pass, {pg_utf8_strings => 1}); #'RaiseError' => 1,post_connect_sql => "SET CLIENT_ENCODING TO 'UTF8'"
+	$conn =  DBI->connect("DBI:Pg:dbname=$dbname;host=$host;port=$port", $login, $pass, {pg_utf8_strings => 1,AutoCommit => 1}); #'RaiseError' => 1,post_connect_sql => "SET CLIENT_ENCODING TO 'UTF8'"
 	
 	$self->{conn} = $conn;
+ }
+ 
+ sub update
+ {
+	my ($self) = @_[0];
+	my $conn = $self->{conn};
+	my $querystring =  @_[1];	
+
+	my $ret = $conn->do($querystring);
+	return $ret;
  }
  
  sub query
@@ -212,6 +222,47 @@ package DBhandler;
 	undef($querystring);
 	return \@ret;
 	
+ }
+ 
+ sub copyinput
+ {
+	my ($self) = @_[0];
+	my $conn = $self->{conn};
+	my $oquerystring =  @_[1];
+	my $delimeter="\t";
+	if(@_[2])
+	{
+		$delimeter=@_[2];
+	}
+	my $index = index(uc($oquerystring),"FROM");
+	if($index==-1)
+	{
+		return "Invalid COPY query";
+	}
+	
+	my $querystring = substr($oquerystring,0,$index);
+	if(substr($querystring,0,1)=='\\')
+	{
+		$querystring=substr($querystring,1);
+	}
+	my $file = substr($oquerystring,$index+5);
+	$file =~ s/^\s+//;
+	$file =~ s/\s+$//;
+	if(!(-e $file))
+	{
+		return "Could not find $file";
+	}
+	
+	my $inputfile = new Loghandler($file);
+	my @lines = @{$inputfile->readFile()};
+	#print "Running $querystring FROM STDIN WITH DELIMITER '$delimeter'\n";
+	$conn->do("$querystring FROM STDIN WITH DELIMITER '$delimeter'");
+	foreach(@lines)
+	{
+		$conn->pg_putcopydata($_);
+	}
+	
+	return $conn->pg_putcopyend();
  }
  
  sub getConnectionInfo
