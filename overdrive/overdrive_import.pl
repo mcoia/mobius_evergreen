@@ -18,6 +18,8 @@ use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
+use Digest::SHA1;
+
 
  my $configFile = @ARGV[0];
  if(!$configFile)
@@ -74,7 +76,28 @@ use DateTime::Format::Duration;
 			{				
 				@shortnames[$y]=$mobUtil->trim(@shortnames[$y]);
 			}
-			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
+			my $dbHandler;
+			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
+			my @dbMarcs = @{findPBrecordInME($dbHandler)};
+			my @lookingforthese;
+			foreach(@dbMarcs)
+			{
+				my @t  = @{$_};
+				my $marc = @t[1];
+				$marc =~ s/(<leader>.........)./${1}a/;
+				$marc = MARC::Record->new_from_xml($marc);
+				if($marc->field('245'))
+				{
+					if($marc->field('245')->subfield('a'))
+					{
+						push(@lookingforthese,$marc->field('245')->subfield('a'));
+					}
+				}
+			}
+			@files=@{findMatchInArchive(\@lookingforthese,$archivefolder)}; 
+			
+			#@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
+			
 			if(@files[$#files]!=-1)
 			{
 				for my $b(0..$#files)
@@ -99,7 +122,7 @@ use DateTime::Format::Duration;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->addLine($output);
+				$marcout->addLineRaw($output);
 				my $dbHandler;
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -113,9 +136,11 @@ use DateTime::Format::Duration;
 				}
 				if($valid)
 				{					
-					@info = @{importMARCintoEvergreen($outputFile,$log,$dbHandler)};
+					my $bib_sourceid = getbibsource($dbHandler);
+					print "Bib source id: $bib_sourceid\n";
+					@info = @{importMARCintoEvergreen($outputFile,$log,$dbHandler,$mobUtil,$bib_sourceid)};
 					$finalImport = 1;
-					print Dumper(\@info);
+					$log->addLine(Dumper(\@info));
 				}
 				$marcout->deleteFile();
 			}
@@ -130,8 +155,10 @@ use DateTime::Format::Duration;
 		}
 		my @worked = @{@info[0]};
 		my @notworked = @{@info[1]};
+		my @updated = @{@info[2]};
 		my $workedCount = $#worked+1;
 		my $notWorkedCount = $#notworked+1;
+		my $updatedCount = $#updated+1;
 		my $fileCount = $#files;
 		my $afterProcess = DateTime->now(time_zone => "local");
 		my $difference = $afterProcess - $dt;
@@ -139,6 +166,7 @@ use DateTime::Format::Duration;
 		my $duration =  $format->format_duration($difference);
 		my $fileList;
 		my $successTitleList;
+		my $successUpdateTitleList;
 		my $failedTitleList;
 		foreach(@files)
 		{
@@ -154,7 +182,7 @@ use DateTime::Format::Duration;
 				my $bibid = @both[0];
 				my $title = @both[1];
 				$successTitleList.=$bibid." ".$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Insert\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -164,7 +192,19 @@ use DateTime::Format::Duration;
 			{
 				my $title = $_;
 				$failedTitleList.=$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Insert\",\"\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Insert\",\"\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$fileList\"";
+				$csvline=~s/\n//g;
+				$csvline=~s/\r//g;
+				$csvline=~s/\r\n//g;
+				$csvlines.="$csvline\n";
+			}
+			foreach(@updated)
+			{
+				my @both = @{$_};
+				my $bibid = @both[0];
+				my $title = @both[1];
+				$successUpdateTitleList.=$bibid." ".$title."\r\n";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Update\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -186,9 +226,9 @@ use DateTime::Format::Duration;
 				$totalSuccess=0;
 			}
 			my @tolist = ($conf{"alwaysemail"});		
-			my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
+			#my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
 			$fileList=~s/\s/\r\n/g;
-			$email->send("Evergreen Utility - Overdrive Import Report Job # $dateString","I connected to: \r\n ".$conf{"server"}."\r\nand gathered:\r\n$count Record(s) from $fileCount file(s)\r\n$workedCount Successful Imports\r\n$notWorkedCount Not successful Imports\r\n Duration: $duration\r\n\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-MOBIUS Perl Squad-");
+			#$email->send("Evergreen Utility - Overdrive Import Report Job # $dateString","I connected to: \r\n ".$conf{"server"}."\r\nand gathered:\r\n$count Record(s) from $fileCount file(s)\r\n$workedCount Successful Imports\r\n$notWorkedCount Not successful Imports\r\n Duration: $duration\r\n\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-MOBIUS Perl Squad-");
 		}
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
 	}
@@ -247,7 +287,7 @@ sub getmarc
 				my $thisMonth = @months[$monthpos];
 				my $URL = "http://$login:$password\@$server/Overdrive/$thisYear/$thisMonth/";
 				#$log->addLine("Attempting to read $URL");
-				if($loops<1)
+				if(1)#$loops<1)
 				{
 				
 				pQuery($URL)
@@ -330,22 +370,34 @@ sub add9
 			#print Dumper(@recID[$rec]);
 			for my $t(0.. $#shortnames)
 			{
-				my @subfields = @recID[$rec]->subfield( '9' );
-				my $shortnameexists=0;
-				for my $subs(0..$#subfields)
+				my @sub3 = @recID[$rec]->subfield( '3' );
+				my $ignore=0;
+				foreach(@sub3)
 				{
-				#print "Comparing ".@subfields[$subs]. " to ".@shortnames[$t]."\n";
-					if(@subfields[$subs] eq @shortnames[$t])
+					if(lc($_) eq 'excerpt')
 					{
-						print "Same!\n";
-						$shortnameexists=1;
+						$ignore=1;
 					}
 				}
-				#print "shortname exists: $shortnameexists\n";
-				if(!$shortnameexists)
+				if(!$ignore)
 				{
-					#print "adding ".@shortnames[$t]."\n";
-					@recID[$rec]->add_subfields('9'=>@shortnames[$t]);
+					my @subfields = @recID[$rec]->subfield( '9' );
+					my $shortnameexists=0;
+					for my $subs(0..$#subfields)
+					{
+					#print "Comparing ".@subfields[$subs]. " to ".@shortnames[$t]."\n";
+						if(@subfields[$subs] eq @shortnames[$t])
+						{
+							print "Same!\n";
+							$shortnameexists=1;
+						}
+					}
+					#print "shortname exists: $shortnameexists\n";
+					if(!$shortnameexists)
+					{
+						#print "adding ".@shortnames[$t]."\n";
+						@recID[$rec]->add_subfields('9'=>@shortnames[$t]);
+					}
 				}
 			}
 		}
@@ -353,56 +405,283 @@ sub add9
 	return $marc;
 }
 
+sub calcSHA1
+{
+	my $marc = @_[0];
+	my $sha1 = Digest::SHA1->new;
+	$sha1->add(  length(getsubfield($marc,'007',''))>6 ? substr( getsubfield($marc,'007',''),0,6) : '' );
+	$sha1->add(getsubfield($marc,'245','h'));
+	$sha1->add(getsubfield($marc,'001',''));
+	$sha1->add(getsubfield($marc,'245','a'));
+	return $sha1->hexdigest;
+}
+
+sub getsubfield
+{
+	my $marc = @_[0];
+	my $tag = @_[1];
+	my $subtag = @_[2];
+	my $ret;
+	if($marc->field($tag))
+	{
+		if($tag<10)
+		{	
+			$ret = $marc->field($tag)->data();
+		}
+		elsif($marc->field($tag)->subfield($subtag))
+		{
+			$ret = $marc->field($tag)->subfield($subtag);
+		}
+	}
+	return $ret;
+	
+}
+
 sub importMARCintoEvergreen
 {
 	my @ret;
 	my @worked;
 	my @notworked;
+	my @updated;
 	my $inputFile = @_[0];
 	my $log = @_[1];
 	my $dbHandler = @_[2];
+	my $mobUtil = @_[3];
+	my $bibsourceid = @_[4];	
 	my $file = MARC::File::USMARC->in( $inputFile );
 	my $r =0;		
-	
+	my $overlay = 0;
 	my $query;
 	print "Working on importMARCintoEvergreen\n";
+	
 	while ( my $marc = $file->next() ) 
 	{
-		if($r<2)
+		
+		if($overlay<16)
 		{
 			#my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
-			my $thisXML = $marc->as_xml();
-			$thisXML =~ s/\n//sog;
-			$thisXML =~ s/^<\?xml.+\?\s*>//go;
-			$thisXML =~ s/>\s+</></go;
-			$thisXML =~ s/\p{Cc}//go;
-			$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
-			$thisXML =~ s/[\x00-\x1f]//go;
-			my $title =  $marc->field('245')->subfield("a");
-			my $max = getEvergreenMax($dbHandler);
+			my $title = getsubfield($marc,'245','a');
 			print "Importing $title\n";
-			$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(\\N,'IMPORT-1382129068.90847',E'$thisXML',\\N,\\N,E'Overdrive',\\N,\\N)";			
-			$log->addLine($query);
-			#my $res = $dbHandler->update($query);
-			#print "$res";
-			my $newmax = getEvergreenMax($dbHandler);
-			if($newmax != $max)
+			my $sha1 = calcSHA1($marc);
+			$marc = readyMARCForInsertIntoME($marc);
+			my $bibid=-1;
+			my $bibid = findRecord($marc, $dbHandler,$sha1);
+			
+			if($bibid!=-1) #already exists so update the marc
 			{
-				my @temp = ($newmax,$title);
-				push @worked, [@temp];
+				my @present = @{$bibid};
+				my $id = @present[0];
+				my $prevmarc = @present[1];
+				$prevmarc =~ s/(<leader>.........)./${1}a/;			
+				$prevmarc = MARC::Record->new_from_xml($prevmarc);
+				my $led = substr($prevmarc->leader(),6,1);
+				print "Subed $led from".$prevmarc->leader()."\n";
+				my $found=0;
+				if($led eq 'a')
+				{
+					$found=1;
+				}
+				if(!$found)
+				{
+					
+				}
+				else
+				{	
+					$prevmarc = mergeMARC856($prevmarc,$marc,$log);
+					$prevmarc = fixLeader($prevmarc);
+					my $thisXML = convertMARCtoXML($prevmarc);
+					$query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$thisXML\$\$,tcn_source=E'molib2go-script $sha1',source=$bibsourceid WHERE ID=$id";
+					$log->addLine($query);
+					$log->addLine("http://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml");
+					$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					my $res = $dbHandler->update($query);
+					print "$res";					
+					if($res)
+					{
+						my @temp = ($id,$title);
+						push @updated, [@temp];
+						$overlay++;
+					}
+					else
+					{
+						push (@notworked, $id);
+					}
+				}
 			}
-			else
+			else  ##need to insert new bib instead of update
 			{
-				push (@notworked, $title);
+				my $starttime = time;
+				my $max = getEvergreenMax($dbHandler);
+				my $thisXML = convertMARCtoXML($marc);
+				
+				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$\$$thisXML\$\$,null,$bibsourceid,E'molib2go-script $sha1,null,null)";
+				$log->addLine($query);
+				my $res = $dbHandler->update($query);
+				#print "$res";
+				my $newmax = getEvergreenMax($dbHandler);
+				if($newmax != $max)
+				{
+					my @temp = ($newmax,$title);
+					push @worked, [@temp];
+					$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+				}
+				else
+				{
+					push (@notworked, $marc);
+				}
 			}
+			
+			undef $sha1;
 		}
 		$r++;
 	}
 	
-	push(@ret, (\@worked,\@notworked));
-	print Dumper(@ret);
+	push(@ret, (\@worked, \@notworked, \@updated));
+	#print Dumper(@ret);
 	return \@ret;
 	
+}
+
+sub findRecord
+{
+	my $marcsearch = @_[0];
+	my $zero01 = $marcsearch->field('001')->data();
+	my $dbHandler = @_[1];
+	my $sha1 = @_[2];
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%'";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
+		print "found matching sha1: $id\n";
+		my @ret = ($id,$marc);
+		return \@ret;
+	}
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%$zero01%'";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		print "found matching 001: $id\n";
+		my $marc = @row[1];
+		my @ret = ($id,$marc);
+		return \@ret;
+	}
+	
+	return -1;
+}
+
+sub readyMARCForInsertIntoME
+{
+	my $marc = @_[0];
+	$marc = fixLeader($marc);	
+	my $lbyte6 = substr($marc->leader(),6,1);
+	
+	my $two45 = $marc->field('245');
+	my @e856s = $marc->field('856');
+	
+	if($two45)
+	{
+		$two45->delete_subfield(code => 'h');
+		$two45->add_subfields('h' => "[Overdrive downloadable item] /");
+		if(@e856s)
+		{
+			foreach(@e856s)
+			{
+				my $thisfield = $_;
+				$thisfield->delete_subfield(code => 'z');					
+				$thisfield->add_subfields('z'=> "Click for access to the downloadable item via Overdrive");
+			}
+		}			
+	}
+	return $marc;
+}
+
+sub mergeMARC856
+{
+	my $marc = @_[0];
+	my $marc2 = @_[1];
+	my $log = @_[2];
+	
+	my @eight56s = $marc->field("856");
+	my @eight56s_2 = $marc2->field("856");
+	my @eights;
+	my $original856 = $#eight56s + 1;
+	@eight56s = (@eight56s,@eight56s_2);
+
+	my %urls;  
+
+
+	foreach(@eight56s)
+	{
+		my $thisField = $_;
+		
+		# Just read the first $u and $z
+		my $u = $thisField->subfield("u");
+		my $z = $thisField->subfield("z");
+		
+		if($u) #needs to be defined because its the key
+		{
+			if(!$urls{$u})
+			{
+				$urls{$u} = $thisField;
+			}
+			else
+			{
+				my @nines = $thisField->subfield("9");
+				my $otherField = $urls{$u};
+				my @otherNines = $otherField->subfield("9");
+				my $otherZ = $otherField->subfield("z");		
+				if(!$otherZ)
+				{
+					if($z)
+					{
+						$otherField->add_subfields('z'=>$z);
+					}
+				}
+				foreach(@nines)
+				{
+					my $looking = $_;
+					my $found = 0;
+					foreach(@otherNines)
+					{
+						if($looking eq $_)
+						{
+							$found=1;
+						}
+					}
+					if($found==0)
+					{
+						$otherField->add_subfields('9' => $looking);
+					}
+				}
+				$urls{$u} = $otherField;
+			}
+		}
+	}
+	
+	my $finalCount = scalar keys %urls;
+	if($original856 != $finalCount)
+	{
+		$log->addLine("There was $original856 and now there are $finalCount");
+	}
+	
+	my $dump1=Dumper(\%urls);
+	my @remove = $marc->field('856');
+	$log->addLine("Removing ".$#remove." 856 records");
+	$marc->delete_fields(@remove);
+
+
+	while ((my $internal, my $mvalue ) = each(%urls))
+		{
+			$marc->insert_grouped_field( $mvalue );
+		}
+	return $marc;
 }
 
 sub getEvergreenMax
@@ -410,6 +689,7 @@ sub getEvergreenMax
 	my $dbHandler = @_[0];
 	
 	my $query = "SELECT MAX(ID) FROM BIBLIO.RECORD_ENTRY";
+	return 1000;
 	my @results = @{$dbHandler->query($query)};
 	my $dbmax=0;
 	foreach(@results)
@@ -455,6 +735,144 @@ sub getTCN
 	}
 	return "od$dbmax$ap";
 }
+
+sub convertMARCtoXML
+{
+	my $marc = @_[0];
+	my $thisXML = $marc->as_xml();			
+	#this code is borrowed from marc2bre.pl
+	$thisXML =~ s/\n//sog;
+	$thisXML =~ s/^<\?xml.+\?\s*>//go;
+	$thisXML =~ s/>\s+</></go;
+	$thisXML =~ s/\p{Cc}//go;
+	$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
+	$thisXML =~ s/[\x00-\x1f]//go;
+	#end code
+	return $thisXML;
+}
+
+sub getbibsource
+{
+	my $dbHandler = @_[0];
+	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+	my @results = @{$dbHandler->query($query)};
+	if($#results==-1)
+	{
+		print "Didnt find molib2go in bib_source, now creating it...\n";
+		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'molib2go')";
+		my $res = $dbHandler->update($query);
+		print "Update results: $res\n";
+		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			return @row[0];
+		}
+	}
+	else
+	{
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			return @row[0];
+		}
+	}
+}
+
+sub findPBrecordInME
+{
+	my $dbHandler = @_[0];	
+	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%\"9\">PB%' limit 14";
+	my $query = "select id,marc from biblio.record_entry where marc ~* '<leader>......a' AND lower(marc) like '%overdrive%' AND lower(marc) like '%ebook%'";
+	my @results = @{$dbHandler->query($query)};
+	my @each;
+	my @ret;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
+		@each = ($id,$marc);
+		push(@ret,[@each]);	
+	}
+	return \@ret;
+}
+
+sub findMatchInArchive
+{
+	my @matchList = @{@_[0]};
+	my $archiveFolder = @_[1];
+	my @files;
+	#Get all files in the directory path
+	@files = @{dirtrav(\@files,$archiveFolder)};
+	for my $b(0..$#files)
+	{
+		my $file = MARC::File::USMARC->in($files[$b]);
+		while ( my $marc = $file->next() ) 
+		{	
+			my $t = $marc->leader();
+			my $su=substr($marc->leader(),6,1);
+			print "Leader:\n$t\n$su\n";			
+			if($su eq 'a')
+			{
+				my $all = $marc->as_formatted();
+				foreach(@matchList)
+				{
+					if($all =~ m/$_/g)
+					{
+						my @booya = ($files[$b]);
+						print "This one: ".$files[$b]." matched $_\n";
+						return \@booya;
+					}
+				}
+			}
+		}
+	}
+}
+
+sub dirtrav
+{
+	my @files = @{@_[0]};
+	my $pwd = @_[1];
+	opendir(DIR,"$pwd") or die "Cannot open $pwd\n";
+	my @thisdir = readdir(DIR);
+	closedir(DIR);
+	foreach my $file (@thisdir) 
+	{
+		if(($file ne ".") and ($file ne ".."))
+		{
+			if (-d "$pwd/$file")
+			{
+				push(@files, "$pwd/$file");
+				@files = @{dirtrav(\@files,"$pwd/$file")};
+			}
+			elsif (-f "$pwd/$file")
+			{
+				push(@files, "$pwd/$file");
+			}
+		}
+	}
+	return \@files;
+}
+
+sub fixLeader
+{
+	my $marc = @_[0];
+	my $fullLeader = $marc->leader();
+	if(substr($fullLeader,6,1) eq 'a')
+	{
+		print "Leader has an a:\n$fullLeader";
+		$fullLeader = substr($fullLeader,0,6).'m'.substr($fullLeader,7);
+		$marc->leader($fullLeader);
+		my $fullLeader = $marc->leader();
+		print "Changed to:\n$fullLeader";
+	}
+	return $marc;
+}
+
  exit;
 
  
