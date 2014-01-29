@@ -103,7 +103,7 @@ sub updateScoreCache
 {
 	my $dbHandler = @_[0];
 	my $log = @_[1];
-	my @ids = @{identifyScoreBibs($dbHandler)};
+	my @ids = @{identifyBibsToScore($dbHandler)};
 	$log->addLine("Found ".($#ids+1)." Bibs to be scored");
 	foreach(@ids)
 	{
@@ -115,17 +115,67 @@ sub updateScoreCache
 		$marcob = MARC::Record->new_from_xml($marcob);
 		my $score = scoreMARC($marcob,$log);
 		my $isElectric = determineElectric($marcob);
-		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE(RECORD,SCORE,ELECTRONIC) VALUES($bibid,$score,$isElectric)";
+		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE(RECORD,SCORE,ELECTRONIC) VALUES($bibid,$score,'$isElectric')";
 		if(@thisone[2])	#these are updates
 		{
 			my $bibscoreid = @thisone[2];
-			$query = "UPDATE SEEKDESTROY.BIB_SCORE SET SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC=$isElectric WHERE ID=$bibscoreid";			
+			my $oldscore = @thisone[3];
+			my $improved = $score - $oldscore;
+			$query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC='$isElectric' WHERE ID=$bibscoreid";			
 		}
 		$dbHandler->update($query);	
 	}
 }
 
-sub identifyScoreBibs
+sub determineElectric
+{
+	my $marc = @_[0];
+	my @e56s = $marc->field('856');
+	if(!@e56s)
+	{
+		return 'f';
+	}
+	my $textmarc = $marc->as_formatted();
+	my $scoreTipToElectronic=3;
+	my $score=0;
+	my @phrases = ("electronic resource","ebook","eaudiobook","overdrive","download");
+	my $has856 = 0;
+	my $has245h = getsubfield($marc,'245','h');	
+	foreach(@e56s)
+	{
+		my $field = $_;
+		my $ind2 = $field->indicator(2);
+		if($ind2==0) #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
+		{
+			my $found=0;
+			my @subs = $field->subfields('u');
+			foreach(@subs)
+			{
+				if(m/http/g)
+				{
+					$found=1;
+				}
+			}
+			if($found)
+			{
+				$score++;
+			}
+		}
+	}
+	foreach(@phrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>1) # Found more than 1 match on that phrase
+		{
+			$score++;
+		}
+	}
+	print "Electric score: $score\n";
+	return ($score>$scoreTipToElectronic?'t':'f');
+}
+
+sub identifyBibsToScore
 {
 	my $dbHandler = @_[0];
 	my @ret=();
@@ -140,7 +190,7 @@ sub identifyScoreBibs
 		my @temp = ($id,$marc);
 		push (@ret, [@temp]);
 	}
-	$query = "SELECT SBS.RECORD,BRE.MARC,SBS.ID FROM SEEKDESTROY.BIB_SCORE SBS,BIBLIO.RECORD_ENTRY BRE WHERE SBS.score_time < BRE.EDIT_DATE AND SBS.RECORD=BRE.ID";
+	$query = "SELECT SBS.RECORD,BRE.MARC,SBS.ID,SCORE FROM SEEKDESTROY.BIB_SCORE SBS,BIBLIO.RECORD_ENTRY BRE WHERE SBS.score_time < BRE.EDIT_DATE AND SBS.RECORD=BRE.ID";
 	@results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -149,7 +199,8 @@ sub identifyScoreBibs
 		my $rec = @row[0];
 		my $id = @row[1];
 		my $marc = @row[2];
-		my @temp = ($rec,$id,$marc);
+		my $score = @row[3];
+		my @temp = ($rec,$id,$marc,$score);
 		push (@ret, [@temp]);
 	}
 	return \@ret;
@@ -192,21 +243,21 @@ sub score
 	my ($log) = shift;
 	my @tags = @_;
 	my $ou = Dumper(@tags);
-	$log->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
+	#$log->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
 	my $score = 0;			
 	if($type == 0) #0 is field count
 	{
-		$log->addLine("Calling count_field");
+		#$log->addLine("Calling count_field");
 		$score = count_field($marc,$log,\@tags);
 	}
 	elsif($type == 1) #1 is length of field
 	{
-		$log->addLine("Calling field_length");
+		#$log->addLine("Calling field_length");
 		$score = field_length($marc,$log,\@tags);
 	}
 	elsif($type == 2) #2 is subfield count
 	{
-		$log->addLine("Calling count_subfield");
+		#$log->addLine("Calling count_subfield");
 		$score = count_subfield($marc,$log,\@tags);
 	}
 	$score = $score * $weight;
@@ -215,7 +266,7 @@ sub score
 		$score = $cap;
 	}
 	$score = int($score);
-	$log->addLine("Weight and cap applied\nScore is: $score");
+	#$log->addLine("Weight and cap applied\nScore is: $score");
 	return $score;
 }
 
@@ -225,7 +276,7 @@ sub count_subfield
 	my $log = $_[1];
 	my @tags = @{$_[2]};
 	my $total = 0;
-	$log->addLine("Starting count_subfield");
+	#$log->addLine("Starting count_subfield");
 	foreach my $tag (@tags) 
 	{
 		my @f = $marc->field($tag);
@@ -233,14 +284,14 @@ sub count_subfield
 		{
 			my @subs = $field->subfields();
 			my $ou = Dumper(@subs);
-			$log->addLine($ou);
+			#$log->addLine($ou);
 			if(@subs)
 			{
 				$total += scalar(@subs);
 			}
 		}
 	}
-	$log->addLine("Total Subfields: $total");
+	#$log->addLine("Total Subfields: $total");
 	return $total;
 	
 }	
@@ -269,12 +320,34 @@ sub field_length
 	return 0 unless @f;
 	my $len = length($f[0]->as_string);
 	my $ou = Dumper(@f);
-	$log->addLine($ou);
-	$log->addLine("Field Length: $len");
+	#$log->addLine($ou);
+	#$log->addLine("Field Length: $len");
 	return $len;
 }
 
-
+sub getsubfield
+{
+	my $marc = @_[0];
+	my $tag = @_[1];
+	my $subtag = @_[2];
+	my $ret;
+	#print "Extracting $tag $subtag\n";
+	if($marc->field($tag))
+	{
+		if($tag<10)
+		{	
+			#print "It was less than 10 so getting data\n";
+			$ret = $marc->field($tag)->data();
+		}
+		elsif($marc->field($tag)->subfield($subtag))
+		{
+			$ret = $marc->field($tag)->subfield($subtag);
+		}
+	}
+	#print "got $ret\n";
+	return $ret;
+	
+}
 
 sub importMARCintoEvergreen
 {
@@ -781,7 +854,8 @@ sub setupSchema
 		id serial,
 		record bigint,
 		score bigint,
-		score_time timestamp default now(), 
+		improved_score_amount bigint default 0,
+		score_time timestamp default now(), 		
 		electronic boolean default false)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.item_reassignment(

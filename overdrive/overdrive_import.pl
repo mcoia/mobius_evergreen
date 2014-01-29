@@ -43,7 +43,7 @@ use Digest::SHA1;
 		my $log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("server","login","password","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape","toomanyfilesthreshold"); 
+		my @reqs = ("server","login","password","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -78,26 +78,25 @@ use Digest::SHA1;
 			}
 			my $dbHandler;
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
-			my @dbMarcs = @{findPBrecordInME($dbHandler)};
-			my @lookingforthese;
-			foreach(@dbMarcs)
-			{
-				my @t  = @{$_};
-				my $marc = @t[1];
-				$marc =~ s/(<leader>.........)./${1}a/;
-				$marc = MARC::Record->new_from_xml($marc);
-				if($marc->field('245'))
-				{
-					if($marc->field('245')->subfield('a'))
-					{
-						push(@lookingforthese,$marc->field('245')->subfield('a'));
-					}
-				}
-			}
-			@files=@{findMatchInArchive(\@lookingforthese,$archivefolder)}; 
-			
+			# my @dbMarcs = @{findPBrecordInME($dbHandler)};
+			# my @lookingforthese;
+			# foreach(@dbMarcs)
+			# {
+				# my @t  = @{$_};
+				# my $marc = @t[1];
+				# $marc =~ s/(<leader>.........)./${1}a/;
+				# $marc = MARC::Record->new_from_xml($marc);
+				# if($marc->field('245'))
+				# {
+					# if($marc->field('245')->subfield('a'))
+					# {
+						# push(@lookingforthese,$marc->field('245')->subfield('a'));
+					# }
+				# }
+			# }
+			# @files=@{findMatchInArchive(\@lookingforthese,$archivefolder)}; 
+			@files = @{dirtrav(\@files,$archivefolder)};
 			#@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
-			
 			if(@files[$#files]!=-1)
 			{
 				for my $b(0..$#files)
@@ -137,7 +136,7 @@ use Digest::SHA1;
 				if($valid)
 				{					
 					my $bib_sourceid = getbibsource($dbHandler);
-					print "Bib source id: $bib_sourceid\n";
+					#print "Bib source id: $bib_sourceid\n";
 					@info = @{importMARCintoEvergreen($outputFile,$log,$dbHandler,$mobUtil,$bib_sourceid)};
 					$finalImport = 1;
 					$log->addLine(Dumper(\@info));
@@ -289,7 +288,6 @@ sub getmarc
 				#$log->addLine("Attempting to read $URL");
 				if(1)#$loops<1)
 				{
-				
 				pQuery($URL)
 							->find("a")->each(sub {
 										my $link = pQuery($_)->toHtml;
@@ -316,14 +314,15 @@ sub getmarc
 													sleep 1;
 													#$log->addLine("$output Got this: $link");
 													$log->addLogLine("New: $URL$link");
-													#my $url = 'http://marinetraffic2.aegean.gr/ais/getkml.aspx';
 													my $getsuccess = getstore($URL.$link, $localFile);
+													#print $getsuccess."\n";
 													if($getsuccess eq "200")
 													{
 														$loops++;
 														#print "success: $getsuccess\n";
 														push(@scrapedFileLinks,$URL.$link);
 														push(@downloadedFiles,$localFile);
+														#$log->addLine($localFile);
 													}
 													else
 													{
@@ -344,6 +343,7 @@ sub getmarc
 	}
 	if($#errors > -1)
 	{
+	print "errors\n";
 		foreach(@downloadedFiles)
 		{
 			my $t = new Loghandler($_);
@@ -422,10 +422,12 @@ sub getsubfield
 	my $tag = @_[1];
 	my $subtag = @_[2];
 	my $ret;
+	#print "Extracting $tag $subtag\n";
 	if($marc->field($tag))
 	{
 		if($tag<10)
 		{	
+			#print "It was less than 10 so getting data\n";
 			$ret = $marc->field($tag)->data();
 		}
 		elsif($marc->field($tag)->subfield($subtag))
@@ -433,6 +435,7 @@ sub getsubfield
 			$ret = $marc->field($tag)->subfield($subtag);
 		}
 	}
+	#print "got $ret\n";
 	return $ret;
 	
 }
@@ -457,15 +460,15 @@ sub importMARCintoEvergreen
 	while ( my $marc = $file->next() ) 
 	{
 		
-		if($overlay<16)
+		if(1)#$overlay<16)
 		{
 			#my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
 			my $title = getsubfield($marc,'245','a');
-			print "Importing $title\n";
+			#print "Importing $title\n";
 			my $sha1 = calcSHA1($marc);
 			$marc = readyMARCForInsertIntoME($marc);
 			my $bibid=-1;
-			my $bibid = findRecord($marc, $dbHandler,$sha1);
+			my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid);
 			
 			if($bibid!=-1) #already exists so update the marc
 			{
@@ -474,14 +477,14 @@ sub importMARCintoEvergreen
 				my $prevmarc = @present[1];
 				$prevmarc =~ s/(<leader>.........)./${1}a/;			
 				$prevmarc = MARC::Record->new_from_xml($prevmarc);
-				my $led = substr($prevmarc->leader(),6,1);
-				print "Subed $led from".$prevmarc->leader()."\n";
-				my $found=0;
-				if($led eq 'a')
-				{
-					$found=1;
-				}
-				if(!$found)
+				# my $led = substr($prevmarc->leader(),6,1);
+				# print "Subed $led from".$prevmarc->leader()."\n";
+				# my $found=0;
+				# if($led eq 'a')
+				# {
+					# $found=1;
+				# }
+				if(0)#!$found)
 				{
 					
 				}
@@ -514,7 +517,7 @@ sub importMARCintoEvergreen
 				my $max = getEvergreenMax($dbHandler);
 				my $thisXML = convertMARCtoXML($marc);
 				
-				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$\$$thisXML\$\$,null,$bibsourceid,E'molib2go-script $sha1,null,null)";
+				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$\$$thisXML\$\$,null,$bibsourceid,E'molib2go-script $sha1',null,null)";
 				$log->addLine($query);
 				my $res = $dbHandler->update($query);
 				#print "$res";
@@ -548,7 +551,8 @@ sub findRecord
 	my $zero01 = $marcsearch->field('001')->data();
 	my $dbHandler = @_[1];
 	my $sha1 = @_[2];
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%'";
+	my $bibsourceid = @_[3];
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%' and source=$bibsourceid";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -864,11 +868,11 @@ sub fixLeader
 	my $fullLeader = $marc->leader();
 	if(substr($fullLeader,6,1) eq 'a')
 	{
-		print "Leader has an a:\n$fullLeader";
+		#print "Leader has an a:\n$fullLeader";
 		$fullLeader = substr($fullLeader,0,6).'m'.substr($fullLeader,7);
 		$marc->leader($fullLeader);
 		my $fullLeader = $marc->leader();
-		print "Changed to:\n$fullLeader";
+		#print "Changed to:\n$fullLeader";
 	}
 	return $marc;
 }
