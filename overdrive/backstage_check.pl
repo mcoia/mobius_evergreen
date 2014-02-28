@@ -9,12 +9,10 @@ use Loghandler;
 use Mobiusutil;
 use DBhandler;
 use Data::Dumper;
-use email;
 use DateTime;
 use utf8;
 use Encode;
 use DateTime;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
@@ -55,7 +53,9 @@ if(! -e $xmlconf)
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
 		my $log = new Loghandler($conf->{"logfile"});
+		my $holdingsmove = new Loghandler($conf->{"holdingsmove"});
 		$log->truncFile("");
+		$holdingsmove->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");		
 		my @reqs = ("logfile"); 
 		my $valid = 1;
@@ -75,16 +75,17 @@ if(! -e $xmlconf)
 			my $dbHandler;
 			my %dbconf = %{getDBconnects($xmlconf,$log)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
-			setupSchema($dbHandler);
-			updateScoreCache($dbHandler,$log);
-			searchDestroyLeaders($dbHandler,$log);
+			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.mrc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_perfect.txt","/mnt/evergreen/tmp/test/after_perfect.txt");
+			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_NonMatch.oc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_nonmatch.txt","/mnt/evergreen/tmp/test/after_nonmatch.txt");
+			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_NonHit.oc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_nonhit.txt","/mnt/evergreen/tmp/test/after_nonhit.txt");
+			#updateMARC("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.mrc",$dbHandler, $mobUtil, $log);
+			alignHoldings("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.mrc",$holdingsmove,$dbHandler, $log);
 		}
 		
 		my $afterProcess = DateTime->now(time_zone => "local");
 		my $difference = $afterProcess - $dt;
 		my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
 		my $duration =  $format->format_duration($difference);
-		my $fileList;
 		my $successTitleList;
 		my $successUpdateTitleList;
 		my $failedTitleList;
@@ -98,6 +99,386 @@ if(! -e $xmlconf)
 	}
 }
 
+sub updateMARC
+{
+	my $backstagefile = @_[0];
+	my $dbHandler = @_[1];
+	my $mobUtil = @_[2];
+	my $log = @_[3];
+	my $file = MARC::File::USMARC->in($backstagefile);
+	my $bibsourceid = getbibsource($dbHandler);
+	my $loops=0;
+	while ( my $marc = $file->next() ) 
+	{	
+		if(1)#$loops<1)
+		{
+			my $t = $marc->leader();
+			my $su=substr($marc->leader(),6,1);
+			#print "Leader:\n$t\n$su\n";
+			my $leader = substr($marc->leader(),6,1);
+			if($marc->field('901'))
+			{
+				if($marc->field('901')->subfield('a'))
+				{
+					my $bibID = $marc->field('901')->subfield('a');
+					my @fields52 = $marc->field('852');
+					my @fields53 = $marc->field('853');
+					$marc->delete_fields(@fields52);
+					$marc->delete_fields(@fields53);
+					$marc = convertMARCtoXML($marc);
+					my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$marc\$\$,tcn_source=E'backstage',source=$bibsourceid WHERE ID=$bibID";
+					$log->addLine($query);
+					$log->addLine("http://missourievergreen.org/eg/opac/record/$bibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://demo.missourievergreen.org/eg/opac/record/$bibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					my $res = $dbHandler->update($query);
+				}
+			}
+			$loops++;
+		}
+	}
+}
+
+sub checkbackstage
+{
+	my $backstagefile = @_[0];
+	my $dbHandler = @_[1];
+	my $mobUtil = @_[2];
+	my $log = @_[3];
+	my $before = new Loghandler(@_[4]);
+	my $after = new Loghandler(@_[5]);
+	$before->truncFile("");
+	$after->truncFile("");
+	my $file = MARC::File::USMARC->in($backstagefile);
+	while ( my $marc = $file->next() ) 
+	{	
+		my $t = $marc->leader();
+		my $su=substr($marc->leader(),6,1);
+		print "Leader:\n$t\n$su\n";
+		my $leader = substr($marc->leader(),6,1);
+		if($marc->field('901'))
+		{
+			my $bibID = $marc->field('901')->subfield('a');		
+			if (my $memarc = getMEMARC($bibID,$dbHandler))
+			{	
+				$after->addLine($marc->as_formatted());
+				my @oldholdingsorder;
+				my @holdings = $marc->field('85.');
+				foreach(@holdings)
+				{
+					if($_->subfield('p'))
+					{
+						push(@oldholdingsorder,$_->subfield('p'));
+					}
+				}
+				#$log->addLine("$bibID");
+				$memarc =~ s/(<leader>.........)./${1}a/;			
+				$memarc = MARC::Record->new_from_xml($memarc);
+				@oldholdingsorder = reverse @oldholdingsorder;				
+				$memarc = attachHoldings($memarc,$dbHandler,\@oldholdingsorder);
+				
+				$before->addLine($memarc->as_formatted());
+				#my @errors = @{$mobUtil->compare2MARCObjects($memarc,1,$marc,1)};
+				#foreach(@errors)
+				#{
+			#		$log->addLine($_);
+			#	}
+				#$log->addLine("\r\n\r\n");
+			}
+		}
+	}
+	
+}
+
+sub alignHoldings
+{
+	my $backstagefile = @_[0];
+	my $holdingsmove = @_[1];
+	my $dbHandler = @_[2];
+	my $log = @_[3];
+	my $file = MARC::File::USMARC->in($backstagefile);
+	my $loops=0;
+	my %notmoved=();
+	my $totalMarc=0;
+	my $catchallBIBid = getMECatchAllBib($dbHandler,$log);
+	#print "catchallBIBid = $catchallBIBid\n";
+	#my $a =  <STDIN>;
+	while ( my $marc = $file->next() ) 
+	{	
+		$totalMarc++;
+		if(1)#$loops<1)
+		{
+			if($marc->field('901'))
+			{
+				if($marc->field('901')->subfield('a'))
+				{
+					my $bibID = $marc->field('901')->subfield('a');
+					my $query = "SELECT ac.barcode,acn.record from ASSET.COPY ac,asset.call_number acn
+								where 
+								ac.CALL_NUMBER = acn.id and
+								acn.record=$bibID and						
+								ac.deleted='f'";
+					my @results = @{$dbHandler->query($query)};
+					my %mebarcodes = ();
+					my @mebarcds;
+					my @backbarcodes = ();
+					foreach(@results)
+					{	
+						my $row = $_;
+						my @row = @{$row};					
+						$mebarcodes{@row[0]}=@row[1];
+						push(@mebarcds,@row[0]);
+					}
+					my @fields = $marc->field('852');
+					my @fields_o = $marc->field('853');
+					my @both = (@fields,@fields_o);
+					foreach(@both)
+					{
+						my $bcode = $_->subfield('p');
+						if($bcode)
+						{
+							push(@backbarcodes,$bcode);
+						}
+					}
+					my $removedfromthisbib = findArrayDifference(\@mebarcds,\@backbarcodes);
+					my @needsmoving = split(',',$removedfromthisbib);
+					foreach(@needsmoving)
+					{
+						$notmoved{$_}='1';
+					}
+					foreach(@backbarcodes)
+					{
+						my $backbarcode = $_;
+						if(!$mebarcodes{$backbarcode})						
+						{
+							my $query = "SELECT ac.barcode,acn.record from ASSET.COPY ac,asset.call_number acn
+								where 
+								ac.CALL_NUMBER = acn.id and
+								ac.barcode='$backbarcode'";
+							@results = @{$dbHandler->query($query)};
+							my $oldbib='';
+							foreach(@results)
+							{	
+								my @row = @{$_};
+								$oldbib = @row[1];
+							}
+							if($oldbib!=$bibID)
+							{
+								my $result = moveAssetCopy($dbHandler,$backbarcode,$bibID,$log);
+								if($result)
+								{
+									if($notmoved{$backbarcode})
+									{
+										print "removing $backbarcode from notmoved array\n";
+										delete $notmoved{$backbarcode};
+									}
+								}
+								$log->addLine("results of the asset move $backbarcode -> $bibID: $result");
+								$log->addLine("link:\t$bibID\thttp://missourievergreen.org/eg/opac/record/$bibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://demo.missourievergreen.org/eg/opac/record/$bibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");							
+								$holdingsmove->addLine("\"$backbarcode\",\"$oldbib\",\"$bibID\",\"$result\",$removedfromthisbib");
+								$loops++;
+							}
+						}
+					}
+					
+				}
+			}
+		}
+	}
+	my $output = "";
+	my $count = 0;
+	foreach my $bcode (keys %notmoved)
+	{
+		$output.="\"$bcode\",";
+		print "Moving to catchall: $bcode\n";
+		moveAssetCopy($dbHandler,$bcode,$catchallBIBid,$log);
+		$count++;
+	}
+	$output = substr($output,0,-1);
+	$holdingsmove->addLine("\"$totalMarc MARC / $loops Items moved from bib to bib / $count leftover to move\"");
+	$holdingsmove->addLine("\"Barcodes moved to catchall: $count\",$output");
+	
+}
+
+sub getMECatchAllBib
+{
+	my $dbHandler = @_[0];
+	my $log = @_[1];
+	my $catchallbibid=0;
+	my $bibsourceid = getbibsource($dbHandler);
+	my $query = "SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE tcn_source='backstage_catchall'";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{	
+		my $row = $_;
+		my @row = @{$row};
+		$catchallbibid=@row[0];
+	}
+	if($catchallbibid==0)
+	{
+		my $starttime = time;
+		my $marc = MARC::Record->new();
+		my $field =  MARC::Field->new(
+			245, '1', '0',
+			'a' => 'Backstage catch all holdings',
+			'c' => 'MOBIUS'
+			);
+		my @all = ($field);
+		$marc->insert_fields_ordered( @all );
+		my $thisXML = convertMARCtoXML($marc);
+		my $query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$\$$thisXML\$\$,null,$bibsourceid,E'backstage_catchall',null,null)";
+		$log->addLine($query);
+		my $res = $dbHandler->update($query);
+		my $query = "SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE tcn_source='backstage_catchall'";
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{	
+			my $row = $_;
+			my @row = @{$row};
+			$catchallbibid=@row[0];
+		}
+	}
+	
+	return $catchallbibid;
+	
+}
+
+sub findArrayDifference
+{
+	my @mebarcodes = @{@_[0]};
+	my @backbarcodes = @{@_[1]};
+	my $ret='';	
+	foreach(@mebarcodes)
+	{
+		my $found=0;
+		my $mebarcode = $_;
+		foreach(@backbarcodes)
+		{
+			if($mebarcode eq $_)
+			{
+				$found=1;
+			}
+		}
+		if(!$found)
+		{
+			$ret.="$mebarcode,";
+		}
+	}
+	$ret = substr($ret,0,-1);
+	return $ret;
+}
+
+sub moveAssetCopy
+{
+	my $dbHandler = @_[0];
+	my $barcode = @_[1];	
+	my $newbib = @_[2];
+	my $log = @_[3];
+	my $query = "select deleted from biblio.record_entry where id=$newbib";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{	
+		my $row = $_;
+		my @row = @{$row};
+		print "$newbib - ".@row[0]."\n";
+		if(@row[0] eq 't' ||@row[0] == 1)
+		{
+			my $tcn_value = $newbib;
+			my $count=1;			
+			while($count>0)
+			{
+				$query = "select count(*) from biblio.record_entry where tcn_value='$tcn_value' and id!=$newbib";
+				my @results = @{$dbHandler->query($query)};
+				foreach(@results)
+				{	
+					my $row = $_;
+					my @row = @{$row};
+					$count=@row[0];
+				}
+				$tcn_value.="_";
+			}
+			$query = "update biblio.record_entry set deleted='f',tcn_source='backstage',tcn_value='$tcn_value'  where id=$newbib";
+			$dbHandler->update($query);
+		}
+	}
+	$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$newbib WHERE id =(SELECT call_number FROM ASSET.COPY WHERE BARCODE='$barcode')";
+	$log->addLine($query);
+	my $result = $dbHandler->update($query);
+	return $result;
+	
+}
+
+sub attachHoldings
+{
+	my $marc = @_[0];
+	my $dbHandler = @_[1];
+	my @oldorder = @{@_[2]};
+	if($marc->field('901'))
+	{
+		if($marc->field('901')->subfield('a'))
+		{
+			my $bibID = $marc->field('901')->subfield('a');
+			my $order;
+			my @holdings = 
+			my $query = "SELECT aou_own.shortname,aou_circ.shortname,AC.PRICE,AC.BARCODE,AC.CIRC_MODIFIER,ACN.LABEL, acl.name FROM ASSET.COPY ac,asset.call_number acn, asset.copy_location acl, actor.org_unit aou_own, actor.org_unit aou_circ
+						  where 
+						ac.CALL_NUMBER =acn.id and
+						acn.record=$bibID and
+						acn.owning_lib=aou_own.id and
+						ac.circ_lib=aou_circ.id and
+						acl.id=ac.location and
+						ac.deleted='f'";
+			my @results = @{$dbHandler->query($query)};
+			my %holdings;
+			my %found;
+			foreach(@results)
+			{	
+				my $row = $_;
+				my @row = @{$row};
+				my $field = MARC::Field->new('852','4', '', 'b' => @row[0], 'b'=>@row[1], 'c'=>@row[6], 'j'=>@row[5], 'g'=>@row[4], 'p'=>@row[3], 'y'=>"\$".@row[2]  );
+				$holdings{@row[3]}=$field;
+			}
+			my @all;
+			foreach(@oldorder)
+			{
+				print "$_\n";
+				if($holdings{$_})
+				{
+					print "Adding $_\n";
+					push(@all,$holdings{$_});
+					$found{$_}=1;
+				}
+			}
+			my $bcode;
+			my $field;
+			while (($bcode, $field) = each(%holdings))
+			{
+				if(!$found{$bcode})
+				{
+					print "Didnt find $bcode\n";
+					push(@all,$field);
+				}
+			}			
+			$marc->insert_fields_ordered( @all );
+			
+		}
+	}
+	return $marc;
+}
+
+sub getMEMARC
+{
+	my $dbID = @_[0];
+	my $dbHandler = @_[1];
+	my $query = "SELECT MARC FROM BIBLIO.RECORD_ENTRY WHERE ID=$dbID";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $marc = @row[0];
+		return $marc;
+	}
+	return 0;
+}
 sub searchDestroyLeaders
 {
 	my $dbHandler = @_[0];
@@ -778,15 +1159,16 @@ sub convertMARCtoXML
 sub getbibsource
 {
 	my $dbHandler = @_[0];
-	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'backstage'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
 	{
-		print "Didnt find molib2go in bib_source, now creating it...\n";
-		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'molib2go')";
+		print "Didnt find backstage in bib_source, now creating it...\n";
+		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'backstage')";
 		my $res = $dbHandler->update($query);
 		print "Update results: $res\n";
-		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'backstage'";
+		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{
 			my $row = $_;
@@ -886,11 +1268,11 @@ sub fixLeader
 	my $fullLeader = $marc->leader();
 	if(substr($fullLeader,6,1) eq 'a')
 	{
-		print "Leader has an a:\n$fullLeader";
+		#print "Leader has an a:\n$fullLeader";
 		$fullLeader = substr($fullLeader,0,6).'m'.substr($fullLeader,7);
 		$marc->leader($fullLeader);
 		my $fullLeader = $marc->leader();
-		print "Changed to:\n$fullLeader";
+		#print "Changed to:\n$fullLeader";
 	}
 	return $marc;
 }

@@ -37,11 +37,10 @@
 # 2013-1-24
 
 package DBhandler;
- #use DBI;
  use DBD::Pg;
  use Loghandler;
  use strict; 
- #use Unicode::Normalize;
+ use Unicode::Normalize;
  use Encode;
  use utf8;
  use Data::Dumper;
@@ -76,7 +75,7 @@ package DBhandler;
 	my $login = $self->{login};
 	my $pass = $self->{password};
 	my $port = $self->{port};
-	$conn =  DBI->connect("DBI:Pg:dbname=$dbname;host=$host;port=$port", $login, $pass, {pg_utf8_strings => 1,AutoCommit => 1}); #'RaiseError' => 1,post_connect_sql => "SET CLIENT_ENCODING TO 'UTF8'"
+	$conn =  DBI->connect("DBI:Pg:dbname=$dbname;host=$host;port=$port", $login, $pass, {AutoCommit => 1}); #'RaiseError' => 1,post_connect_sql => "SET CLIENT_ENCODING TO 'UTF8'" pg_utf8_strings => 1,
 	
 	$self->{conn} = $conn;
  }
@@ -123,6 +122,8 @@ package DBhandler;
 			#print "testing $teststring\n";
 			#Encode::_set_utf8_on($_);
 			my $conv = decode_utf8($_);# Encode::decode("utf8",$_);#Encode::_set_utf8_on($_);# $utf8->substr($_,0,$utf8->length($_));#$_;#Encode::encode_utf8($_);#$utf8->substr($_,0,$utf8->length($_));#Encode::encode_utf8($_);
+			#my $conv = $_;
+			#my $conv = $utf8->substr($_,0,$utf8->length($_));
 			#$conv = Encode::encode_utf8($decode);
 			#print "Enc = $conv\n";
 			#print "conv = $conv\n";

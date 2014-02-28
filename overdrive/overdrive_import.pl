@@ -1,4 +1,5 @@
 #!/usr/bin/perl
+#1198396
 use lib qw(../);
 use MARC::Record;
 use MARC::File;
@@ -95,7 +96,7 @@ use Digest::SHA1;
 				# }
 			# }
 			# @files=@{findMatchInArchive(\@lookingforthese,$archivefolder)}; 
-			@files = @{dirtrav(\@files,$archivefolder)};
+			 @files = @{dirtrav(\@files,$archivefolder)};
 			#@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
 			if(@files[$#files]!=-1)
 			{
@@ -159,6 +160,7 @@ use Digest::SHA1;
 		my $notWorkedCount = $#notworked+1;
 		my $updatedCount = $#updated+1;
 		my $fileCount = $#files;
+		$fileCount++;
 		my $afterProcess = DateTime->now(time_zone => "local");
 		my $difference = $afterProcess - $dt;
 		my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
@@ -169,7 +171,9 @@ use Digest::SHA1;
 		my $failedTitleList;
 		foreach(@files)
 		{
-			$fileList.="$_ ";
+			my $temp = $_;
+			$temp = substr($temp,rindex($temp, '/')+1);
+			$fileList.="$temp ";
 		}
 		
 		if($finalImport)
@@ -225,9 +229,9 @@ use Digest::SHA1;
 				$totalSuccess=0;
 			}
 			my @tolist = ($conf{"alwaysemail"});		
-			#my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
+			my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
 			$fileList=~s/\s/\r\n/g;
-			#$email->send("Evergreen Utility - Overdrive Import Report Job # $dateString","I connected to: \r\n ".$conf{"server"}."\r\nand gathered:\r\n$count Record(s) from $fileCount file(s)\r\n$workedCount Successful Imports\r\n$notWorkedCount Not successful Imports\r\n Duration: $duration\r\n\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-MOBIUS Perl Squad-");
+			$email->send("Evergreen Utility - Overdrive Import Report Job # $dateString","I connected to: \r\n ".$conf{"server"}."\r\nand gathered:\r\n$count Record(s) from $fileCount file(s)\r\n$workedCount Successful Imports\r\n$notWorkedCount Not successful Imports\r\n Duration: $duration\r\n\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-MOBIUS Perl Squad-");
 		}
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
 	}
@@ -475,7 +479,9 @@ sub importMARCintoEvergreen
 				my @present = @{$bibid};
 				my $id = @present[0];
 				my $prevmarc = @present[1];
-				$prevmarc =~ s/(<leader>.........)./${1}a/;			
+				my $deleted = @present[2];
+				$prevmarc =~ s/(<leader>.........)./${1}a/;	
+print "Reading from xml\n";				
 				$prevmarc = MARC::Record->new_from_xml($prevmarc);
 				# my $led = substr($prevmarc->leader(),6,1);
 				# print "Subed $led from".$prevmarc->leader()."\n";
@@ -495,8 +501,7 @@ sub importMARCintoEvergreen
 					my $thisXML = convertMARCtoXML($prevmarc);
 					$query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$thisXML\$\$,tcn_source=E'molib2go-script $sha1',source=$bibsourceid WHERE ID=$id";
 					$log->addLine($query);
-					$log->addLine("http://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml");
-					$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$deleted");
 					my $res = $dbHandler->update($query);
 					print "$res";					
 					if($res)
@@ -526,7 +531,7 @@ sub importMARCintoEvergreen
 				{
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
-					$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
 				}
 				else
 				{
@@ -552,7 +557,8 @@ sub findRecord
 	my $dbHandler = @_[1];
 	my $sha1 = @_[2];
 	my $bibsourceid = @_[3];
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%' and source=$bibsourceid";
+	my $deleted=0;
+	my $query = "SELECT ID,MARC,DELETED FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%' and source=$bibsourceid";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -560,11 +566,12 @@ sub findRecord
 		my @row = @{$row};
 		my $id = @row[0];
 		my $marc = @row[1];
+		$deleted = @row[2];
 		print "found matching sha1: $id\n";
-		my @ret = ($id,$marc);
+		my @ret = ($id,$marc,$deleted);
 		return \@ret;
 	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%$zero01%'";
+	my $query = "SELECT ID,MARC,DELETED FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%$zero01%'";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -573,7 +580,8 @@ sub findRecord
 		my $id = @row[0];
 		print "found matching 001: $id\n";
 		my $marc = @row[1];
-		my @ret = ($id,$marc);
+		$deleted = @row[2];
+		my @ret = ($id,$marc,$deleted);
 		return \@ret;
 	}
 	
@@ -591,15 +599,42 @@ sub readyMARCForInsertIntoME
 	
 	if($two45)
 	{
-		$two45->delete_subfield(code => 'h');
-		$two45->add_subfields('h' => "[Overdrive downloadable item] /");
+		my $value = "item";
+		if($lbyte6 eq 'm' || $lbyte6 eq 'i')
+		{	
+			$value = "eBook";
+			if($lbyte6 eq 'i')
+			{
+				$value = "eAudioBook";
+			}
+			if($two45->subfield('h'))
+			{
+				$two45->update( 'h' => "[Overdrive downloadable $value] /" );
+			}
+			else
+			{			
+				$two45->add_subfields('h' => "[Overdrive downloadable $value] /");
+			}
+		}
 		if(@e856s)
 		{
 			foreach(@e856s)
 			{
 				my $thisfield = $_;
-				$thisfield->delete_subfield(code => 'z');					
-				$thisfield->add_subfields('z'=> "Click for access to the downloadable item via Overdrive");
+				my @sub3 = $thisfield->subfield( '3' );
+				my $ignore=0;
+				foreach(@sub3)
+				{
+					if(lc($_) eq 'excerpt')
+					{
+						$ignore=1;
+					}
+				}
+				if(!$ignore)
+				{
+					$thisfield->delete_subfield(code => 'z');					
+					$thisfield->add_subfields('z'=> "Click for access to the downloadable $value via Overdrive");
+				}
 			}
 		}			
 	}
@@ -693,7 +728,7 @@ sub getEvergreenMax
 	my $dbHandler = @_[0];
 	
 	my $query = "SELECT MAX(ID) FROM BIBLIO.RECORD_ENTRY";
-	return 1000;
+	#return 1000;
 	my @results = @{$dbHandler->query($query)};
 	my $dbmax=0;
 	foreach(@results)
@@ -751,6 +786,8 @@ sub convertMARCtoXML
 	$thisXML =~ s/\p{Cc}//go;
 	$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
 	$thisXML =~ s/[\x00-\x1f]//go;
+	$thisXML =~ s/^\s+//;
+	$thisXML =~ s/\s+$//;
 	#end code
 	return $thisXML;
 }
@@ -767,6 +804,7 @@ sub getbibsource
 		my $res = $dbHandler->update($query);
 		print "Update results: $res\n";
 		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{
 			my $row = $_;

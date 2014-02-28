@@ -1,0 +1,29 @@
+#
+#
+# ~~ is the equal sign! (because there are equal signs in the queries we can't delimit by that)
+#	
+# FULL queries need to have an additional variable $recordSearch. This is so that the code can do
+# count(*) ahead of time so it knows when to stop searching.
+# The software will append RECORD_ID > X AND RECORD_ID < Y - Repeat for the population for the DB
+evergreen_library_adds~~SELECT $recordSearch FROM BIBLIO.RECORD_ENTRY WHERE 
+			(
+				ID IN
+				(
+					SELECT RECORD FROM ASSET.CALL_NUMBER WHERE 
+					(
+						(OWNING_LIB BETWEEN 145 AND 146)
+						OR
+						(OWNING_LIB BETWEEN 120 AND 121)
+					)
+					AND
+					ID IN
+					(
+						SELECT CALL_NUMBER FROM ASSET.COPY WHERE 
+						EDIT_DATE > TO_DATE('$dbFromDate','YYYY-MM-DD HH24:MI:MS')
+						AND
+						EDIT_DATE < TO_DATE('$dbToDate','YYYY-MM-DD HH24:MI:MS')
+					)
+					
+				)
+			)
+evergreen_library_full~~SELECT $recordSearch FROM BIBLIO.RECORD_ENTRY WHERE 1=1;
