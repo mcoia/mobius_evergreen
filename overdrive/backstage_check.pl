@@ -75,11 +75,11 @@ if(! -e $xmlconf)
 			my $dbHandler;
 			my %dbconf = %{getDBconnects($xmlconf,$log)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
-			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.mrc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_perfect.txt","/mnt/evergreen/tmp/test/after_perfect.txt");
+			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.oc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_perfect.txt","/mnt/evergreen/tmp/test/after_perfect.txt");
 			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_NonMatch.oc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_nonmatch.txt","/mnt/evergreen/tmp/test/after_nonmatch.txt");
 			#checkbackstage("/mnt/evergreen/tmp/test/MOBIUS_LP_NonHit.oc",$dbHandler, $mobUtil, $log,"/mnt/evergreen/tmp/test/before_nonhit.txt","/mnt/evergreen/tmp/test/after_nonhit.txt");
-			#updateMARC("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.mrc",$dbHandler, $mobUtil, $log);
-			alignHoldings("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.mrc",$holdingsmove,$dbHandler, $log);
+			#updateMARC("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.oc",$dbHandler, $mobUtil, $log);
+			alignHoldings("/mnt/evergreen/tmp/test/MOBIUS_LP_Perfect.oc",$holdingsmove,$dbHandler, $log);
 		}
 		
 		my $afterProcess = DateTime->now(time_zone => "local");
@@ -199,7 +199,7 @@ sub alignHoldings
 	my %notmoved=();
 	my $totalMarc=0;
 	my $catchallBIBid = getMECatchAllBib($dbHandler,$log);
-	#print "catchallBIBid = $catchallBIBid\n";
+	print "catchallBIBid = $catchallBIBid\n";
 	#my $a =  <STDIN>;
 	while ( my $marc = $file->next() ) 
 	{	

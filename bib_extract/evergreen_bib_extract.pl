@@ -26,15 +26,15 @@
 
    #If you have weird control fields...
    
-    use MARC::Field;
-	my @files = ('/tmp/temp/evergreen_tempmarc1011.mrc');
+    # use MARC::Field;
+	# my @files = ('/tmp/temp/evergreen_tempmarc1011.mrc');
 
-    my $batch = MARC::Batch->new( 'USMARC', @files );
-    while ( my $marc = $batch->next ) {
-        print $marc->subfield(245,"a"), "\n";
-		print $marc->subfield(901,"a"), "\n";
-    }
-	exit;
+    # my $batch = MARC::Batch->new( 'USMARC', @files );
+    # while ( my $marc = $batch->next ) {
+        # print $marc->subfield(245,"a"), "\n";
+		# print $marc->subfield(901,"a"), "\n";
+    # }
+	# exit;
  my $barcodeCharacterAllowedInEmail=2000;
 		 
  my $configFile = @ARGV[0];
@@ -66,7 +66,8 @@
 			}
 		}
 		if($valid)
-		{		
+		{	
+	
 			my $pathtothis = $conf{"pathtothis"};
 			my $maxdbconnections = $conf{"maxdbconnections"};
 			my $queries = $mobUtil->readQueryFile($conf{"queryfile"});
@@ -168,8 +169,8 @@
 							#print "Path: $pathtothis\n";
 							my $gatherTime = DateTime->now();
 							local $@;
-							#eval{$evergreenScraper = new evergreenScraper($dbHandler,$log,$selectQuery,$type,$conf{"school"},$pathtothis,$configFile,$maxdbconnections);};
-							eval{$evergreenScraper = new evergreenScraper($dbHandler,$log,'select $recordsearch from biblio.record_entry where id=-90',$type,$conf{"school"},$pathtothis,$configFile,$maxdbconnections);};
+							eval{$evergreenScraper = new evergreenScraper($dbHandler,$log,$selectQuery,$type,$conf{"school"},$pathtothis,$configFile,$maxdbconnections);};
+							#eval{$evergreenScraper = new evergreenScraper($dbHandler,$log,'select $recordsearch from biblio.record_entry where id=-90',$type,$conf{"school"},$pathtothis,$configFile,$maxdbconnections);};
 							if($@)
 							{
 								print "Master Thread Failed:\n";
@@ -197,35 +198,18 @@
 							if($valid)
 							{
 								my @tm = ();
-								#my @all = @{$evergreenScraper->getAllMARC()};
+								my @all = @{$evergreenScraper->getAllMARC()};
 								# my @tall = ('/mnt/evergreen/tmp/temp/evergreen_tempmarc35.mrc');
 # '/mnt/evergreen/tmp/temp/evergreen_tempmarc1072.mrc',
 # '/mnt/evergreen/tmp/temp/evergreen_tempmarc148.mrc',
 # '/mnt/evergreen/tmp/temp/evergreen_tempmarc1077.mrc',
 # '/mnt/evergreen/tmp/temp/evergreen_tempmarc829.mrc');
-my @tall = ();
-								@tall = @{dirtrav(\@tall,"/tmp/temp")};	
-								@tall = sort @tall;
-								# for my $i(0..$#tall)
-								# {
-									# if($i!=$#tall)
-									# {										
-										# if(@tall[$i+1] lt @tall[$i])
-										# {
-											# print "Shifting\n";
-											# my $tempm = @tall[$i+1];
-											# @tall[$i+1]=@tall[$i];
-											# @tall[$i+1] = $tempm;
-											# $i-=2;
-											# if($i==-2)
-											# {
-												# $i++;
-											# }
-										# }
-									# }
-								# }
+#my @tall = ();
+#								@tall = @{dirtrav(\@tall,"/tmp/temp")};	
+#								@tall = sort @tall;
+								
 # print "Got: ".$#tall." files\n";
-								 my @all = (\@tm,\@tall);
+#								 my @all = (\@tm,\@tall);
 								my @marc = @{@all[0]}; 
 								my @tobig = @{$evergreenScraper->getTooBigList()};
 								$extraInformationOutput = @tobig[0];
@@ -234,12 +218,12 @@ my @tall = ();
 								$marcout->deleteFile();
 								my $output;
 								my $barcodes="";
-								# my @back = @{processMARC(\@marc,$platform,$type,$school,$marcout,$log)};
-								# print Dumper(@back);
-								# $extraInformationOutput.=@back[0];
-								# $barcodes.=@back[1];
-								# $couldNotBeCut.=@back[2];
-								# $recCount+=@back[3];
+								my @back = @{processMARC(\@marc,$platform,$type,$school,$marcout,$log)};
+								print Dumper(@back);
+								$extraInformationOutput.=@back[0];
+								$barcodes.=@back[1];
+								$couldNotBeCut.=@back[2];
+								$recCount+=@back[3];
 								
 								if(ref @all[1] eq 'ARRAY')
 								{
@@ -260,6 +244,8 @@ my @tall = ();
 												$r++;
 												push(@marc,$marc);
 											}
+											$file->close();
+											undef $file;
 											print "Read $r records from $_\n";
 											#$check->deleteFile();
 										}
@@ -355,9 +341,9 @@ my @tall = ();
 	{
 		my $marc = $_;
 		#print $marc->encoding();
-		$log->addLine("setting encoding");
-		$marc->encoding( 'UTF-8' );
-		$log->addLine($marc->subfield('901','a'));
+		#$log->addLine("setting encoding");
+		#$marc->encoding( 'UTF-8' );
+		#$log->addLine($marc->subfield('901','a'));
 		my @count = @{$mobUtil->trucateMarcToFit($marc)};
 		#print @count[1]."\n";
 		my $addThisone=1;
@@ -384,7 +370,7 @@ my @tall = ();
 			}
 			$barcodes.="\r\n";
 			#print "Appending master marc file\n";
-			$marcout->appendLine($marc->as_usmarc());
+			$marcout->appendLineRaw($marc->as_usmarc());
 			#print "Done appending master marc file\n";			
 			$recCount++;
 		}
@@ -461,6 +447,48 @@ my @tall = ();
 			$rangeWriter->addLine("$offset $increment DEFUNCT");
 			exit;
 		}
+		
+		my @diskDump = @{$evergreenScraper->getDiskDump()};
+		my $disk =@diskDump[0];
+		my @marc =();
+		my $check = new Loghandler($disk);
+		if($check->fileExists())
+		{
+			local $@;
+			my $finishedprocessing=0;
+			my $file='';
+			eval{
+			#print "usmarc->\n";
+				$file = MARC::File::USMARC->in( $disk );			
+				my $r =0;
+				while ( my $marc = $file->next() ) 
+				{						
+					$r++;
+					#print "encoding\n";
+					#$marc->encoding('UTF-8');
+					push(@marc,$marc);
+				}
+				#print "after pushing\n";
+				$file->close();
+				undef $file;
+				#Just checking for errors - temporary file created and deleted
+				
+				my $marcout = new Loghandler('/tmp/t.mrc');
+				#print "processing\n";
+				my @back = @{processMARC(\@marc,$platform,$type,$school,$marcout,$log)};
+				$finishedprocessing=1;
+				$marcout->deleteFile();
+			};
+			
+			if($@ && $finishedprocessing==0)
+			{
+			print "fail\n";
+				$check->deleteFile();
+				$pidWriter->truncFile("none\nnone\nnone\nnone\nnone\nnone\n$dbuser\nnone\n1\n$offset\n$increment");
+				$rangeWriter->addLine("$offset $increment BAD OUTPUT".$check->getFileName()."\t".$@);
+				exit;
+			}
+		}								
 		
 		my $recordCount = $evergreenScraper->getRecordCount();
 		my @tobig = @{$evergreenScraper->getTooBigList()};

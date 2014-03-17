@@ -79,6 +79,7 @@ use Digest::SHA1;
 			}
 			my $dbHandler;
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
+			setupSchema($dbHandler);
 			# my @dbMarcs = @{findPBrecordInME($dbHandler)};
 			# my @lookingforthese;
 			# foreach(@dbMarcs)
@@ -100,21 +101,30 @@ use Digest::SHA1;
 			#@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
 			if(@files[$#files]!=-1)
 			{
+				my $cnt = 0;
 				for my $b(0..$#files)
 				{
-					$log->addLogLine("Parsing: ".$files[$b]);
-					my $file = MARC::File::USMARC->in($files[$b]);
-					while ( my $marc = $file->next() ) 
-					{	
-						$marc = add9($marc,\@shortnames);
-						push(@marcOutputRecords,$marc);
+					if($cnt<100004)
+					{
+						$log->addLogLine("Parsing: ".$files[$b]);
+						my $file = MARC::File::USMARC->in($files[$b]);
+						while ( my $marc = $file->next() ) 
+						{	
+							$marc = add9($marc,\@shortnames);
+							push(@marcOutputRecords,$marc);
+						}
+						$file->close();
+						undef $file;
+						$cnt++;
 					}
 				}
 				my $outputFile = $mobUtil->chooseNewFileName($conf{"tempspace"},"temp","mrc");
 				my $marcout = new Loghandler($outputFile);
 				$marcout->deleteFile();
-				my $output;
 				
+				my $output;
+				#my $output = getListOfMARC($log,$dbHandler,\@marcOutputRecords);
+			
 				foreach(@marcOutputRecords)
 				{
 					my $marc = $_;
@@ -223,6 +233,14 @@ use Digest::SHA1;
 		}
 		if($count>0)
 		{
+			if(length($successUpdateTitleList)>5000)
+			{
+				$successUpdateTitleList = substr($successUpdateTitleList,0,5000)."\r\nTRUNCATED FOR LENGTH";
+			}
+			if(length($failedTitleList)>5000)
+			{
+				$failedTitleList = substr($failedTitleList,0,5000)."\r\nTRUNCATED FOR LENGTH";
+			}
 			my $totalSuccess=1;
 			if($notWorkedCount>0)
 			{
@@ -238,6 +256,38 @@ use Digest::SHA1;
 	else
 	{
 		print "Config file does not define 'logfile'\n";		
+	}
+}
+
+sub getListOfMARC
+{
+	my $log = @_[0];
+	my $dbHandler = @_[1];
+	my @marcOutputRecords = @{@_[2]};
+	my $ret;
+	my $matches=0;
+	my $loops=0;
+	foreach(@marcOutputRecords)
+	{
+		my $zero01 = $_->field('001')->data();	
+		print "$matches / $loops - $zero01\n";
+		my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE deleted='f' AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!='##URI##') and id in(select distinct lead_bibid from m_dedupe.merge_map) and MARC LIKE '%$zero01%' ";
+		my @results = @{$dbHandler->query($query)};
+		my $found=0;
+		foreach(@results)
+		{
+			print "Found one!\n";
+			$found=1;
+		}
+		if($found)
+		{
+			$ret.=$_->as_usmarc();
+			$matches++;
+		}
+		if($matches>5)
+		{
+			return $ret;
+		}
 	}
 }
 
@@ -409,6 +459,116 @@ sub add9
 	return $marc;
 }
 
+sub removeOldCallNumberURI
+{
+	my $bibid = @_[0];
+	my $dbHandler = @_[1];
+	my $query = "
+	DELETE FROM asset.uri_call_number_map WHERE call_number in 
+	(
+		SELECT id from asset.call_number WHERE record = $bibid AND label = '##URI##'
+	)
+	";
+	$dbHandler->update($query);
+	$query = "
+	DELETE FROM asset.uri_call_number_map WHERE call_number in 
+	(
+		SELECT id from asset.call_number WHERE  record = $bibid AND label = '##URI##'
+	)";
+	$dbHandler->update($query);
+	$query = "
+	DELETE FROM asset.uri WHERE id not in
+	(
+		SELECT uri FROM asset.uri_call_number_map
+	)";
+	$dbHandler->update($query);
+	$query = "
+	DELETE FROM asset.call_number WHERE  record = $bibid AND label = '##URI##'
+	";
+	$dbHandler->update($query);
+	$query = "
+	DELETE FROM asset.call_number WHERE  record = $bibid AND label = '##URI##'
+	";
+	$dbHandler->update($query);
+
+}
+
+sub recordAssetCopyMove
+{
+	my $oldbib = @_[0];
+	my $newbib = @_[1];
+	my $dbHandler = @_[2];
+	my $overdriveMatchString = @_[3];
+	my $log = @_[4];
+	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!='##URI##')";
+	my @cids;
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my @row = @{$_};
+		push(@cids,@row[0]);
+	}
+	
+	if($#cids>-1)
+	{		
+		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
+		moveAssetCopyToPreviouslyDedupedBib($dbHandler,$oldbib,$overdriveMatchString,$log);		
+	}	
+	
+	#Check again after the attempt to undedupe
+	@cids = ();
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my @row = @{$_};
+		push(@cids,@row[0]);
+	}
+	
+	foreach(@cids)
+	{
+		print "There were asset.copies on $oldbib\n";
+		$log->addLine("\t$oldbib\tContained physical Items");
+		 $query = "
+		INSERT INTO molib2go.item_reassignment(copy,prev_bib,target_bib)
+		VALUES ($_,$oldbib,$newbib)";
+		$log->addLine("$query");
+		$dbHandler->update($query);
+	}
+}
+
+sub recordBIBMARCChanges
+{
+	my $bibID = @_[0];
+	my $oldMARC = @_[1];
+	my $newMARC = @_[2];
+	my $dbHandler = @_[3];
+	my $log = @_[4];
+	
+		 my $query = "
+		INSERT INTO molib2go.bib_marc_update(record,prev_marc,changed_marc)
+		VALUES ($bibID,\$\$$oldMARC\$\$,\$\$$newMARC\$\$)";
+		$dbHandler->update($query);
+}
+
+sub mergeBIBs
+{
+	my $oldbib = @_[0];
+	my $newbib = @_[1];
+	my $dbHandler = @_[2];
+	my $overdriveMatchString = @_[3];
+	my $log = @_[4];	
+	recordAssetCopyMove($oldbib,$newbib,$dbHandler,$overdriveMatchString,$log);
+	my $query = "INSERT INTO molib2go.bib_merge(leadbib,subbib) VALUES($newbib,$oldbib)";
+	#$log->addLine("MERGE:\t$newbib\t$oldbib");
+	$log->addLine($query);
+	$dbHandler->update($query);	
+	#print "About to merge assets\n";
+	$query = "SELECT asset.merge_record_assets($newbib, $oldbib)";
+	$log->addLine($query);
+	$dbHandler->query($query);
+	#print "Merged\n";
+}
+
 sub calcSHA1
 {
 	my $marc = @_[0];
@@ -440,8 +600,7 @@ sub getsubfield
 		}
 	}
 	#print "got $ret\n";
-	return $ret;
-	
+	return $ret;	
 }
 
 sub importMARCintoEvergreen
@@ -472,55 +631,20 @@ sub importMARCintoEvergreen
 			my $sha1 = calcSHA1($marc);
 			$marc = readyMARCForInsertIntoME($marc);
 			my $bibid=-1;
-			my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid);
+			my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
 			
 			if($bibid!=-1) #already exists so update the marc
 			{
-				my @present = @{$bibid};
-				my $id = @present[0];
-				my $prevmarc = @present[1];
-				my $deleted = @present[2];
-				$prevmarc =~ s/(<leader>.........)./${1}a/;	
-print "Reading from xml\n";				
-				$prevmarc = MARC::Record->new_from_xml($prevmarc);
-				# my $led = substr($prevmarc->leader(),6,1);
-				# print "Subed $led from".$prevmarc->leader()."\n";
-				# my $found=0;
-				# if($led eq 'a')
-				# {
-					# $found=1;
-				# }
-				if(0)#!$found)
-				{
-					
-				}
-				else
-				{	
-					$prevmarc = mergeMARC856($prevmarc,$marc,$log);
-					$prevmarc = fixLeader($prevmarc);
-					my $thisXML = convertMARCtoXML($prevmarc);
-					$query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$thisXML\$\$,tcn_source=E'molib2go-script $sha1',source=$bibsourceid WHERE ID=$id";
-					$log->addLine($query);
-					$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$deleted");
-					my $res = $dbHandler->update($query);
-					print "$res";					
-					if($res)
-					{
-						my @temp = ($id,$title);
-						push @updated, [@temp];
-						$overlay++;
-					}
-					else
-					{
-						push (@notworked, $id);
-					}
-				}
+				my @ret = @{chooseWinnerAndDeleteRest($bibid, $dbHandler, $sha1, $marc, $bibsourceid, $title, \@notworked, \@updated, $log)};
+				@updated = @{@ret[0]};
+				@notworked = @{@ret[1]};
+				$overlay+=$#updated+1;
 			}
 			else  ##need to insert new bib instead of update
 			{
 				my $starttime = time;
 				my $max = getEvergreenMax($dbHandler);
-				my $thisXML = convertMARCtoXML($marc);
+				my $thisXML = convertMARCtoXML($marc,$log);
 				
 				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$\$$thisXML\$\$,null,$bibsourceid,E'molib2go-script $sha1',null,null)";
 				$log->addLine($query);
@@ -532,6 +656,8 @@ print "Reading from xml\n";
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
 					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$query = "INSERT INTO molib2go.bib_marc_update(record,changed_marc,new_record) VALUES($newmax,\$\$$thisXML\$\$,'t')";
+					$dbHandler->update($query);
 				}
 				else
 				{
@@ -543,11 +669,234 @@ print "Reading from xml\n";
 		}
 		$r++;
 	}
-	
+	$file->close();
+	undef $file;
 	push(@ret, (\@worked, \@notworked, \@updated));
 	#print Dumper(@ret);
 	return \@ret;
 	
+}
+
+
+sub chooseWinnerAndDeleteRest
+{
+	my @list = @{@_[0]};
+	my $dbHandler = @_[1];
+	my $sha1 = @_[2];
+	my $newMarc = @_[3];
+	my $bibsourceid = @_[4];
+	my $title = @_[5];
+	my @notworked = @{@_[6]};
+	my @updated = @{@_[7]};
+	my $log = @_[8];
+	my $chosenWinner = 0;
+	my $bestScore=0;
+	my $finalMARC;
+	my $i=0;
+	my $winnerBibID;
+	my $winnerOGMARCxml;
+	my $matchnum = $#list+1;
+	my $overdriveMatchString = $newMarc->field('001')->data();
+	foreach(@list)
+	{
+		my @attrs = @{$_};	
+		my $id = @attrs[0];
+		my $score = @attrs[2];
+		my $marcxml = @attrs[3];
+		if($score>$bestScore)
+		{
+			$bestScore=$score;
+			$chosenWinner=$i;
+			$winnerBibID = $id;
+			$winnerOGMARCxml = $marcxml;
+		}		
+		$i++;
+	}
+	$finalMARC = @{@list[$chosenWinner]}[1];
+	$i=0;
+	foreach(@list)
+	{	
+		my @attrs = @{$_};	
+		my $id = @attrs[0];
+		removeOldCallNumberURI($id, $dbHandler);
+		my $marc = @attrs[1];
+		my $marcxml = @attrs[3];
+		if($i!=$chosenWinner)
+		{	
+			$finalMARC = mergeMARC856($finalMARC, $marc, $log);
+			$finalMARC = fixLeader($finalMARC);			
+			mergeBIBs($id, $winnerBibID, $dbHandler, $overdriveMatchString, $log);			
+		}
+		$i++;
+	}
+	#attempt to move any items on the winning bib that were deduped 6-28-2013
+	moveAssetCopyToPreviouslyDedupedBib($dbHandler,$winnerBibID,$overdriveMatchString,$log);
+	# melt the incoming molib2go 856's retaining the rest of the marc from the DB
+	# At this point, the 9's have been added to the newMarc (data from molib2go)
+	$finalMARC = mergeMARC856($finalMARC, $newMarc, $log);
+	$finalMARC = fixLeader($finalMARC);
+	my $newmarcforrecord = convertMARCtoXML($finalMARC,$log);
+	recordBIBMARCChanges($winnerBibID, $winnerOGMARCxml, $newmarcforrecord, $dbHandler,$log);
+	
+	my $thisXML = convertMARCtoXML($finalMARC, $log);					
+	my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$thisXML\$\$,tcn_source=E'molib2go-script $sha1',source=$bibsourceid WHERE ID=$winnerBibID";
+	$log->addLine($query);
+	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$matchnum");
+	my $res = $dbHandler->update($query);
+	#print "$res\n";					
+	if($res)
+	{
+		my @temp = ($winnerBibID, $title);
+		push @updated, [@temp];
+	}
+	else
+	{
+		push (@notworked, $winnerBibID);
+	}
+	my @ret;
+	push @ret, [@updated];
+	push @ret, [@notworked];
+	
+	return \@ret;
+	
+}
+
+sub moveAssetCopyToPreviouslyDedupedBib
+{
+	my $dbHandler = @_[0];	
+	my $currentBibID = @_[1];
+	my $overdriveMatchString = @_[2];
+	my $log = @_[3];
+	my %possibles;
+	#this query will only return previously deleted bibs that do not have the molib2go 001 field ($overdriveMatchString)
+	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
+	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid and bre.marc not like '%$overdriveMatchString%'";
+	print $query."\n";
+	my @results = @{$dbHandler->query($query)};
+	my $winner=0;
+	my $currentWinnerElectricScore=10000;
+	my $currentWinnerMARCScore=0;
+	foreach(@results)
+	{
+		my @row = @{$_};
+		my $prevmarc = @row[1];
+		$prevmarc =~ s/(<leader>.........)./${1}a/;
+		$prevmarc = MARC::Record->new_from_xml($prevmarc);
+		my @temp=($prevmarc,determineElectric($prevmarc),scoreMARC($prevmarc,$log));
+		#need to initialize the winner values
+		$winner=@row[0];
+		$currentWinnerElectricScore = @temp[1];
+		$currentWinnerMARCScore = @temp[2];
+		$possibles{@row[0]}=\@temp;
+	}
+	
+	#choose the best deleted bib - we want the lowest electronic bib score in this case because we want to attach the 
+	#items to the *most physical bib
+	while ((my $bib, my $attr) = each(%possibles))
+	{
+		my @atts = @{$attr};
+		if(@atts[1]<$currentWinnerElectricScore)
+		{
+			$winner=$bib;
+			$currentWinnerElectricScore=@atts[1];
+			$currentWinnerMARCScore=@atts[2];
+		}
+		elsif(@atts[1]==$currentWinnerElectricScore && @atts[2]>$currentWinnerMARCScore)
+		{
+			$winner=$bib;
+			$currentWinnerElectricScore=@atts[1];
+			$currentWinnerMARCScore=@atts[2];
+		}		
+	}
+	if($winner!=0)
+	{
+		$query = "select deleted from biblio.record_entry where id=$winner";
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{	
+			my $row = $_;
+			my @row = @{$row};
+			print "$winner - ".@row[0]."\n";
+			#make sure that it is in fact deleted
+			if(@row[0] eq 't' ||@row[0] == 1)
+			{
+				my $tcn_value = $winner;
+				my $count=1;			
+				#make sure that when we undelete it, it will not collide its tcn_value 
+				while($count>0)
+				{
+					$query = "select count(*) from biblio.record_entry where tcn_value='$tcn_value' and id!=$winner";
+					my @results = @{$dbHandler->query($query)};
+					foreach(@results)
+					{	
+						my $row = $_;
+						my @row = @{$row};
+						$count=@row[0];
+					}
+					$tcn_value.="_";
+				}
+				#finally, undelete the bib making it available for the asset.call_number
+				$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value='$tcn_value'  where id=$winner";
+				$dbHandler->update($query);
+			}
+		}
+		#find all of the eligible call_numbers
+		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!='##URI##' AND DELETED='f'";
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{	
+			my @row = @{$_};
+			my $acnid = @row[0];
+			$query = 
+"INSERT INTO molib2go.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number)
+VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid)";
+			$log->addLine($query);
+			$dbHandler->update($query);
+			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
+			$log->addLine($query);
+			$dbHandler->update($query);
+		}
+	}
+}
+
+sub determineElectric
+{
+	my $marc = @_[0];
+	my @e56s = $marc->field('856');	
+	my $textmarc = $marc->as_formatted();
+	my $score=0;
+	my @phrases = ("electronic resource","ebook","eaudiobook","overdrive","download");
+	my $has856 = 0;
+	my $has245h = getsubfield($marc,'245','h');
+	my $found=0;	
+	foreach(@e56s)
+	{
+		my $field = $_;
+		my $ind2 = $field->indicator(2);
+		if($ind2==0) #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
+		{	
+			my @subs = $field->subfield('u');
+			foreach(@subs)
+			{
+				#print "checking $_ for http\n";
+				if(m/http/g)
+				{
+					$score++;
+				}
+			}
+		}
+	}	
+	foreach(@phrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>1) # Found more than 1 match on that phrase
+		{
+			$score++;
+		}
+	}
+	#print "Electric score: $score\n";
+	return $score;
 }
 
 sub findRecord
@@ -557,21 +906,36 @@ sub findRecord
 	my $dbHandler = @_[1];
 	my $sha1 = @_[2];
 	my $bibsourceid = @_[3];
-	my $deleted=0;
-	my $query = "SELECT ID,MARC,DELETED FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%' and source=$bibsourceid";
+	my $log = @_[4];
+	my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.tcn_source LIKE '%$sha1%' and bre.source=$bibsourceid and bre.deleted='f'";
 	my @results = @{$dbHandler->query($query)};
+	my @ret;
+	my $none=1;
+	my $foundIDs;
+	my $count=0;
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
 		my $id = @row[0];
 		my $marc = @row[1];
-		$deleted = @row[2];
-		print "found matching sha1: $id\n";
-		my @ret = ($id,$marc,$deleted);
-		return \@ret;
+		print "found matching sha1: $id\n";		
+		my $prevmarc = $marc;
+		$prevmarc =~ s/(<leader>.........)./${1}a/;	
+		$prevmarc = MARC::Record->new_from_xml($prevmarc);
+		my $score = scoreMARC($prevmarc,$log);
+		my @matchedsha = ($id,$prevmarc,$score,$marc);
+		$foundIDs.="$id,";
+		push (@ret, [@matchedsha]);
+		$none=0;
+		$count++;
 	}
-	my $query = "SELECT ID,MARC,DELETED FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%$zero01%'";
+	$foundIDs = substr($foundIDs,0,-1);
+	if(length($foundIDs)<1)
+	{
+		$foundIDs="-1";
+	}
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%$zero01%' and ID not in($foundIDs) and deleted='f'";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -580,12 +944,22 @@ sub findRecord
 		my $id = @row[0];
 		print "found matching 001: $id\n";
 		my $marc = @row[1];
-		$deleted = @row[2];
-		my @ret = ($id,$marc,$deleted);
-		return \@ret;
+		my $prevmarc = $marc;
+		$prevmarc =~ s/(<leader>.........)./${1}a/;	
+		$prevmarc = MARC::Record->new_from_xml($prevmarc);
+		my $score = scoreMARC($prevmarc,$log);
+		my @matched001 = ($id,$prevmarc,$score,$marc);
+		push (@ret, [@matched001]);	
+		$none=0;
+		$count++;
+	}	
+	if($none)
+	{
+		return -1;
 	}
+	print "Count matches: $count\n";
+	return \@ret;
 	
-	return -1;
 }
 
 sub readyMARCForInsertIntoME
@@ -712,12 +1086,12 @@ sub mergeMARC856
 	
 	my $dump1=Dumper(\%urls);
 	my @remove = $marc->field('856');
-	$log->addLine("Removing ".$#remove." 856 records");
+	#$log->addLine("Removing ".$#remove." 856 records");
 	$marc->delete_fields(@remove);
 
 
 	while ((my $internal, my $mvalue ) = each(%urls))
-		{
+		{	
 			$marc->insert_grouped_field( $mvalue );
 		}
 	return $marc;
@@ -778,16 +1152,22 @@ sub getTCN
 sub convertMARCtoXML
 {
 	my $marc = @_[0];
-	my $thisXML = $marc->as_xml();			
+	my $log = @_[1];
+	my $thisXML =  decode_utf8($marc->as_xml());				
+	
 	#this code is borrowed from marc2bre.pl
-	$thisXML =~ s/\n//sog;
-	$thisXML =~ s/^<\?xml.+\?\s*>//go;
-	$thisXML =~ s/>\s+</></go;
-	$thisXML =~ s/\p{Cc}//go;
+	$thisXML =~ s/\n//sog;	
+	$thisXML =~ s/^<\?xml.+\?\s*>//go;	
+	$thisXML =~ s/>\s+</></go;	
+	$thisXML =~ s/\p{Cc}//go;	
 	$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
 	$thisXML =~ s/[\x00-\x1f]//go;
 	$thisXML =~ s/^\s+//;
 	$thisXML =~ s/\s+$//;
+	$thisXML =~ s/<record><leader>/<leader>/;
+	$thisXML =~ s/<collection/<record/;	
+	$thisXML =~ s/<\/record><\/collection>/<\/record>/;	
+	
 	#end code
 	return $thisXML;
 }
@@ -827,7 +1207,7 @@ sub findPBrecordInME
 {
 	my $dbHandler = @_[0];	
 	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%\"9\">PB%' limit 14";
-	my $query = "select id,marc from biblio.record_entry where marc ~* '<leader>......a' AND lower(marc) like '%overdrive%' AND lower(marc) like '%ebook%'";
+	my $query = "select id,marc from biblio.record_entry where lower(marc) like '%overdrive%' AND lower(marc) like '%ebook%' AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!='##URI##')";
 	my @results = @{$dbHandler->query($query)};
 	my @each;
 	my @ret;
@@ -850,15 +1230,18 @@ sub findMatchInArchive
 	my @files;
 	#Get all files in the directory path
 	@files = @{dirtrav(\@files,$archiveFolder)};
+	my @ret;
+	
 	for my $b(0..$#files)
 	{
+	
 		my $file = MARC::File::USMARC->in($files[$b]);
 		while ( my $marc = $file->next() ) 
 		{	
 			my $t = $marc->leader();
 			my $su=substr($marc->leader(),6,1);
 			print "Leader:\n$t\n$su\n";			
-			if($su eq 'a')
+			if(1)#$su eq 'a')
 			{
 				my $all = $marc->as_formatted();
 				foreach(@matchList)
@@ -866,12 +1249,15 @@ sub findMatchInArchive
 					if($all =~ m/$_/g)
 					{
 						my @booya = ($files[$b]);
-						print "This one: ".$files[$b]." matched $_\n";
+						push(@ret,$files[$b]);
+						print "This one: ".$files[$b]." matched '$_'\n";
 						return \@booya;
 					}
 				}
 			}
 		}
+		$file->close();
+		undef $file;
 	}
 }
 
@@ -892,8 +1278,8 @@ sub dirtrav
 				@files = @{dirtrav(\@files,"$pwd/$file")};
 			}
 			elsif (-f "$pwd/$file")
-			{
-				push(@files, "$pwd/$file");
+			{			
+				push(@files, "$pwd/$file");			
 			}
 		}
 	}
@@ -913,6 +1299,170 @@ sub fixLeader
 		#print "Changed to:\n$fullLeader";
 	}
 	return $marc;
+}
+
+
+sub scoreMARC
+{
+	my $marc = shift;
+	my $log = shift;
+	
+	my $score = 0;
+	$score+= score($marc,2,100,400,$log,'245');
+	$score+= score($marc,1,1,150,$log,'100');
+	$score+= score($marc,1,1.1,150,$log,'110');
+	$score+= score($marc,0,50,200,$log,'6..');
+	$score+= score($marc,0,50,100,$log,'02.');
+	
+	$score+= score($marc,0,100,200,$log,'246');
+	$score+= score($marc,0,100,100,$log,'130');
+	$score+= score($marc,0,100,100,$log,'010');
+	$score+= score($marc,0,100,200,$log,'490');
+	$score+= score($marc,0,10,50,$log,'830');
+	
+	$score+= score($marc,1,.5,50,$log,'300');
+	$score+= score($marc,0,1,100,$log,'7..');
+	$score+= score($marc,2,2,100,$log,'50.');
+	$score+= score($marc,2,2,100,$log,'52.');
+	
+	$score+= score($marc,2,.5,200,$log,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
+
+	return $score;
+}
+
+sub score
+{
+	my ($marc) = shift;
+	my ($type) = shift;
+	my ($weight) = shift;
+	my ($cap) = shift;
+	my ($log) = shift;
+	my @tags = @_;
+	my $ou = Dumper(@tags);
+	#$log->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
+	my $score = 0;			
+	if($type == 0) #0 is field count
+	{
+		#$log->addLine("Calling count_field");
+		$score = count_field($marc,$log,\@tags);
+	}
+	elsif($type == 1) #1 is length of field
+	{
+		#$log->addLine("Calling field_length");
+		$score = field_length($marc,$log,\@tags);
+	}
+	elsif($type == 2) #2 is subfield count
+	{
+		#$log->addLine("Calling count_subfield");
+		$score = count_subfield($marc,$log,\@tags);
+	}
+	$score = $score * $weight;
+	if($score > $cap)
+	{
+		$score = $cap;
+	}
+	$score = int($score);
+	#$log->addLine("Weight and cap applied\nScore is: $score");
+	return $score;
+}
+
+sub count_subfield
+{
+	my ($marc) = $_[0];
+	my $log = $_[1];
+	my @tags = @{$_[2]};
+	my $total = 0;
+	#$log->addLine("Starting count_subfield");
+	foreach my $tag (@tags) 
+	{
+		my @f = $marc->field($tag);
+		foreach my $field (@f)
+		{
+			my @subs = $field->subfields();
+			my $ou = Dumper(@subs);
+			#$log->addLine($ou);
+			if(@subs)
+			{
+				$total += scalar(@subs);
+			}
+		}
+	}
+	#$log->addLine("Total Subfields: $total");
+	return $total;
+	
+}	
+
+sub count_field 
+{
+	my ($marc) = $_[0];
+	my $log = $_[1];
+	my @tags = @{$_[2]};
+	my $total = 0;
+	foreach my $tag (@tags) 
+	{
+		my @f = $marc->field($tag);
+		$total += scalar(@f);
+	}
+	return $total;
+}
+
+sub field_length 
+{
+	my ($marc) = $_[0];
+	my $log = $_[1];
+	my @tags = @{$_[2]};
+
+	my @f = $marc->field(@tags[0]);
+	return 0 unless @f;
+	my $len = length($f[0]->as_string);
+	my $ou = Dumper(@f);
+	#$log->addLine($ou);
+	#$log->addLine("Field Length: $len");
+	return $len;
+}
+
+
+sub setupSchema
+{
+	my $dbHandler = @_[0];
+	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'molib2go'";
+	my @results = @{$dbHandler->query($query)};
+	if($#results==-1)
+	{
+		$query = "CREATE SCHEMA molib2go";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE molib2go.item_reassignment(
+		id serial,
+		copy bigint,
+		prev_bib bigint,
+		target_bib bigint,
+		change_time timestamp default now()
+		)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE molib2go.bib_marc_update(
+		id serial,
+		record bigint,
+		prev_marc text,
+		changed_marc text,
+		new_record boolean NOT NULL DEFAULT false,
+		change_time timestamp default now())";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE molib2go.bib_merge(
+		id serial,
+		leadbib bigint,
+		subbib bigint,
+		change_time timestamp default now())";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE molib2go.undedupe(
+		id serial,
+		oldleadbib bigint,
+		undeletedbib bigint,
+		undeletedbib_electronic_score bigint,
+		undeletedbib_marc_score bigint,
+		moved_call_number bigint,
+		change_time timestamp default now())";
+		$dbHandler->update($query);		
+	}
 }
 
  exit;

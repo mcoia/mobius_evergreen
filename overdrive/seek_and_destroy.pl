@@ -76,6 +76,7 @@ if(! -e $xmlconf)
 			my %dbconf = %{getDBconnects($xmlconf,$log)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
 			setupSchema($dbHandler);
+			print "regular cache\n";
 			updateScoreCache($dbHandler,$log);
 			searchDestroyLeaders($dbHandler,$log);
 		}
@@ -112,6 +113,7 @@ sub searchDestroyLeaders
 		{
 			my @scorethis = ($id,$marc);
 			my @st = ([@scorethis]);
+			print "searchleaders cache\n";
 			updateScoreCache($dbHandler,$log,\@st);
 		}
 		$marc =~ s/(<leader>.........)./${1}a/;			
@@ -146,19 +148,29 @@ sub isScored
 
 sub updateScoreCache
 {
+	
 	my $dbHandler = @_[0];
 	my $log = @_[1];
-	my @ids;
+	my @newIDs;
+	my @newAndUpdates;
+	my @updateIDs;
 	if(@_[2])
 	{	
-		@ids=@{@_[2]};
+		@newIDs=@{@_[2]};
 	}
 	else
 	{
-		@ids = @{identifyBibsToScore($dbHandler)};
+		@newAndUpdates = @{identifyBibsToScore($dbHandler)};
+		@newIDs = @{@newAndUpdates[0]};
 	}
-	$log->addLine("Found ".($#ids+1)." Bibs to be scored");
-	foreach(@ids)
+	print Dumper(@newIDs);
+	$log->addLine("Found ".($#newIDs+1)." new Bibs to be scored");	
+	if(@newAndUpdates[1])
+	{
+		@updateIDs = @{@newAndUpdates[1]};
+		$log->addLine("Found ".($#updateIDs+1)." new Bibs to update score");	
+	}
+	foreach(@newIDs)
 	{
 		my @thisone = @{$_};
 		my $bibid = @thisone[0];
@@ -168,14 +180,23 @@ sub updateScoreCache
 		$marcob = MARC::Record->new_from_xml($marcob);
 		my $score = scoreMARC($marcob,$log);
 		my $electricScore = determineElectric($marcob);
-		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE(RECORD,SCORE,ELECTRONIC) VALUES($bibid,$score,$electricScore)";
-		if(@thisone[2])	#these are updates
-		{
-			my $bibscoreid = @thisone[2];
-			my $oldscore = @thisone[3];
-			my $improved = $score - $oldscore;
-			$query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC=$electricScore WHERE ID=$bibscoreid";			
-		}
+		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE(RECORD,SCORE,ELECTRONIC) VALUES($bibid,$score,$electricScore)";		
+		$dbHandler->update($query);	
+	}
+	foreach(@updateIDs)
+	{
+		my @thisone = @{$_};
+		my $bibid = @thisone[0];
+		my $marc = @thisone[1];
+		my $bibscoreid = @thisone[2];
+		my $oldscore = @thisone[3];
+		my $marcob = $marc;
+		$marcob =~ s/(<leader>.........)./${1}a/;			
+		$marcob = MARC::Record->new_from_xml($marcob);
+		my $score = scoreMARC($marcob,$log);
+		my $electricScore = determineElectric($marcob);
+		my $improved = $score - $oldscore;
+		my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC=$electricScore WHERE ID=$bibscoreid";			
 		$dbHandler->update($query);	
 	}
 }
@@ -232,9 +253,12 @@ sub determineElectric
 sub identifyBibsToScore
 {
 	my $dbHandler = @_[0];
-	my @ret=();
+	my @ret;
+#This query finds bibs that have not received a score at all
 	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) LIMIT 100";
 	my @results = @{$dbHandler->query($query)};
+	my @news;
+	my @updates;
 	foreach(@results)
 	{
 		my $row = $_;
@@ -242,8 +266,9 @@ sub identifyBibsToScore
 		my $id = @row[0];
 		my $marc = @row[1];
 		my @temp = ($id,$marc);
-		push (@ret, [@temp]);
+		push (@news, [@temp]);
 	}
+#This query finds bibs that have received but the marc has changed since the last score
 	$query = "SELECT SBS.RECORD,BRE.MARC,SBS.ID,SCORE FROM SEEKDESTROY.BIB_SCORE SBS,BIBLIO.RECORD_ENTRY BRE WHERE SBS.score_time < BRE.EDIT_DATE AND SBS.RECORD=BRE.ID";
 	@results = @{$dbHandler->query($query)};
 	foreach(@results)
@@ -251,12 +276,14 @@ sub identifyBibsToScore
 		my $row = $_;
 		my @row = @{$row};
 		my $rec = @row[0];
-		my $id = @row[1];
-		my $marc = @row[2];
+		my $marc = @row[1];
+		my $id = @row[2];
 		my $score = @row[3];
 		my @temp = ($rec,$id,$marc,$score);
-		push (@ret, [@temp]);
+		push (@updates, [@temp]);
 	}
+	push(@ret,[@news]);
+	push(@ret,[@updates]);
 	return \@ret;
 }
 

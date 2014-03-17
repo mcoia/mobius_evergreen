@@ -666,7 +666,7 @@ package evergreenScraper;
 		my $recordID = @row[0];
 		my $memarc = @row[1];
 		$memarc =~ s/(<leader>.........)./${1}a/;
-		$memarc = MARC::Record->new_from_xml($memarc);
+		$memarc = MARC::Record->new_from_xml($memarc, 'UTF-8');
 		$standard{$recordID} = $memarc;
 	}
 	$self->{'standard'} = \%standard;
@@ -764,7 +764,7 @@ package evergreenScraper;
 	#print Dumper($ret);
 	#$log->addLine($ret->as_formatted());
 	#print $ret->encoding();
-	#$ret->encoding( 'UTF-8' );
+	$ret->encoding( 'UTF-8' );
 	#print "Returning single marc\n";
 	return $ret;
  }
@@ -782,6 +782,7 @@ package evergreenScraper;
 	{
 		push(@marcout,getSingleMARC($self,$internal));
 	}
+	
 	push(@ret,[@marcout]);
 	if(ref $dumpedFiles eq 'ARRAY')
 	{
@@ -938,17 +939,8 @@ package evergreenScraper;
 				#$marc->encoding( 'UTF-8' );
 				#print "About to add it to output\n";
 				#print Dumper($marc);
-				#my @fid = $marc->fields();
-				#foreach(@fid)
-				#{
-					#my $tag = $_->tag();
-					#if (! $_->is_valid_tag($tag) )
-					#{
-				#		$log->addLine("Not a valid tag: $tag - changing to 400");
-				#		$_->set_tag("400");
-				#	}
-				#}
-				$output.=$marc->as_usmarc();
+				
+				$output.=decode_utf8($marc->as_usmarc());
 				#print "Added it\n";
 			}
 			else
@@ -961,7 +953,7 @@ package evergreenScraper;
 			$title=$title."_";
 		}
 		#print "Choosing file name\n";
-		my $fileName = $mobUtil->chooseNewFileName("/tmp/temp",$title."tempmarc","mrc");		
+		my $fileName = $mobUtil->chooseNewFileName("/mnt/evergreen/tmp/temp",$title."tempmarc","mrc");		
 		#print "Decided on $fileName \n";	
 		my $marcout = new Loghandler($fileName);
 		$marcout->appendLine($output);
