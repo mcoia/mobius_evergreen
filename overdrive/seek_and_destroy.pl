@@ -255,7 +255,7 @@ sub identifyBibsToScore
 	my $dbHandler = @_[0];
 	my @ret;
 #This query finds bibs that have not received a score at all
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) LIMIT 100";
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE LIMIT 100";
 	my @results = @{$dbHandler->query($query)};
 	my @news;
 	my @updates;
@@ -630,7 +630,6 @@ sub findRecord
 sub readyMARCForInsertIntoME
 {
 	my $marc = @_[0];
-	$marc = fixLeader($marc);	
 	my $lbyte6 = substr($marc->leader(),6,1);
 	
 	my $two45 = $marc->field('245');
@@ -638,15 +637,50 @@ sub readyMARCForInsertIntoME
 	
 	if($two45)
 	{
-		$two45->delete_subfield(code => 'h');
-		$two45->add_subfields('h' => "[Overdrive downloadable item] /");
+		my $value = "item";
+		# if($lbyte6 eq 'm' || $lbyte6 eq 'i')
+		# {	
+			$value = "eBook";
+			if($lbyte6 eq 'i')
+			{
+				$value = "eAudioBook";
+			}
+			if($two45->subfield('h'))
+			{
+				$two45->update( 'h' => "[Overdrive downloadable $value] /" );
+			}
+			else
+			{			
+				$two45->add_subfields('h' => "[Overdrive downloadable $value] /");
+			}
+		# }
 		if(@e856s)
 		{
 			foreach(@e856s)
 			{
 				my $thisfield = $_;
-				$thisfield->delete_subfield(code => 'z');					
-				$thisfield->add_subfields('z'=> "Click for access to the downloadable item via Overdrive");
+				my $ind2 = $thisfield->indicator(2);
+				if($ind2 eq '0') #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
+				{	
+					my @sub3 = $thisfield->subfield( '3' );
+					my $ignore=0;
+					foreach(@sub3)
+					{
+						if(lc($_) eq 'excerpt')
+						{
+							$ignore=1;
+						}
+						if(lc($_) eq 'image')
+						{
+							$ignore=1;
+						}
+					}
+					if(!$ignore)
+					{
+						$thisfield->delete_subfield(code => 'z');					
+						$thisfield->add_subfields('z'=> "Click for access to the downloadable $value via Overdrive");
+					}
+				}
 			}
 		}			
 	}
@@ -931,6 +965,17 @@ sub setupSchema
 	{
 		$query = "CREATE SCHEMA seekdestroy";
 		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.job
+		(
+		id bigserial NOT NULL,
+		start_time timestamp with time zone NOT NULL DEFAULT now(),
+		last_update_time timestamp with time zone NOT NULL DEFAULT now(),
+		status text default 'processing',	
+		current_action text,
+		current_action_num bigint default 0,
+		CONSTRAINT job_pkey PRIMARY KEY (id)
+		  )";		  
+		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.bib_score(
 		id serial,
 		record bigint,
@@ -945,7 +990,10 @@ sub setupSchema
 		prev_bib bigint,
 		target_bib bigint,
 		change_time timestamp default now(), 
-		electronic boolean default false)";
+		electronic boolean default false),
+		job  bigint NOT NULL,
+		CONSTRAINT item_reassignment_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.bib_marc_update(
 		id serial,
@@ -953,6 +1001,15 @@ sub setupSchema
 		prev_marc text,
 		changed_marc text,
 		change_time timestamp default now())";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.bib_merge(
+		id serial,
+		leadbib bigint,
+		subbib bigint,
+		change_time timestamp default now(),
+		job  bigint NOT NULL,
+		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 	}
 }

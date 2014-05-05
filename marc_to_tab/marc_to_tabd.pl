@@ -3,21 +3,13 @@
 # Example Configure file:
 # 
 # logfile = /tmp/log.log
-# marcoutdir = /tmp
-# z3950server = server.address.org/INNOPAC
-# dbhost = 192.168.12.45
-# db = postgresDB_Name
-# dbuser = dbuser
-# dbpass = dbpassword
-#
+# csvout = /tmp/run/marc_to_tab_extract.csv
+
  use strict; 
  use Loghandler;
  use Mobiusutil;
  use DBhandler;
- use recordItem;
- use sierraScraper;
  use Data::Dumper;
- use email;
  use DateTime;
  use utf8;
  use Encode;
@@ -43,7 +35,7 @@
 	{
 		my $log = new Loghandler($conf->{"logfile"});
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my $file = MARC::File::USMARC->in('/tmp/run/patrons.mrc');
+		my $file = MARC::File::USMARC->in('/tmp/run/marc.mrc');
 		my @final = ();
 		my $count=0;
 		my @header;
@@ -56,19 +48,19 @@
 			my %fieldcount;
 			foreach(@fields)
 			{
-			
+			@marcOutput=();
 				my $field = $_;
 				my $tag = $field->tag();
-				my $append = 1;
-				while($fieldcount{$tag."_".$append})
-				{
-					$append++;
-				}
-				$fieldcount{$tag."_".$append}=1;
-				$tag = $tag."_".$append;
+				# my $append = 1;
+				# while($fieldcount{$tag."_".$append})
+				# {
+					# $append++;
+				# }
+				# $fieldcount{$tag."_".$append}=1;
+				# $tag = $tag."_".$append;
 				
-				#if($tag =='852')
-				#{
+				if($tag =='852')
+				{
 				if($field->is_control_field())
 				{				
 					my $data = $field->data();
@@ -134,7 +126,7 @@
 					}
 				}
 				
-				#}
+				}
 				
 			}
 			push(@allOutCSV,[@marcOutput]);

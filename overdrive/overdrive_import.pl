@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-#1198396
+
 use lib qw(../);
 use MARC::Record;
 use MARC::File;
@@ -14,7 +14,6 @@ use email;
 use DateTime;
 use utf8;
 use Encode;
-use DateTime;
 use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
@@ -70,6 +69,7 @@ use Digest::SHA1;
 		my @info;
 		my $count=0;
 		my @files;
+		my $dbHandler;
 		if($valid)
 		{	
 			my @marcOutputRecords;
@@ -77,8 +77,7 @@ use Digest::SHA1;
 			for my $y(0.. $#shortnames)
 			{				
 				@shortnames[$y]=$mobUtil->trim(@shortnames[$y]);
-			}
-			my $dbHandler;
+			}			
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
 			setupSchema($dbHandler);
 			# my @dbMarcs = @{findPBrecordInME($dbHandler)};
@@ -100,8 +99,10 @@ use Digest::SHA1;
 			# @files=@{findMatchInArchive(\@lookingforthese,$archivefolder)}; 
 			#@files = @{dirtrav(\@files,$archivefolder)};			
 			 @files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
+			
 			if(@files[$#files]!=-1)
 			{
+			#print Dumper(@files);
 				my $cnt = 0;
 				for my $b(0..$#files)
 				{
@@ -134,7 +135,7 @@ use Digest::SHA1;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
 				$marcout->addLineRaw($output);
-				my $dbHandler;
+				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
 				{
@@ -261,15 +262,16 @@ use Digest::SHA1;
 			}
 			my @tolist = ($conf{"alwaysemail"});
 			my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
+			my $reports = gatherOutputReport($log,$dbHandler);
 			$fileList=~s/\s/\r\n/g;
-			$email->send("Evergreen Utility - Overdrive Import Report Job # $jobid","I connected to: \r\n ".$conf{"server"}."\r\nand gathered:\r\n$count Record(s) from $fileCount file(s)\r\n$workedCount Successful Imports\r\n$notWorkedCount Not successful Imports\r\n Duration: $duration\r\n\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-Evergreen Perl Squad-");
+			$email->send("Evergreen Utility - Molib2go Overdrive Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n$count Record(s) from $fileCount file(s)\r\n Duration: $duration\r\n\r\n$reports\r\n\r\nFiles:\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-Evergreen Perl Squad-");
 		}
 		elsif(length($errorMessage)>0)
 		{
 			my @tolist = ($conf{"alwaysemail"});
 			my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
 			$fileList=~s/\s/\r\n/g;
-			$email->send("Evergreen Utility - Overdrive Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
+			$email->send("Evergreen Utility - Molib2go Overdrive Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
 			
 		}
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
@@ -278,6 +280,106 @@ use Digest::SHA1;
 	{
 		print "Config file does not define 'logfile'\n";		
 	}
+}
+
+sub gatherOutputReport
+{
+	my $log = @_[0];
+	my $dbHandler = @_[1];
+	my $newRecordCount=0;
+	my $updatedRecordCount=0;
+	my $mergedRecords='';
+	my $itemsAssignedRecords='';
+	my $undedupeRecords='';
+	#bib_marc_update table report new bibs
+	my $query = "select count(*) from molib2go.bib_marc_update where job=$jobid and new_record is true";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$newRecordCount=@row[0];
+	}
+	#bib_marc_update table report non new bibs
+	$query = "select count(*) from molib2go.bib_marc_update where job=$jobid and new_record is not true";
+	@results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$updatedRecordCount=@row[0];
+	}
+	
+	#bib_merge table report
+	$query = "select leadbib,subbib from molib2go.bib_merge where job=$jobid";
+	@results = @{$dbHandler->query($query)};	
+	my $count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$mergedRecords.=@row[0]." < ".@row[1]."\r\n";
+		$count++;
+	}
+	if($count>0)
+	{	
+		if(length($mergedRecords)>5000)
+		{
+			$mergedRecords = substr($mergedRecords,0,5000)."\r\nTRUNCATED FOR LENGTH";
+		}
+		$mergedRecords="$count records were merged - The left number is the winner\r\n".$mergedRecords;
+		$mergedRecords."\r\n\r\n\r\n";
+	}
+	
+	
+	#item_reassignment table report
+	$query = "select target_bib,prev_bib from molib2go.item_reassignment where job=$jobid";
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$itemsAssignedRecords.=@row[0]." < ".@row[1]."\r\n";
+		$count++;
+	}
+	if($count>0)
+	{	
+		if(length($itemsAssignedRecords)>5000)
+		{
+			$itemsAssignedRecords = substr($itemsAssignedRecords,0,5000)."\r\nTRUNCATED FOR LENGTH";
+		}
+		$itemsAssignedRecords="$count Records had physical items assigned - The left number is where the items were moved\r\n".$itemsAssignedRecords;
+		$itemsAssignedRecords."\r\n\r\n\r\n";
+	}
+	
+	#undedupe table report
+	$query = "select undeletedbib,oldleadbib,(select label from asset.call_number where id=a.moved_call_number) from molib2go.undedupe a where job=$jobid";
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$undedupeRecords.=@row[0]." < ".@row[1]." - '".@row[2]."'\r\n";
+		$count++;
+	}
+	if($count>0)
+	{	
+		if(length($undedupeRecords)>5000)
+		{
+			$undedupeRecords = substr($undedupeRecords,0,5000)."\r\nTRUNCATED FOR LENGTH";
+		}
+		$undedupeRecords="$count records had physical items and were moved onto a previously deduped bib - The left number is the undeleted deduped bib\r\n
+		The right is the molib2go bib that had it's items moved onto the undeduped bib.\r\n
+		We have included the call number as well\r\n".$undedupeRecords;
+		$undedupeRecords."\r\n\r\n\r\n";
+	}
+	my $ret=$newRecordCount." New record(s) were created.\r\n\r\n\r\n".
+	$updatedRecordCount." Record(s) were updated\r\n\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$undedupeRecords;
+	print $ret;
+	return $ret;
+	
 }
 
 sub getListOfMARC
@@ -913,9 +1015,23 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 			$log->addLine($query);
 			$dbHandler->update($query);
 		}
+		moveHolds($dbHandler,$currentBibID,$winner,$log);
 	}
 }
 
+sub moveHolds
+{
+	my $dbHandler = @_[0];	
+	my $oldBib = @_[1];
+	my $newBib = @_[2];
+	my $log = @_[3];	
+	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE='T' AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
+	$log->addLine($query);
+	updateJob($dbHandler,"Processing","moveHolds  $query");
+	#print $query."\n";
+	$dbHandler->update($query);
+}	
+	
 sub determineElectric
 {
 	my $marc = @_[0];
@@ -1197,7 +1313,7 @@ sub getEvergreenMax
 		my @row = @{$row};
 		$dbmax = @row[0];
 	}
-	print "DB Max: $dbmax\n";
+	#print "DB Max: $dbmax\n";
 	return $dbmax;
 }
 
