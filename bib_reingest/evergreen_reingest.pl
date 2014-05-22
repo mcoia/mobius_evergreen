@@ -317,7 +317,7 @@ sub correctTCN
 	}
 	#take the last tail off
 	$tcn_value=substr($tcn_value,0,-1);	
-	$query = "update biblio.record_entry tcn_value = \$\$$tcn_value\$\$  where id=$bibid";
+	my $query = "update biblio.record_entry tcn_value = \$\$$tcn_value\$\$  where id=$bibid";
 	$dbHandler->update($query);
 }
 
