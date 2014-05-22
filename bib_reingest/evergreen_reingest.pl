@@ -294,6 +294,33 @@
 	}
 }
 
+sub correctTCN
+{
+	my $dbHandler = @_[0];
+	my $bibid = @_[1];
+	my $target_tcn = @_[2];
+	my $tcn_value = $target_tcn;
+	
+	my $count=1;			
+	#Alter the tcn until it doesn't collide
+	while($count>0)
+	{
+		my $query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$";
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{	
+			my $row = $_;
+			my @row = @{$row};
+			$count=@row[0];
+		}
+		$tcn_value.="_";
+	}
+	#take the last tail off
+	$tcn_value=substr($tcn_value,0,-1);	
+	$query = "update biblio.record_entry tcn_value = \$\$$tcn_value\$\$  where id=$bibid";
+	$dbHandler->update($query);
+}
+
  sub setReingest
 {
 	my $dbHandler = @_[0];
