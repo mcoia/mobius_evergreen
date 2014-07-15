@@ -3,7 +3,7 @@
 # evergreen_bib_extract.pl
 #
 # Usage:
-# ./evergreen_bib_extract.pl conf_file.conf [adds or cancels]
+# ./evergreen_reingest.pl conf_file.conf [adds or cancels]
 # 
 
  use lib qw(../);
@@ -62,7 +62,7 @@
 					thread(\%conf);
 				}
 				
-				my $platform = $conf{"platform"};#ebsco or summon
+				my $platform = $conf{"platform"};
 				
 				if(defined($type))		
 				{
@@ -126,10 +126,10 @@
 						# PREP THE DATABASE
 						my $originalSetting = getOriginalSetting($dbHandler);
 						# remove the reingest flag to make this faster	
-						setReingest($dbHandler,"false");
+						setReingest($dbHandler,"true");
 						prepDBTCN($dbHandler,$log);
 						# This ingest cannot be done in threads. So we just have to bite it.
-						#ingestBrowseOnly($dbHandler,$selectQuery,$log);
+						ingestBrowseOnly($dbHandler,$selectQuery,$log);
 						setReingest($dbHandler,$originalSetting==1?"true":"false");	
 						# DONE PREPPING AND NOW STARTING THREADS
 						my $dt = DateTime->now(time_zone => "local");
@@ -142,7 +142,9 @@
 						#print "Path: $pathtothis\n";
 						my $gatherTime = DateTime->now(time_zone => "local");
 						local $@;
-						eval{$threadHandler = new threadHandler($dbHandler,$log,$selectQuery,$type,$conf{"school"},$pathtothis,$configFile,$maxdbconnections);};
+						eval{
+#						$threadHandler = new threadHandler($dbHandler,$log,$selectQuery,$type,$conf{"school"},$pathtothis,$configFile,$maxdbconnections);
+						};
 						if($@)
 						{
 							print "Master Thread Failed:\n";
@@ -209,7 +211,8 @@
 		$duration = $duration / 60;
 		$duration = substr($duration,0,index($duration,'.')+3);
 		$log->addLogLine("Working on $bibID \t$completed / $total\telapsed/remaining $duration/$eta");
-		my $query = "SELECT metabib.reingest_metabib_field_entries($bibID, TRUE, FALSE, TRUE)";		
+		#my $query = "SELECT metabib.reingest_metabib_field_entries($bibID, TRUE, FALSE, TRUE)";		
+		my $query = "update biblio.record_entry set id=id where id=$bibID";	
 		$dbHandler->update($query);
 		$completed++;
 	}
