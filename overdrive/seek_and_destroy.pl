@@ -287,6 +287,12 @@ sub identifyBibsToScore
 	return \@ret;
 }
 
+sub get_marc_extract
+{
+	my $record=@_[0];
+	my $marc = populate_marc($record);	
+	return normalize_marc($marc);
+}
 sub scoreMARC
 {
 	my $marc = shift;
@@ -406,6 +412,17 @@ sub field_length
 	return $len;
 }
 
+sub calcSHA1
+{
+	my $marc = @_[0];
+	my $sha1 = Digest::SHA1->new;
+	$sha1->add(  length(getsubfield($marc,'007',''))>6 ? substr( getsubfield($marc,'007',''),0,6) : '' );
+	$sha1->add(getsubfield($marc,'245','h'));
+	$sha1->add(getsubfield($marc,'001',''));
+	$sha1->add(getsubfield($marc,'245','a'));
+	return $sha1->hexdigest;
+}
+
 sub getsubfield
 {
 	my $marc = @_[0];
@@ -454,40 +471,14 @@ sub importMARCintoEvergreen
 		if($overlay<16)
 		{
 			#my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
-			
-			my $sha1 = Digest::SHA1->new;			
-			my $title;
-			my $zero01;
-			#see if it is already in the database
-			
-			my $i245h;
-			my $z07;
-			my $leader = substr($marc->leader(),5,3);
-			if($marc->field('007'))
-			{
-				$z07 = substr($marc->field('007')->data(),0,6);
-				$sha1->add($marc->field('007')->data());
-			}
-			if($marc->field('245')->subfield("h"))
-			{
-				$i245h =  $marc->field('245')->subfield("h");
-				$sha1->add($marc->field('245')->subfield("h"));
-			}
-			if($marc->field('001')->data())
-			{
-				$zero01 =  $marc->field('001')->data();
-				$sha1->add($marc->field('001')->data());
-			}
-			if($marc->field('245')->subfield("a"))
-			{
-				$title =  $marc->field('245')->subfield("a");
-				$sha1->add($marc->field('245')->subfield("a"));
-			}
-			print "Importing $title\n";
-			$sha1 = $sha1->hexdigest;			
+			my $title = getsubfield($marc,'245','a');
+			#print "Importing $title\n";
+updateJob($dbHandler,"Processing","CalcSHA1");
+			my $sha1 = calcSHA1($marc);
+updateJob($dbHandler,"Processing","updating 245h and 856z");
 			$marc = readyMARCForInsertIntoME($marc);
 			my $bibid=-1;
-			my $bibid = findRecord($marc, $dbHandler,$sha1);
+			my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
 			if($leadercount{$leader})
 			{
 				$leadercount{$leader}++;
@@ -523,8 +514,7 @@ sub importMARCintoEvergreen
 				}
 				else
 				{	
-					$prevmarc = mergeMARC856($prevmarc,$marc,$log);
-					$prevmarc = fixLeader($prevmarc);
+					$prevmarc = mergeMARC856($prevmarc,$marc,$log);					
 					my $thisXML = convertMARCtoXML($prevmarc);
 					$query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$thisXML\$\$,tcn_source=E'script $sha1',source=$bibsourceid WHERE ID=$id";
 					$log->addLine($query);
@@ -586,7 +576,8 @@ sub importMARCintoEvergreen
 	{
 		$log->addLine("$internal $value");
 	}
-	
+	$file->close();
+	undef $file;
 	push(@ret, (\@worked, \@notworked, \@updated));
 	#print Dumper(@ret);
 	return \@ret;
@@ -599,19 +590,39 @@ sub findRecord
 	my $zero01 = $marcsearch->field('001')->data();
 	my $dbHandler = @_[1];
 	my $sha1 = @_[2];
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE tcn_source LIKE '%$sha1%'";
+	my $bibsourceid = @_[3];
+	my $log = @_[4];
+	my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.tcn_source ~ \$\$$sha1\$\$ and bre.source=$bibsourceid and bre.deleted is false";
+updateJob($dbHandler,"Processing","$query");
 	my @results = @{$dbHandler->query($query)};
+	my @ret;
+	my $none=1;
+	my $foundIDs;
+	my $count=0;
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
 		my $id = @row[0];
 		my $marc = @row[1];
-		print "found matching sha1: $id\n";
-		my @ret = ($id,$marc);
-		return \@ret;
+		print "found matching sha1: $id\n";		
+		my $prevmarc = $marc;
+		$prevmarc =~ s/(<leader>.........)./${1}a/;	
+		$prevmarc = MARC::Record->new_from_xml($prevmarc);
+		my $score = scoreMARC($prevmarc,$log);
+		my @matchedsha = ($id,$prevmarc,$score,$marc);
+		$foundIDs.="$id,";
+		push (@ret, [@matchedsha]);
+		$none=0;
+		$count++;
 	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%$zero01%'";
+	$foundIDs = substr($foundIDs,0,-1);
+	if(length($foundIDs)<1)
+	{
+		$foundIDs="-1";
+	}
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
+updateJob($dbHandler,"Processing","$query");
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -620,16 +631,28 @@ sub findRecord
 		my $id = @row[0];
 		print "found matching 001: $id\n";
 		my $marc = @row[1];
-		my @ret = ($id,$marc);
-		return \@ret;
+		my $prevmarc = $marc;
+		$prevmarc =~ s/(<leader>.........)./${1}a/;	
+		$prevmarc = MARC::Record->new_from_xml($prevmarc);
+		my $score = scoreMARC($prevmarc,$log);
+		my @matched001 = ($id,$prevmarc,$score,$marc);
+		push (@ret, [@matched001]);	
+		$none=0;
+		$count++;
+	}	
+	if($none)
+	{
+		return -1;
 	}
+	print "Count matches: $count\n";
+updateJob($dbHandler,"Processing","Count matches: $count");
+	return \@ret;
 	
-	return -1;
 }
 
 sub readyMARCForInsertIntoME
 {
-	my $marc = @_[0];
+	my $marc = @_[0];	
 	my $lbyte6 = substr($marc->leader(),6,1);
 	
 	my $two45 = $marc->field('245');
@@ -692,7 +715,6 @@ sub mergeMARC856
 	my $marc = @_[0];
 	my $marc2 = @_[1];
 	my $log = @_[2];
-	
 	my @eight56s = $marc->field("856");
 	my @eight56s_2 = $marc2->field("856");
 	my @eights;
@@ -700,20 +722,24 @@ sub mergeMARC856
 	@eight56s = (@eight56s,@eight56s_2);
 
 	my %urls;  
-
-
 	foreach(@eight56s)
 	{
 		my $thisField = $_;
-		
+		my $ind2 = $thisField->indicator(2);
 		# Just read the first $u and $z
 		my $u = $thisField->subfield("u");
 		my $z = $thisField->subfield("z");
+		my $s7 = $thisField->subfield("7");
 		
 		if($u) #needs to be defined because its the key
 		{
 			if(!$urls{$u})
 			{
+				if($ind2 ne '0')
+				{
+					$thisField->delete_subfields('9');
+					$thisField->delete_subfields('z');
+				}
 				$urls{$u} = $thisField;
 			}
 			else
@@ -722,11 +748,19 @@ sub mergeMARC856
 				my $otherField = $urls{$u};
 				my @otherNines = $otherField->subfield("9");
 				my $otherZ = $otherField->subfield("z");		
+				my $other7 = $otherField->subfield("7");
 				if(!$otherZ)
 				{
 					if($z)
 					{
 						$otherField->add_subfields('z'=>$z);
+					}
+				}
+				if(!$other7)
+				{
+					if($s7)
+					{
+						$otherField->add_subfields('7'=>$s7);
 					}
 				}
 				foreach(@nines)
@@ -739,15 +773,22 @@ sub mergeMARC856
 						{
 							$found=1;
 						}
-					}
-					if($found==0)
+					}					
+					if($found==0 && $ind2 eq '0')
 					{
 						$otherField->add_subfields('9' => $looking);
 					}
 				}
+				if($ind2 ne '0')
+				{
+					$thisField->delete_subfields('9');
+					$thisField->delete_subfields('z');
+				}
+				
 				$urls{$u} = $otherField;
 			}
 		}
+		
 	}
 	
 	my $finalCount = scalar keys %urls;
@@ -758,12 +799,12 @@ sub mergeMARC856
 	
 	my $dump1=Dumper(\%urls);
 	my @remove = $marc->field('856');
-	$log->addLine("Removing ".$#remove." 856 records");
+	#$log->addLine("Removing ".$#remove." 856 records");
 	$marc->delete_fields(@remove);
 
 
 	while ((my $internal, my $mvalue ) = each(%urls))
-		{
+		{	
 			$marc->insert_grouped_field( $mvalue );
 		}
 	return $marc;
@@ -843,7 +884,7 @@ sub getbibsource
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
 	{
-		print "Didnt find molib2go in bib_source, now creating it...\n";
+		print "Didnt find seekdestroy in bib_source, now creating it...\n";
 		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'molib2go')";
 		my $res = $dbHandler->update($query);
 		print "Update results: $res\n";
@@ -866,6 +907,37 @@ sub getbibsource
 	}
 }
 
+sub createNewJob
+{
+	my $dbHandler = @_[0];
+	my $status = @_[1];
+	my $query = "INSERT INTO seekdestroy.job(status) values('$status')";
+	my $results = $dbHandler->update($query);
+	if($results)
+	{
+		$query = "SELECT max( ID ) FROM seekdestroy.job";
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			$jobid = @row[0];
+			return @row[0];
+		}
+	}
+	return -1;
+}
+
+sub updateJob
+{
+	my $dbHandler = @_[0];
+	my $status = @_[1];
+	my $action = @_[2];
+	my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+	my $results = $dbHandler->update($query);
+	return $results;
+}
+
 sub findPBrecordInME
 {
 	my $dbHandler = @_[0];	
@@ -886,75 +958,150 @@ sub findPBrecordInME
 	return \@ret;
 }
 
-sub findMatchInArchive
-{
-	my @matchList = @{@_[0]};
-	my $archiveFolder = @_[1];
-	my @files;
-	#Get all files in the directory path
-	@files = @{dirtrav(\@files,$archiveFolder)};
-	for my $b(0..$#files)
-	{
-		my $file = MARC::File::USMARC->in($files[$b]);
-		while ( my $marc = $file->next() ) 
-		{	
-			my $t = $marc->leader();
-			my $su=substr($marc->leader(),6,1);
-			print "Leader:\n$t\n$su\n";
-			my $leader = substr($marc->leader(),6,1);			
-			my $all = $marc->as_formatted();
-			foreach(@matchList)
-			{
-				if($all =~ m/$_/g)
-				{
-					my @booya = ($files[$b]);
-					print "This one: ".$files[$b]." matched $_\n";
-					return \@booya;
-				}
-			}
-		}
-	}
+#This is borrowed from fingerprinter
+sub populate_marc {
+    my $record = @_[0];
+    my %marc = (); $marc{isbns} = [];
+
+    # record_type, bib_lvl
+    $marc{record_type} = substr($record->leader, 6, 1);
+    $marc{bib_lvl}     = substr($record->leader, 7, 1);
+
+    # date1, date2
+    my $my_008 = $record->field('008');
+    $marc{tag008} = $my_008->as_string() if ($my_008);
+    if (defined $marc{tag008}) {
+        unless (length $marc{tag008} == 40) {
+            $marc{tag008} = $marc{tag008} . ('|' x (40 - length($marc{tag008})));
+            print XF ">> Short 008 padded to ",length($marc{tag008})," at rec $count\n";
+        }
+        $marc{date1} = substr($marc{tag008},7,4) if ($marc{tag008});
+        $marc{date2} = substr($marc{tag008},11,4) if ($marc{tag008}); # UNUSED
+    }
+    unless ($marc{date1} and $marc{date1} =~ /\d{4}/) {
+        my $my_260 = $record->field('260');
+        if ($my_260 and $my_260->subfield('c')) {
+            my $date1 = $my_260->subfield('c');
+            $date1 =~ s/\D//g;
+            if (defined $date1 and $date1 =~ /\d{4}/) {
+                $marc{date1} = $date1;
+                $marc{fudgedate} = 1;
+                print XF ">> using 260c as date1 at rec $count\n";
+            }
+        }
+    }
+
+    # item_form
+    if ( $marc{record_type} =~ /[gkroef]/ ) { # MAP, VIS
+        $marc{item_form} = substr($marc{tag008},29,1) if ($marc{tag008});
+    } else {
+        $marc{item_form} = substr($marc{tag008},23,1) if ($marc{tag008});
+    }
+
+    # isbns
+    my @isbns = $record->field('020') if $record->field('020');
+    push @isbns, $record->field('024') if $record->field('024');
+    for my $f ( @isbns ) {
+        push @{ $marc{isbns} }, $1 if ( defined $f->subfield('a') and
+                                        $f->subfield('a')=~/(\S+)/ );
+    }
+
+    # author
+    for my $rec_field (100, 110, 111) {
+        if ($record->field($rec_field)) {
+            $marc{author} = $record->field($rec_field)->subfield('a');
+            last;
+        }
+    }
+
+    # oclc
+    $marc{oclc} = [];
+    push @{ $marc{oclc} }, $record->field('001')->as_string()
+      if ($record->field('001') and $record->field('003') and
+          $record->field('003')->as_string() =~ /OCo{0,1}LC/);
+    for ($record->field('035')) {
+        my $oclc = $_->subfield('a');
+        push @{ $marc{oclc} }, $oclc
+          if (defined $oclc and $oclc =~ /\(OCoLC\)/ and $oclc =~/([0-9]+)/);
+    }
+
+    if ($record->field('999')) {
+        my $koha_bib_id = $record->field('999')->subfield('c');
+        $marc{koha_bib_id} = $koha_bib_id if defined $koha_bib_id and $koha_bib_id =~ /^\d+$/;
+    }
+
+    # "Accompanying material" and check for "copy" (300)
+    if ($record->field('300')) {
+        $marc{accomp} = $record->field('300')->subfield('e');
+        $marc{tag300a} = $record->field('300')->subfield('a');
+    }
+
+    # issn, lccn, title, desc, pages, pub, pubyear, edition
+    $marc{lccn} = $record->field('010')->subfield('a') if $record->field('010');
+    $marc{issn} = $record->field('022')->subfield('a') if $record->field('022');
+    $marc{desc} = $record->field('300')->subfield('a') if $record->field('300');
+    $marc{pages} = $1 if (defined $marc{desc} and $marc{desc} =~ /(\d+)/);
+    $marc{title} = $record->field('245')->subfield('a')
+      if $record->field('245');
+   
+    $marc{edition} = $record->field('250')->subfield('a')
+      if $record->field('250');
+    if ($record->field('260')) {
+        $marc{publisher} = $record->field('260')->subfield('b');
+        $marc{pubyear} = $record->field('260')->subfield('c');
+        $marc{pubyear} =
+          (defined $marc{pubyear} and $marc{pubyear} =~ /(\d{4})/) ? $1 : '';
+    }
+    return \%marc;
 }
 
-sub dirtrav
-{
-	my @files = @{@_[0]};
-	my $pwd = @_[1];
-	opendir(DIR,"$pwd") or die "Cannot open $pwd\n";
-	my @thisdir = readdir(DIR);
-	closedir(DIR);
-	foreach my $file (@thisdir) 
-	{
-		if(($file ne ".") and ($file ne ".."))
-		{
-			if (-d "$pwd/$file")
-			{
-				push(@files, "$pwd/$file");
-				@files = @{dirtrav(\@files,"$pwd/$file")};
-			}
-			elsif (-f "$pwd/$file")
-			{
-				push(@files, "$pwd/$file");
-			}
-		}
-	}
-	return \@files;
+sub normalize_marc {
+    my ($marc) = @_;
+
+    $marc->{record_type }= 'a' if ($marc->{record_type} eq ' ');
+    if ($marc->{title}) {
+        $marc->{title} = NFD($marc->{title});
+        $marc->{title} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{title} = lc($marc->{title});
+        $marc->{title} =~ s/\W+$//go;
+    }
+    if ($marc->{author}) {
+        $marc->{author} = NFD($marc->{author});
+        $marc->{author} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{author} = lc($marc->{author});
+        $marc->{author} =~ s/\W+$//go;
+        if ($marc->{author} =~ /^(\w+)/) {
+            $marc->{author} = $1;
+        }
+    }
+    if ($marc->{publisher}) {
+        $marc->{publisher} = NFD($marc->{publisher});
+        $marc->{publisher} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{publisher} = lc($marc->{publisher});
+        $marc->{publisher} =~ s/\W+$//go;
+        if ($marc->{publisher} =~ /^(\w+)/) {
+            $marc->{publisher} = $1;
+        }
+    }
+    return $marc;
 }
 
-sub fixLeader
-{
-	my $marc = @_[0];
-	my $fullLeader = $marc->leader();
-	if(substr($fullLeader,6,1) eq 'a')
-	{
-		print "Leader has an a:\n$fullLeader";
-		$fullLeader = substr($fullLeader,0,6).'m'.substr($fullLeader,7);
-		$marc->leader($fullLeader);
-		my $fullLeader = $marc->leader();
-		print "Changed to:\n$fullLeader";
-	}
-	return $marc;
+sub marc_isvalid {
+    my ($marc) = @_;
+    return 1 if ($marc->{item_form} and ($marc->{date1} =~ /\d{4}/) and
+                 $marc->{record_type} and $marc->{bib_lvl} and $marc->{title});
+    return 0;
 }
+
+
+sub get_fingerprints {
+    my ($marc) = @_;
+	my %fingerprints;
+    $fingerprints->{baseline} = join("\t", 
+	  $marc->{item_form}, $marc->{date1}, $marc->{record_type},
+	  $marc->{bib_lvl}, $marc->{title}, $marc->{author} ? $marc->{author} : '');
+}
+
 
 sub setupSchema
 {
@@ -1012,6 +1159,16 @@ sub setupSchema
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 	}
+}
+
+sub updateJob
+{
+	my $dbHandler = @_[0];
+	my $status = @_[1];
+	my $action = @_[2];
+	my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+	my $results = $dbHandler->update($query);
+	return $results;
 }
 
 sub getDBconnects

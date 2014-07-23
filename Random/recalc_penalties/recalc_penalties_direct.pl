@@ -1,6 +1,5 @@
 #!/usr/bin/perl
 
-# Copyright 2011 Traverse Area District Library
 # Author: Blake Graham-Henderson
 
 # This program is free software; you can redistribute it and/or

@@ -1,5 +1,11 @@
 #!/usr/bin/perl
 
+# These Perl modules are required:
+# install pQuery
+# install Email::MIME
+# install Email::Sender::Simple
+# install Digest::SHA1
+
 use lib qw(../);
 use MARC::Record;
 use MARC::File;
@@ -539,7 +545,7 @@ sub add9
 	my $marc = @_[0];
 	my @shortnames = @{@_[1]};
 	my @recID = $marc->field('856');
-	if(defined @recID)
+	if(@recID)
 	{
 		#$marc->delete_fields( @recID );
 		for my $rec(0..$#recID)
@@ -1719,7 +1725,14 @@ sub setupSchema
 		job  bigint NOT NULL,
 		CONSTRAINT undedupe_fkey FOREIGN KEY (job)
 		REFERENCES molib2go.job (id) MATCH SIMPLE)";
-		$dbHandler->update($query);		
+		$dbHandler->update($query);
+		$query = "CREATE TABLE molib2go.nine_sync(
+		id serial,
+		record bigint,
+		nines_synced text,
+		url text,
+		change_time timestamp default now())";
+		$dbHandler->update($query);
 	}
 }
 
