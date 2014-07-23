@@ -10,15 +10,12 @@ use Loghandler;
 use Mobiusutil;
 use DBhandler;
 use Data::Dumper;
-use email;
 use DateTime;
 use utf8;
 use Encode;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
-use Digest::SHA1;
 
 
  my $configFile = @ARGV[0];
@@ -30,8 +27,6 @@ use Digest::SHA1;
 
  my $mobUtil = new Mobiusutil(); 
  my $conf = $mobUtil->readConfFile($configFile);
- 
- our $jobid=-1;
  
  if($conf)
  {
@@ -82,10 +77,10 @@ use Digest::SHA1;
 				my $after = substr($thisXML,index($thisXML, '<leader>'));
 				if($before ne $after)
 				{
-					my @temp = ( $id, $marc );
+					my @temp = ( $id, $thisXML );
 					push @updatethese, [@temp];
-					$log->addLine("These are different now $id");
-					$log->addLine("$marc\r\nbecame\r\n$thisXML");
+					#$log->addLine("These are different now $id");
+					#$log->addLine("$marc\r\nbecame\r\n$thisXML");
 				}
 			}
 			foreach(@updatethese)
@@ -99,13 +94,12 @@ use Digest::SHA1;
 					recordSyncToDB($dbHandler,$conf{"participants"},$bibid,$_);
 				}
 				removeOldCallNumberURI($bibid,$dbHandler);				
-				$log->addLine("UPDATE BIBLIO.RECORD_ENTRY SET MARC=\$1 WHERE ID=$bibid");
-				$log->addLine($marc);
+				#$log->addLine("UPDATE BIBLIO.RECORD_ENTRY SET MARC=\$1 WHERE ID=$bibid");
+				#$log->addLine($marc);
 				my $query = "UPDATE BIBLIO.RECORD_ENTRY SET MARC=\$1 WHERE ID=$bibid";
 				my @values = ($marc);
 				$dbHandler->updateWithParameters($query,\@values);
-				$log->addLine("http://missourievergreen.org/eg/opac/record/$bibid?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml");
-				$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$bibid?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+				$log->addLine("$bibid\thttp://missourievergreen.org/eg/opac/record/$bibid?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$bibid?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
 			}
 			
 		}
@@ -201,7 +195,6 @@ sub getMolib2goList
 	ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$##URI##\$\$) 
 	AND MARC ~ '<subfield code=\"7\">molib2go'
 	AND TCN_SOURCE~'molib2go'
-	limit 5
 	";
 	my @results = @{$dbHandler->query($query)};
 	my $found=0;
@@ -268,7 +261,7 @@ sub add9
 					if(!$foundshortname)
 					{
 						@recID[$rec]->delete_subfield(code => '9', match => qr/$thisname/);
-						print " removing $thisname\n";
+						#print " removing $thisname\n";
 					}
 				}
 			}
