@@ -45,6 +45,8 @@ if(! -e $xmlconf)
  my $conf = $mobUtil->readConfFile($configFile);
 
  
+  our $jobid=-1;
+  
  if($conf)
  {
 	my %conf = %{$conf};
@@ -78,6 +80,10 @@ if(! -e $xmlconf)
 			setupSchema($dbHandler);
 			print "regular cache\n";
 			updateScoreCache($dbHandler,$log);
+			$jobid = createNewJob($dbHandler,'processing');
+			if($jobid!=-1)
+			{
+			}
 			searchDestroyLeaders($dbHandler,$log);
 		}
 		
@@ -447,142 +453,6 @@ sub getsubfield
 	
 }
 
-sub importMARCintoEvergreen
-{
-	my @ret;
-	my @worked;
-	my @notworked;
-	my $inputFile = @_[0];
-	my $log = @_[1];
-	my $dbHandler = @_[2];
-	my $mobUtil = @_[3];
-	my $bibsourceid = @_[4];
-	my $file = MARC::File::USMARC->in( $inputFile );
-	my $r =0;		
-	my $overlay = 0;
-	my $query;
-	print "Working on importMARCintoEvergreen\n";
-	my @updated;
-	my %leadercount;
-	my %z07count;
-	while ( my $marc = $file->next() ) 
-	{
-		
-		if($overlay<16)
-		{
-			#my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
-			my $title = getsubfield($marc,'245','a');
-			#print "Importing $title\n";
-updateJob($dbHandler,"Processing","CalcSHA1");
-			my $sha1 = calcSHA1($marc);
-updateJob($dbHandler,"Processing","updating 245h and 856z");
-			$marc = readyMARCForInsertIntoME($marc);
-			my $bibid=-1;
-			my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
-			if($leadercount{$leader})
-			{
-				$leadercount{$leader}++;
-			}
-			else
-			{
-				$leadercount{$leader}=1;
-			}
-			if($z07count{$z07})
-			{
-				$z07count{$z07}++;
-			}
-			else
-			{
-				$z07count{$z07}=1;
-			}
-			if($bibid!=-1) #already exists so update the marc
-			{
-				my @present = @{$bibid};
-				my $id = @present[0];
-				my $prevmarc = @present[1];
-				$prevmarc =~ s/(<leader>.........)./${1}a/;			
-				$prevmarc = MARC::Record->new_from_xml($prevmarc);
-				my $led = substr($prevmarc->leader(),6,1);
-				my $found=0;
-				if($led eq 'a')
-				{
-					$found=1;
-				}
-				if(!$found)
-				{
-					
-				}
-				else
-				{	
-					$prevmarc = mergeMARC856($prevmarc,$marc,$log);					
-					my $thisXML = convertMARCtoXML($prevmarc);
-					$query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$\$$thisXML\$\$,tcn_source=E'script $sha1',source=$bibsourceid WHERE ID=$id";
-					$log->addLine($query);
-					$log->addLine("http://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml");
-					$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
-					my $res = $dbHandler->update($query);
-					print "$res";
-					# my @compare = @{$mobUtil->compare2MARCObjects($marc,1,$prevmarc,1)};
-					# foreach(@compare)
-					# {
-						# $log->addLine($_);
-					# }
-					if($res)
-					{
-						my @temp = ($id,$title);
-						push @updated, [@temp];
-						$overlay++;
-					}
-					else
-					{
-						push (@notworked, $id);
-					}
-				}
-			}
-			else  ##need to insert new bib instead of update
-			{
-				my $starttime = time;
-				my $max = getEvergreenMax($dbHandler);
-				my $thisXML = convertMARCtoXML($marc);
-				
-				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',E'$thisXML',null,$bibsourceid,E'script ".$sha1->hexdigest.",null,null)";
-				$log->addLine($query);
-				#my $res = $dbHandler->update($query);
-				#print "$res";
-				my $newmax = getEvergreenMax($dbHandler);
-				if($newmax != $max)
-				{
-					my @temp = ($newmax,$title);
-					push @worked, [@temp];
-					$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
-				}
-				else
-				{
-					push (@notworked, $marc);
-				}
-			}
-			
-			undef $sha1;
-		}
-		$r++;
-	}
-	$log->addLine("Leader Breakdown:");
-	while ((my $internal, my $value ) = each(%leadercount))
-	{
-		$log->addLine("$internal $value");
-	}
-	$log->addLine("007 Breakdown:");
-	while ((my $internal, my $value ) = each(%z07count))
-	{
-		$log->addLine("$internal $value");
-	}
-	$file->close();
-	undef $file;
-	push(@ret, (\@worked, \@notworked, \@updated));
-	#print Dumper(@ret);
-	return \@ret;
-	
-}
 
 sub findRecord
 {
