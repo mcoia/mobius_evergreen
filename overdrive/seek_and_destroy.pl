@@ -14,12 +14,12 @@ use DateTime;
 use utf8;
 use Encode;
 use DateTime;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
 use Digest::SHA1;
 use XML::Simple;
+use Unicode::Normalize;
 
  my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
@@ -77,14 +77,15 @@ if(! -e $xmlconf)
 			my $dbHandler;
 			my %dbconf = %{getDBconnects($xmlconf,$log)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
-			setupSchema($dbHandler);
-			print "regular cache\n";
-			updateScoreCache($dbHandler,$log);
+			setupSchema($dbHandler);			
 			$jobid = createNewJob($dbHandler,'processing');
 			if($jobid!=-1)
 			{
+				findPossibleDups($mobUtil,$dbHandler,$log);
+				print "regular cache\n";
+				updateScoreCache($dbHandler,$log);
 			}
-			searchDestroyLeaders($dbHandler,$log);
+			#searchDestroyLeaders($dbHandler,$log);
 		}
 		
 		my $afterProcess = DateTime->now(time_zone => "local");
@@ -95,7 +96,7 @@ if(! -e $xmlconf)
 		my $successTitleList;
 		my $successUpdateTitleList;
 		my $failedTitleList;
-	
+updateJob($dbHandler,"Completed","");
 		
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
 	}
@@ -169,7 +170,7 @@ sub updateScoreCache
 		@newAndUpdates = @{identifyBibsToScore($dbHandler)};
 		@newIDs = @{@newAndUpdates[0]};
 	}
-	print Dumper(@newIDs);
+	##print Dumper(@newIDs);
 	$log->addLine("Found ".($#newIDs+1)." new Bibs to be scored");	
 	if(@newAndUpdates[1])
 	{
@@ -181,13 +182,40 @@ sub updateScoreCache
 		my @thisone = @{$_};
 		my $bibid = @thisone[0];
 		my $marc = @thisone[1];
+		#print "bibid = $bibid";
+		#print "marc = $marc";
 		my $marcob = $marc;
-		$marcob =~ s/(<leader>.........)./${1}a/;			
+		$marcob =~ s/(<leader>.........)./${1}a/;
 		$marcob = MARC::Record->new_from_xml($marcob);
 		my $score = scoreMARC($marcob,$log);
 		my $electricScore = determineElectric($marcob);
-		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE(RECORD,SCORE,ELECTRONIC) VALUES($bibid,$score,$electricScore)";		
-		$dbHandler->update($query);	
+		my %fingerprints = %{getFingerprints($marcob)};
+		$log->addLine(Dumper(%fingerprints));
+		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE
+		(RECORD,
+		SCORE,
+		ELECTRONIC,
+		item_form,
+		date1,
+		record_type,
+		bib_lvl,
+		title,
+		author,
+		fingerprint) 
+		VALUES($bibid,$score,$electricScore,
+		\$1,\$2,\$3,\$4,\$5,\$6,\$7
+		)";		
+		my @values = (
+		$fingerprints{item_form},
+		$fingerprints{date1},
+		$fingerprints{record_type},
+		$fingerprints{bib_lvl},
+		$fingerprints{title},
+		$fingerprints{author},
+		$fingerprints{baseline}
+		);
+		$dbHandler->updateWithParameters($query,\@values);
+		updateBibCircs($bibid,$dbHandler);	
 	}
 	foreach(@updateIDs)
 	{
@@ -197,14 +225,360 @@ sub updateScoreCache
 		my $bibscoreid = @thisone[2];
 		my $oldscore = @thisone[3];
 		my $marcob = $marc;
-		$marcob =~ s/(<leader>.........)./${1}a/;			
-		$marcob = MARC::Record->new_from_xml($marcob);
-		my $score = scoreMARC($marcob,$log);
-		my $electricScore = determineElectric($marcob);
+		$marcob =~ s/(<leader>.........)./${1}a/;
+		$marcob = MARC::Record->new_from_xml($marcob);		
+		my $score = scoreMARC($marcob,$log);		
+		my $electricScore = determineElectric($marcob);		
+		my %fingerprints = %{getFingerprints($marcob)};		
 		my $improved = $score - $oldscore;
-		my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC=$electricScore WHERE ID=$bibscoreid";			
-		$dbHandler->update($query);	
+		my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC=$electricScore ,
+		item_form = \$1,
+		date1 = \$2,
+		record_type = \$3,
+		bib_lvl = \$4,
+		title = \$5,
+		author = \$6,
+		fingerprint = \$7
+		WHERE ID=$bibscoreid";
+		my @values = (
+		$fingerprints{item_form},
+		$fingerprints{date1},
+		$fingerprints{record_type},
+		$fingerprints{bib_lvl},
+		$fingerprints{title},
+		$fingerprints{author},
+		$fingerprints{baseline}
+		);
+		$dbHandler->updateWithParameters($query,\@values);
+		updateBibCircs($bibid,$dbHandler);
 	}
+}
+
+sub updateBibCircs
+{	
+	my $bibid = @_[0];
+	my $dbHandler = @_[1];
+	my $query = "DELETE FROM seekdestroy.bib_item_circ_mods WHERE RECORD=$bibid";
+	$dbHandler->update($query);
+	
+	
+	$query = "CREATE TABLE seekdestroy.bib_item_circ_mods(
+		id serial,
+		record bigint,
+		circ_modifier text,
+		job  bigint NOT NULL,";
+	$query = "
+	select ac.circ_modifier,acn.record  from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
+	acn.id=ac.call_number and
+	bre.id=acn.record and
+	acn.record = $bibid
+	not acn.deleted and
+	not bre.deleted and
+	not ac.deleted
+	group by ac.circ_modifier,acn.record
+	order by record";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $circmod = @row[0];
+		my $record = @row[1];
+		my $q="INSERT INTO seekdestroy.bib_item_circ_mods(record,circ_modifier,different_circs,job)
+		values
+		(\$1,\$2\$3)";
+		my @values = ($record,$circmod,$#results+1,$jobid);
+		$dbHandler->updateWithParameters($q,\@values);
+	}
+}
+
+sub findPhysicalItemsOnElectronic
+{
+	my $mobUtil = @_[0];
+	my $dbHandler = @_[1];
+	my $log = @_[2];
+	my $query = "
+	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ '<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">'
+	and id in
+	(
+	select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
+	)
+	";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $bibid = @row[0];
+		my $marc = @row[1];
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);
+		updateScoreCache($dbHandler,$log,\@st);
+		
+	}
+	
+}
+
+##
+##
+##UPDATE THIS QUERY TO INCLUDE EVERYTHING BEFORE GOING TO PRODUCTION
+## REMOVE THIS:
+## and id not in(select record from seekdestroy.bib_score)
+##
+sub findPossibleDups
+{
+	my $mobUtil = @_[0];
+	my $dbHandler = @_[1];
+	my $log = @_[2];
+	my $query="
+		select string_agg(to_char(id,'9999999999'),','),fingerprint from biblio.record_entry where fingerprint in
+		(
+		select fingerprint from(
+		select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
+		and id not in(select record from seekdestroy.bib_score)
+		group by fingerprint
+		) as a
+		where count>1
+		)
+		and not deleted
+		and fingerprint != ''
+		group by fingerprint
+		limit 1;
+		";
+updateJob($dbHandler,"Processing","findPossibleDups  $query");
+	my @results = @{$dbHandler->query($query)};
+	my @st=();
+	my %alreadycached;
+	my $deleteoldscorecache="";
+updateJob($dbHandler,"Processing","findPossibleDups  looping results");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my @ids=split(',',@row[0]);
+		my $fingerprint = @row[1];
+		for my $i(0..$#ids)
+		{
+			@ids[$i]=$mobUtil->trim(@ids[$i]);
+			my $id = @ids[$i];
+			if(!$alreadycached{$id})
+			{
+				$alreadycached{$id}=1;
+				my $q = "select marc from biblio.record_entry where id=$id";
+				my @result = @{$dbHandler->query($q)};			
+				my @r = @{@result[0]};
+				my $marc = @r[0];
+				my @scorethis = ($id,$marc);
+				push(@st,[@scorethis]);
+				$deleteoldscorecache.="$id,";
+			}
+		}
+	}
+
+	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);
+	my $q = "delete from SEEKDESTROY.BIB_SCORE where record in( $deleteoldscorecache)";
+	updateJob($dbHandler,"Processing","findPossibleDups deleting old cache    $query");
+	print $dbHandler->update($q);				
+	my $q = "delete from SEEKDESTROY.BIB_MATCH where record in( $deleteoldscorecache)";
+	updateJob($dbHandler,"Processing","findPossibleDups deleting old cache bib_match   $query");
+	print $dbHandler->update($q);	
+	updateJob($dbHandler,"Processing","findPossibleDups updating scorecache selectivly");
+	updateScoreCache($dbHandler,$log,\@st);
+	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $q = "select record, fingerprint,
+		(select id from action.hold_request ahr where 
+		ahr.target=sbs.record and
+		ahr.type='T' and
+		ahr.capture_time is null and
+		ahr.cancel_time is null limit 1
+		)
+		from seekdestroy.bib_score sbs
+		where sbs.record in(".@row[0].")";
+		
+		my $fingerprint = @row[1];
+		my @result = @{$dbHandler->query($q)};		
+		foreach(@result)
+		{
+			my $ro = $_;
+			my @ro = @{$ro};
+			my $record = @ro[0];
+			my $sd_fingerprint = @ro[2];
+			my $hold = @ro[2];
+			length($hold)>0 ? $hold=1 : $hold=0;
+			
+			my $q = "INSERT INTO SEEKDESTROY.BIB_MATCH(RECORD,EG_FINGERPRINT,SD_FINGERPRINT,HAS_HOLDS,JOB)
+			VALUES(\$1,\$2,\$3,\$4,\$5)";
+			my @values = ($record,$fingerprint,$sd_fingerprint,$hold,$jobid);
+			$dbHandler->updateWithParameters($q,\@values);
+		}
+	}
+}
+
+sub recordAssetCopyMove
+{
+	my $oldbib = @_[0];
+	my $newbib = @_[1];
+	my $dbHandler = @_[2];
+	my $overdriveMatchString = @_[3];
+	my $log = @_[4];
+	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$)";
+	my @cids;
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my @row = @{$_};
+		push(@cids,@row[0]);
+	}
+	
+	if($#cids>-1)
+	{		
+		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
+		moveAssetCopyToPreviouslyDedupedBib($dbHandler,$oldbib,$overdriveMatchString,$log);		
+	}	
+	
+	#Check again after the attempt to undedupe
+	@cids = ();
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my @row = @{$_};
+		push(@cids,@row[0]);
+	}
+	
+	foreach(@cids)
+	{
+		print "There were asset.copies on $oldbib even after attempting to put them on a deduped bib\n";
+		$log->addLine("\t$oldbib\tContained physical Items");
+		 $query = "
+		INSERT INTO seekdestroy.item_reassignment(copy,prev_bib,target_bib,job)
+		VALUES ($_,$oldbib,$newbib,$jobid)";
+		$log->addLine("$query");
+updateJob($dbHandler,"Processing","recordAssetCopyMove  $query");
+		$dbHandler->update($query);
+	}
+}
+
+sub moveAssetCopyToPreviouslyDedupedBib
+{
+	my $dbHandler = @_[0];	
+	my $currentBibID = @_[1];
+	my $overdriveMatchString = @_[2];
+	my $log = @_[3];
+	my %possibles;	
+	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
+	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid";
+updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+	#print $query."\n";
+	my @results = @{$dbHandler->query($query)};
+	my $winner=0;
+	my $currentWinnerElectricScore=10000;
+	my $currentWinnerMARCScore=0;
+	foreach(@results)
+	{
+		my @row = @{$_};
+		my $prevmarc = @row[1];
+		$prevmarc =~ s/(<leader>.........)./${1}a/;
+		$prevmarc = MARC::Record->new_from_xml($prevmarc);
+		my @temp=($prevmarc,determineElectric($prevmarc),scoreMARC($prevmarc,$log));
+		#need to initialize the winner values
+		$winner=@row[0];
+		$currentWinnerElectricScore = @temp[1];
+		$currentWinnerMARCScore = @temp[2];
+		$possibles{@row[0]}=\@temp;
+	}
+	
+	#choose the best deleted bib - we want the lowest electronic bib score in this case because we want to attach the 
+	#items to the *most physical bib
+	while ((my $bib, my $attr) = each(%possibles))
+	{
+		my @atts = @{$attr};
+		if(@atts[1]<$currentWinnerElectricScore)
+		{
+			$winner=$bib;
+			$currentWinnerElectricScore=@atts[1];
+			$currentWinnerMARCScore=@atts[2];
+		}
+		elsif(@atts[1]==$currentWinnerElectricScore && @atts[2]>$currentWinnerMARCScore)
+		{
+			$winner=$bib;
+			$currentWinnerElectricScore=@atts[1];
+			$currentWinnerMARCScore=@atts[2];
+		}		
+	}
+	if($winner!=0)
+	{
+		$query = "select deleted from biblio.record_entry where id=$winner";
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{	
+			my $row = $_;
+			my @row = @{$row};
+			print "$winner - ".@row[0]."\n";
+			#make sure that it is in fact deleted
+			if(@row[0] eq 't' ||@row[0] == 1)
+			{
+				my $tcn_value = $winner;
+				my $count=1;			
+				#make sure that when we undelete it, it will not collide its tcn_value 
+				while($count>0)
+				{
+					$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $winner";
+					$log->addLine($query);
+updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+					my @results = @{$dbHandler->query($query)};
+					foreach(@results)
+					{	
+						my $row = $_;
+						my @row = @{$row};
+						$count=@row[0];
+					}
+					$tcn_value.="_";
+				}
+				#take the last tail off
+				$tcn_value=substr($tcn_value,0,-1);
+				#finally, undelete the bib making it available for the asset.call_number
+				$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$winner";
+				#$dbHandler->update($query);
+			}
+		}
+		#find all of the eligible call_numbers
+		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
+updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{	
+			my @row = @{$_};
+			my $acnid = @row[0];
+			$query = 
+"INSERT INTO seekdestroy.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
+VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
+updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
+			$log->addLine($query);
+			$dbHandler->update($query);
+			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
+updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+			$log->addLine($query);
+			#$dbHandler->update($query);
+		}
+		moveHolds($dbHandler,$currentBibID,$winner,$log);
+	}
+}
+
+sub moveHolds
+{
+	my $dbHandler = @_[0];	
+	my $oldBib = @_[1];
+	my $newBib = @_[2];
+	my $log = @_[3];	
+	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE='T' AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
+	$log->addLine($query);
+	updateJob($dbHandler,"Processing","moveHolds  $query");
+	#print $query."\n";
+	$dbHandler->update($query);
 }
 
 sub determineElectric
@@ -261,7 +635,7 @@ sub identifyBibsToScore
 	my $dbHandler = @_[0];
 	my @ret;
 #This query finds bibs that have not received a score at all
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE LIMIT 100";
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE LIMIT 1";
 	my @results = @{$dbHandler->query($query)};
 	my @news;
 	my @updates;
@@ -285,7 +659,7 @@ sub identifyBibsToScore
 		my $marc = @row[1];
 		my $id = @row[2];
 		my $score = @row[3];
-		my @temp = ($rec,$id,$marc,$score);
+		my @temp = ($rec,$marc,$id,$score);
 		push (@updates, [@temp]);
 	}
 	push(@ret,[@news]);
@@ -293,12 +667,6 @@ sub identifyBibsToScore
 	return \@ret;
 }
 
-sub get_marc_extract
-{
-	my $record=@_[0];
-	my $marc = populate_marc($record);	
-	return normalize_marc($marc);
-}
 sub scoreMARC
 {
 	my $marc = shift;
@@ -450,73 +818,6 @@ sub getsubfield
 	}
 	#print "got $ret\n";
 	return $ret;
-	
-}
-
-
-sub findRecord
-{
-	my $marcsearch = @_[0];
-	my $zero01 = $marcsearch->field('001')->data();
-	my $dbHandler = @_[1];
-	my $sha1 = @_[2];
-	my $bibsourceid = @_[3];
-	my $log = @_[4];
-	my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.tcn_source ~ \$\$$sha1\$\$ and bre.source=$bibsourceid and bre.deleted is false";
-updateJob($dbHandler,"Processing","$query");
-	my @results = @{$dbHandler->query($query)};
-	my @ret;
-	my $none=1;
-	my $foundIDs;
-	my $count=0;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
-		print "found matching sha1: $id\n";		
-		my $prevmarc = $marc;
-		$prevmarc =~ s/(<leader>.........)./${1}a/;	
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matchedsha = ($id,$prevmarc,$score,$marc);
-		$foundIDs.="$id,";
-		push (@ret, [@matchedsha]);
-		$none=0;
-		$count++;
-	}
-	$foundIDs = substr($foundIDs,0,-1);
-	if(length($foundIDs)<1)
-	{
-		$foundIDs="-1";
-	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-updateJob($dbHandler,"Processing","$query");
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		print "found matching 001: $id\n";
-		my $marc = @row[1];
-		my $prevmarc = $marc;
-		$prevmarc =~ s/(<leader>.........)./${1}a/;	
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matched001 = ($id,$prevmarc,$score,$marc);
-		push (@ret, [@matched001]);	
-		$none=0;
-		$count++;
-	}	
-	if($none)
-	{
-		return -1;
-	}
-	print "Count matches: $count\n";
-updateJob($dbHandler,"Processing","Count matches: $count");
-	return \@ret;
 	
 }
 
@@ -680,58 +981,6 @@ sub mergeMARC856
 	return $marc;
 }
 
-sub getEvergreenMax
-{
-	my $dbHandler = @_[0];
-	
-	my $query = "SELECT MAX(ID) FROM BIBLIO.RECORD_ENTRY";
-	return 1000;
-	my @results = @{$dbHandler->query($query)};
-	my $dbmax=0;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		$dbmax = @row[0];
-	}
-	print "DB Max: $dbmax\n";
-	return $dbmax;
-}
-
-sub getTCN
-{
-	my $log = @_[0];
-	my $dbHandler = @_[1];
-	my $dbmax=getEvergreenMax($dbHandler);
-	$dbmax++;
-	my $result = 1;
-	my $seed=0;
-	my $ap="";
-	my $trys = 0;
-	while($result==1)
-	{
-		my $query = "SELECT COUNT(*) FROM BIBLIO.RECORD_ENTRY WHERE TCN_VALUE = 'od$dbmax$ap'";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			if(@row[0]==0)
-			{
-				$result=0;
-			}
-		}
-		$ap = "_".$seed;
-		$seed++;
-		$trys++;
-	}
-	if($trys>1)
-	{
-		$log->addLogLine("Needed to change tcn $trys times to find: 'od$dbmax$ap'");
-	}
-	return "od$dbmax$ap";
-}
-
 sub convertMARCtoXML
 {
 	my $marc = @_[0];
@@ -745,36 +994,6 @@ sub convertMARCtoXML
 	$thisXML =~ s/[\x00-\x1f]//go;
 	#end code
 	return $thisXML;
-}
-
-sub getbibsource
-{
-	my $dbHandler = @_[0];
-	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
-	my @results = @{$dbHandler->query($query)};
-	if($#results==-1)
-	{
-		print "Didnt find seekdestroy in bib_source, now creating it...\n";
-		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'molib2go')";
-		my $res = $dbHandler->update($query);
-		print "Update results: $res\n";
-		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			return @row[0];
-		}
-	}
-	else
-	{
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			return @row[0];
-		}
-	}
 }
 
 sub createNewJob
@@ -798,34 +1017,23 @@ sub createNewJob
 	return -1;
 }
 
-sub updateJob
+sub getFingerprints
 {
-	my $dbHandler = @_[0];
-	my $status = @_[1];
-	my $action = @_[2];
-	my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
-	my $results = $dbHandler->update($query);
-	return $results;
-}
-
-sub findPBrecordInME
-{
-	my $dbHandler = @_[0];	
-	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%\"9\">PB%' limit 14";
-	my $query = "select id,marc from biblio.record_entry where marc ~* '<leader>......a' AND lower(marc) like '%overdrive%' AND lower(marc) like '%ebook%'";
-	my @results = @{$dbHandler->query($query)};
-	my @each;
-	my @ret;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
-		@each = ($id,$marc);
-		push(@ret,[@each]);	
-	}
-	return \@ret;
+	my $marcRecord = @_[0];
+	my $marc = populate_marc($marcRecord);	
+	my %marc = %{normalize_marc($marc)};    
+	my %fingerprints;
+    $fingerprints{baseline} = join("\t", 
+	  $marc{item_form}, $marc{date1}, $marc{record_type},
+	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '');
+	$fingerprints{item_form} = $marc{item_form};
+	$fingerprints{date1} = $marc{date1};
+	$fingerprints{record_type} = $marc{record_type};
+	$fingerprints{bib_lvl} = $marc{bib_lvl};
+	$fingerprints{title} = $marc{title};
+	$fingerprints{author} = $marc{author};
+	#print Dumper(%fingerprints);
+	return \%fingerprints;
 }
 
 #This is borrowed from fingerprinter
@@ -843,7 +1051,7 @@ sub populate_marc {
     if (defined $marc{tag008}) {
         unless (length $marc{tag008} == 40) {
             $marc{tag008} = $marc{tag008} . ('|' x (40 - length($marc{tag008})));
-            print XF ">> Short 008 padded to ",length($marc{tag008})," at rec $count\n";
+#            print XF ">> Short 008 padded to ",length($marc{tag008})," at rec $count\n";
         }
         $marc{date1} = substr($marc{tag008},7,4) if ($marc{tag008});
         $marc{date2} = substr($marc{tag008},11,4) if ($marc{tag008}); # UNUSED
@@ -856,7 +1064,7 @@ sub populate_marc {
             if (defined $date1 and $date1 =~ /\d{4}/) {
                 $marc{date1} = $date1;
                 $marc{fudgedate} = 1;
-                print XF ">> using 260c as date1 at rec $count\n";
+ #               print XF ">> using 260c as date1 at rec $count\n";
             }
         }
     }
@@ -922,6 +1130,7 @@ sub populate_marc {
         $marc{pubyear} =
           (defined $marc{pubyear} and $marc{pubyear} =~ /(\d{4})/) ? $1 : '';
     }
+	#print Dumper(%marc);
     return \%marc;
 }
 
@@ -963,16 +1172,6 @@ sub marc_isvalid {
     return 0;
 }
 
-
-sub get_fingerprints {
-    my ($marc) = @_;
-	my %fingerprints;
-    $fingerprints->{baseline} = join("\t", 
-	  $marc->{item_form}, $marc->{date1}, $marc->{record_type},
-	  $marc->{bib_lvl}, $marc->{title}, $marc->{author} ? $marc->{author} : '');
-}
-
-
 sub setupSchema
 {
 	my $dbHandler = @_[0];
@@ -999,7 +1198,14 @@ sub setupSchema
 		score bigint,
 		improved_score_amount bigint default 0,
 		score_time timestamp default now(), 		
-		electronic bigint)";
+		electronic bigint,
+		item_form text,
+		date1 text,
+		record_type text,
+		bib_lvl text,
+		title text,
+		author text,
+		fingerprint text)";		
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.item_reassignment(
 		id serial,
@@ -1007,23 +1213,48 @@ sub setupSchema
 		prev_bib bigint,
 		target_bib bigint,
 		change_time timestamp default now(), 
-		electronic boolean default false),
+		electronic boolean default false,
 		job  bigint NOT NULL,
 		CONSTRAINT item_reassignment_fkey FOREIGN KEY (job)
-		REFERENCES seekdestroy.job (id) MATCH SIMPLE";
-		$dbHandler->update($query);
-		$query = "CREATE TABLE seekdestroy.bib_marc_update(
-		id serial,
-		record bigint,
-		prev_marc text,
-		changed_marc text,
-		change_time timestamp default now())";
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";		
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.bib_merge(
 		id serial,
 		leadbib bigint,
 		subbib bigint,
 		change_time timestamp default now(),
+		job  bigint NOT NULL,
+		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.undedupe(
+		id serial,
+		oldleadbib bigint,
+		undeletedbib bigint,
+		undeletedbib_electronic_score bigint,
+		undeletedbib_marc_score bigint,
+		moved_call_number bigint,
+		change_time timestamp default now(),
+		job  bigint NOT NULL,
+		CONSTRAINT undedupe_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.bib_match(
+		id serial,
+		record bigint,
+		eg_fingerprint text,
+		sd_fingerprint text,
+		merged boolean default false,
+		has_holds boolean default false,
+		job  bigint NOT NULL,
+		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.bib_item_circ_mods(
+		id serial,
+		record bigint,
+		circ_modifier text,
+		different_circs bigint,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
@@ -1053,7 +1284,7 @@ sub getDBconnects
 	$conf{"dbuser"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{user};
 	$conf{"dbpass"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{pw};
 	$conf{"port"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{port};
-	#print Dumper(\%conf);
+	##print Dumper(\%conf);
 	return \%conf;
 
 }
