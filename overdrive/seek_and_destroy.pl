@@ -96,7 +96,7 @@ if(! -e $xmlconf)
 				updateScoreWithQuery($query,$dbHandler,$log);
 				findPhysicalItemsOnElectronic($mobUtil,$dbHandler,$log);
 				#findPossibleDups($mobUtil,$dbHandler,$log);
-				print "regular cache\n";
+				#print "regular cache\n";
 				#updateScoreCache($dbHandler,$log);
 			}
 			#searchDestroyLeaders($dbHandler,$log);
@@ -328,7 +328,7 @@ sub findPhysicalItemsOnElectronic
 	(select lead_bibid from m_dedupe.merge_map)
 	and 
 	marc ~ \$\$tag=\"008\">.......................s\$\$
-	limit 10
+	limit 1000
 	";
 	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
 	my @results = @{$dbHandler->query($query)};
@@ -355,7 +355,7 @@ sub findPhysicalItemsOnElectronic
 	(select lead_bibid from m_dedupe.merge_map)
 	and 
 	marc ~ \$\$tag=\"008\">.......................s\$\$
-	limit 10
+	limit 1000
 	";
 	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
 	my @results = @{$dbHandler->query($query)};	
