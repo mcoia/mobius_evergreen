@@ -29,8 +29,9 @@ use Unicode::Normalize;
 # 01317nim a22003257  4500
 # Books have "a" : 
 # 01208cam a2200361 a 4500
-#
-#
+# AUDIOBOOK
+#  marc ~ '<leader>......i'
+# 
 #
  my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
@@ -92,9 +93,10 @@ if(! -e $xmlconf)
 			$jobid = createNewJob($dbHandler,'processing');
 			if($jobid!=-1)
 			{
-				my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
-				updateScoreWithQuery($query,$dbHandler,$log);
-				findPhysicalItemsOnElectronic($mobUtil,$dbHandler,$log);
+				#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
+				#updateScoreWithQuery($query,$dbHandler,$log);
+				#findPhysicalItemsOnElectronic($mobUtil,$dbHandler,$log);
+				matchAudioBooks($mobUtil,$dbHandler,$log);
 				#findPossibleDups($mobUtil,$dbHandler,$log);
 				#print "regular cache\n";
 				#updateScoreCache($dbHandler,$log);
@@ -186,7 +188,7 @@ sub updateScoreCache
 		@newIDs = @{@newAndUpdates[0]};
 	}
 	##print Dumper(@newIDs);
-	$log->addLine("Found ".($#newIDs+1)." new Bibs to be scored");	
+	#$log->addLine("Found ".($#newIDs+1)." new Bibs to be scored");	
 	if(@newAndUpdates[1])
 	{
 		@updateIDs = @{@newAndUpdates[1]};
@@ -368,11 +370,25 @@ sub findPhysicalItemsOnElectronic
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);
 		updateScoreCache($dbHandler,$log,\@st);
-		## Now find likely candidates elsewhere in the ME DB		
-		$query =
-		"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
-		$log->addLine($query);
-		updateScoreWithQuery($query,$dbHandler,$log);
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($bibid,"Physical items attched to Electronic Bibs and were not deduped 6/30/2013",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);
+		## Now find likely candidates elsewhere in the ME DB	
+		$query="SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		my @results2 = @{$dbHandler->query($query)};
+		foreach(@results2)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $title = @row[0];
+			if(length($title)>5)
+			{
+				$query =
+				"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
+				$log->addLine($query);
+				updateScoreWithQuery($query,$dbHandler,$log);
+			}
+		}
 		$query =
 		"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE FINGERPRINT = (SELECT EG_FINGERPRINT FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
 		$log->addLine($query);
@@ -445,6 +461,111 @@ sub findPhysicalItemsOnElectronic
 					my @values = ($bibid,$mbibid,"Physical Items to Physical Bib loose: Author, Title",$holds,$jobid);
 					$dbHandler->updateWithParameters($query,\@values);
 				}
+			}
+		}
+	}
+}
+
+
+sub matchAudioBooks
+{
+	my $mobUtil = @_[0];
+	my $dbHandler = @_[1];
+	my $log = @_[2];
+	# Find Bibs that are not Audiobooks and have physical items that are circed as audiobooks
+	my $query = "
+	select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn where 
+bre.marc !~ \$\$<leader>......i\$\$
+and
+bre.id=acn.record and
+acn.id=ac.call_number and
+not acn.deleted and
+not ac.deleted and
+ac.circ_modifier=\$\$AudioBooks\$\$
+group by bre.id,bre.marc
+limit 100
+	";
+	updateJob($dbHandler,"Processing","matchAudioBooks  $query");
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $bibid = @row[0];
+		my $marc = @row[1];
+		my $extra = @row[2];
+		my @scorethis = ($bibid,$marc);
+		my @st = ([@scorethis]);
+		updateScoreCache($dbHandler,$log,\@st);
+		
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,EXTRA,JOB) VALUES (\$1,\$2,\$3,\$4)";
+		my @values = ($bibid,"Non-audiobook Bib with items that circulate as 'AudioBooks'",$extra,$jobid);
+		$dbHandler->updateWithParameters($query,\@values);
+		## Now find likely candidates elsewhere in the ME DB	
+		$query="SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		my @results2 = @{$dbHandler->query($query)};
+		foreach(@results2)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $title = @row[0];
+			if(length($title)>5)
+			{
+				$query =
+				"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
+				$log->addLine($query);
+				updateScoreWithQuery($query,$dbHandler,$log);
+			}
+		}
+		$query =
+		"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE FINGERPRINT = (SELECT EG_FINGERPRINT FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
+		$log->addLine($query);
+		updateScoreWithQuery($query,$dbHandler,$log);
+
+		$query = "SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+		WHERE 
+		DATE1 = (SELECT DATE1 FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND RECORD_TYPE = \$\$i\$\$
+		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)
+		AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+		AND RECORD != $bibid";
+		updateJob($dbHandler,"Processing","matchAudioBooks  $query");
+		$log->addLine($query);
+		## Exact matches!
+		
+		my @result = @{$dbHandler->query($query)};
+		for my $i (0..$#result)
+		{
+			my @ro = @{@result[$i]};
+			my $mbibid=@ro[1];
+			my $holds = findHoldsOnBib($mbibid,$dbHandler);
+			$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
+			VALUES(\$1,\$2,\$3,\$4,\$5)";
+			my @values = ($bibid,$mbibid,"AudioBooks attached to non AudioBook Bib exact",$holds,$jobid);
+			$dbHandler->updateWithParameters($query,\@values);
+		}
+		if($#result==-1)
+		{
+			## Loosen the matching down to just author and title and record type
+			$query = "SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+			WHERE TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid)
+			AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)			
+			AND RECORD_TYPE = \$\$i\$\$
+			AND RECORD != $bibid";
+			updateJob($dbHandler,"Processing","matchAudioBooks  $query");
+			$log->addLine($query);
+			my @result = @{$dbHandler->query($query)};
+			for my $i (0..$#result)
+			{
+				my @ro = @{@result[$i]};				
+				my $mbibid=@ro[1];
+				my $holds = findHoldsOnBib($mbibid,$dbHandler);
+				$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)	
+				VALUES(\$1,\$2,\$3,\$4,\$5)";
+				my @values = ($bibid,$mbibid,"AudioBooks attached to non AudioBook Bib exact",$holds,$jobid);
+				$dbHandler->updateWithParameters($query,\@values);
 			}
 		}
 	}
@@ -534,43 +655,36 @@ updateJob($dbHandler,"Processing","findPossibleDups  looping results");
 	updateJob($dbHandler,"Processing","findPossibleDups updating scorecache selectivly");
 	updateScoreCache($dbHandler,$log,\@st);
 	
+	
+	my $query="
+			select record,sd_fingerprint,score from seekdestroy.bib_score sbs2 where sd_fingerprint in(
+		select sd_fingerprint from(
+		select sd_fingerprint,count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5  group by sd_fingerprint having count(*) > 1) as a 
+		)
+		order by sd_fingerprint,score desc
+		";
+updateJob($dbHandler,"Processing","findPossibleDups  $query");
+	my @results = @{$dbHandler->query($query)};
+	my $current_fp ='';
+	my $master_record=-2;
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
-		my $q = "select record
-		(select id from action.hold_request ahr where 
-		ahr.target=sbs.record and
-		ahr.hold_type=\$\$T\$\$ and
-		ahr.capture_time is null and
-		ahr.cancel_time is null limit 1
-		)
-		from seekdestroy.bib_score sbs
-		where sbs.record in(".@row[0].")";
-		
+		my $record=@row[0];
 		my $fingerprint = @row[1];
-		my @result = @{$dbHandler->query($q)};
-		my $bib1;
-		for my $i (0..$#result)
+		my $score= @row[2];
+		
+		if($current_fp ne $fingerprint)
 		{
-			my @ro = @{@result[$i]};
-			if($i==0)
-			{
-				$bib1 = @ro[0];
-			}
-			else
-			{
-				my @ro = @{@result[$i]};
-				my $record = @ro[0];
-				my $sd_fingerprint = @ro[1];
-				my $hold = @ro[2];
-				length($hold)>0 ? $hold=1 : $hold=0;
-				
-				my $q = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
-				VALUES(\$1,\$2,\$3,\$4,\$5)";
-				my @values = ($bib1,$record,"EG Fingerprint",$hold,$jobid);
-				$dbHandler->updateWithParameters($q,\@values);
-			}
+			$master_record = $record
+		}
+		else
+		{
+			my $q = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
+			VALUES(\$1,\$2,\$3,\$4,\$5)";
+			my @values = ($bib1,$record,"EG Fingerprint",$hold,$jobid);
+			$dbHandler->updateWithParameters($q,\@values);
 		}
 	}
 }
@@ -1349,6 +1463,8 @@ sub marc_isvalid {
 sub setupSchema
 {
 	my $dbHandler = @_[0];
+	my $query = "DROP SCHEMA seekdestroy CASCADE";
+	$dbHandler->update($query);
 	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'seekdestroy'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
@@ -1430,6 +1546,15 @@ sub setupSchema
 		record bigint,
 		circ_modifier text,
 		different_circs bigint,
+		job  bigint NOT NULL,
+		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.problem_bibs(
+		id serial,
+		record bigint,
+		problem text,
+		extra text,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
