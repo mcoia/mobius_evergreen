@@ -22,18 +22,16 @@ use XML::Simple;
 use Unicode::Normalize;
 
 
-#
-#
-#
-# AUDIOBOOK has "i" in the leader:
-# 01317nim a22003257  4500
-# Books have "a" : 
-# 01208cam a2200361 a 4500
-# AUDIOBOOK
-#  marc ~ '<leader>......i'
-# 
-#
- my $configFile = @ARGV[0];
+
+# select sbm.bib1,sbm.bib2,sbm.match_reason,merged,has_holds,job,sbs1.score,sbs2.score,sbs2.sd_fingerprint from seekdestroy.bib_match sbm,seekdestroy.bib_score sbs1,seekdestroy.bib_score sbs2
+# where
+# sbs1.record=sbm.bib1 and
+# sbs2.record=sbm.bib2
+# order by bib1,sbs1.score
+
+
+
+my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
  
 
@@ -95,8 +93,9 @@ if(! -e $xmlconf)
 			{
 				#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
 				#updateScoreWithQuery($query,$dbHandler,$log);
-				#findPhysicalItemsOnElectronic($mobUtil,$dbHandler,$log);
-				matchAudioBooks($mobUtil,$dbHandler,$log);
+				findPhysicalItemsOnElectronic($mobUtil,$dbHandler,$log);
+				#findInvalidElectronicMARC($dbHandler,$log);
+				#matchAudioBooks($mobUtil,$dbHandler,$log);
 				#findPossibleDups($mobUtil,$dbHandler,$log);
 				#print "regular cache\n";
 				#updateScoreCache($dbHandler,$log);
@@ -123,38 +122,36 @@ if(! -e $xmlconf)
 	}
 }
 
-sub searchDestroyLeaders
+sub findInvalidElectronicMARC
 {
 	my $dbHandler = @_[0];
 	my $log = @_[1];
-	my @bibs = @{findElectronicBibsMarkedAsBooks($dbHandler)};
-	foreach(@bibs)
+	my $query = "
+	select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag=\$\$856\$\$ and ind2=\$\$0\$\$) AND  
+marc ~ \$\$<leader>......a\$\$
+and
+marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
+and
+marc !~ \$\$<leader>.......p\$\$
+ limit 1000";
+ 
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
 	{
-		my @bibatts = @{$_};
-		my $id = @bibatts[0];
-		my $marc = @bibatts[1];
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
 		if(!isScored($dbHandler, $id))
 		{
 			my @scorethis = ($id,$marc);
-			my @st = ([@scorethis]);
-			print "searchleaders cache\n";
+			my @st = ([@scorethis]);			
 			updateScoreCache($dbHandler,$log,\@st);
 		}
-		$marc =~ s/(<leader>.........)./${1}a/;			
-		$marc = MARC::Record->new_from_xml($marc);
-		my $electricScore = determineElectric($marc);
-		$log->addLine("Electric Score: $electricScore");		
-		$log->addLine("http://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with E-Links but 008 tag is missing o,q,s",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);
 	}
-}
-
-sub findElectronicBibsMarkedAsBooks
-{
-	my $dbHandler = @_[0];	
-	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC LIKE '%\"9\">PB%' limit 14";
-	my $query = "select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag='856' and ind2='0') AND  marc ~* '<leader>......a' limit 100";
-	my @results = @{$dbHandler->query($query)};	
-	return \@results;
 }
 
 sub isScored
@@ -221,9 +218,10 @@ sub updateScoreCache
 		title,
 		author,
 		sd_fingerprint,
+		audioformat,
 		eg_fingerprint) 
 		VALUES($bibid,$score,$electricScore,
-		\$1,\$2,\$3,\$4,\$5,\$6,\$7,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
+		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		)";		
 		my @values = (
 		$fingerprints{item_form},
@@ -232,7 +230,8 @@ sub updateScoreCache
 		$fingerprints{bib_lvl},
 		$fingerprints{title},
 		$fingerprints{author},
-		$fingerprints{baseline}
+		$fingerprints{baseline},
+		$fingerprints{audioformat}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircs($bibid,$dbHandler);	
@@ -259,6 +258,7 @@ sub updateScoreCache
 		title = \$5,
 		author = \$6,
 		sd_fingerprint = \$7,
+		audioformat = \$8,
 		eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		WHERE ID=$bibscoreid";
 		my @values = (
@@ -269,7 +269,7 @@ sub updateScoreCache
 		$fingerprints{title},
 		$fingerprints{author},
 		$fingerprints{baseline},
-		
+		$fingerprints{audioformat}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircs($bibid,$dbHandler);
@@ -342,6 +342,8 @@ sub findPhysicalItemsOnElectronic
 		my $marc = @row[1];
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);
+		my $q = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		$dbHandler->update($q);
 		updateScoreCache($dbHandler,$log,\@st);
 		recordAssetCopyMove($bibid,$dbHandler,$log);
 	}
@@ -369,6 +371,8 @@ sub findPhysicalItemsOnElectronic
 		my $marc = @row[1];
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);
+		my $q = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		$dbHandler->update($q);
 		updateScoreCache($dbHandler,$log,\@st);
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
 		my @values = ($bibid,"Physical items attched to Electronic Bibs and were not deduped 6/30/2013",$jobid);
@@ -483,7 +487,7 @@ not acn.deleted and
 not ac.deleted and
 ac.circ_modifier=\$\$AudioBooks\$\$
 group by bre.id,bre.marc
-limit 100
+limit 1000
 	";
 	updateJob($dbHandler,"Processing","matchAudioBooks  $query");
 	my @results = @{$dbHandler->query($query)};	
@@ -496,6 +500,8 @@ limit 100
 		my $extra = @row[2];
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);
+		my $q = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		$dbHandler->update($q);
 		updateScoreCache($dbHandler,$log,\@st);
 		
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,EXTRA,JOB) VALUES (\$1,\$2,\$3,\$4)";
@@ -589,19 +595,13 @@ sub updateScoreWithQuery
 	}
 }
 
-##
-##
-##UPDATE THIS QUERY TO INCLUDE EVERYTHING BEFORE GOING TO PRODUCTION
-## REMOVE THIS:
-## and id not in(select record from seekdestroy.bib_score)
-##
 sub findPossibleDups
 {
 	my $mobUtil = @_[0];
 	my $dbHandler = @_[1];
 	my $log = @_[2];
 	my $query="
-		select string_agg(to_char(id,'9999999999'),','),fingerprint from biblio.record_entry where fingerprint in
+		select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
 		(
 		select fingerprint from(
 		select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
@@ -611,9 +611,9 @@ sub findPossibleDups
 		where count>1
 		)
 		and not deleted
-		and fingerprint != ''
+		and fingerprint != \$\$\$\$
 		group by fingerprint
-		limit 1;
+		limit 1000;
 		";
 updateJob($dbHandler,"Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
@@ -648,10 +648,10 @@ updateJob($dbHandler,"Processing","findPossibleDups  looping results");
 	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);
 	my $q = "delete from SEEKDESTROY.BIB_SCORE where RECORD IN( $deleteoldscorecache)";
 	updateJob($dbHandler,"Processing","findPossibleDups deleting old cache    $query");
-	print $dbHandler->update($q);				
+	#print $dbHandler->update($q);				
 	$q = "delete from SEEKDESTROY.BIB_MATCH where BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)";
 	updateJob($dbHandler,"Processing","findPossibleDups deleting old cache bib_match   $query");
-	print $dbHandler->update($q);	
+	#print $dbHandler->update($q);	
 	updateJob($dbHandler,"Processing","findPossibleDups updating scorecache selectivly");
 	updateScoreCache($dbHandler,$log,\@st);
 	
@@ -677,13 +677,15 @@ updateJob($dbHandler,"Processing","findPossibleDups  $query");
 		
 		if($current_fp ne $fingerprint)
 		{
+			$current_fp=$fingerprint;
 			$master_record = $record
 		}
 		else
 		{
+			my $hold = findHoldsOnBib($record, $dbHandler);
 			my $q = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
 			VALUES(\$1,\$2,\$3,\$4,\$5)";
-			my @values = ($bib1,$record,"EG Fingerprint",$hold,$jobid);
+			my @values = ($master_record,$record,"Duplicate SD Fingerprint",$hold,$jobid);
 			$dbHandler->updateWithParameters($q,\@values);
 		}
 	}
@@ -1335,6 +1337,7 @@ sub populate_marc {
 
     # date1, date2
     my $my_008 = $record->field('008');
+	my $my_007 = $record->field('007');
     $marc{tag008} = $my_008->as_string() if ($my_008);
     if (defined $marc{tag008}) {
         unless (length $marc{tag008} == 40) {
@@ -1357,6 +1360,11 @@ sub populate_marc {
         }
     }
 
+	$marc{tag007} = $my_007->as_string() if ($my_007);
+	if (defined $marc{tag007}) {
+		$marc{audioformat} = substr($marc{tag007},3,1) unless (length $marc{tag007} < 4 );
+	}
+	
     # item_form
     if ( $marc{record_type} =~ /[gkroef]/ ) { # MAP, VIS
         $marc{item_form} = substr($marc{tag008},29,1) if ($marc{tag008});
@@ -1496,6 +1504,7 @@ sub setupSchema
 		title text,
 		author text,
 		sd_fingerprint text,
+		audioformat text,
 		eg_fingerprint text)";		
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.item_reassignment(
