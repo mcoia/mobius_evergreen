@@ -995,60 +995,79 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 	}
 	if($winner!=0)
 	{
-		$query = "select deleted from biblio.record_entry where id=$winner";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my $row = $_;
-			my @row = @{$row};
-			print "$winner - ".@row[0]."\n";
-			#make sure that it is in fact deleted
-			if(@row[0] eq 't' ||@row[0] == 1)
-			{
-				my $tcn_value = $winner;
-				my $count=1;			
-				#make sure that when we undelete it, it will not collide its tcn_value 
-				while($count>0)
-				{
-					$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $winner";
-					$log->addLine($query);
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-					my @results = @{$dbHandler->query($query)};
-					foreach(@results)
-					{	
-						my $row = $_;
-						my @row = @{$row};
-						$count=@row[0];
-					}
-					$tcn_value.="_";
-				}
-				#take the last tail off
-				$tcn_value=substr($tcn_value,0,-1);
-				#finally, undelete the bib making it available for the asset.call_number
-				$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$winner";
-				$dbHandler->update($query);
-			}
-		}
+		undeleteBIB($dbHandler,$winner,$log);
 		#find all of the eligible call_numbers
-		$query = "SELECT ID,LABEL FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
+		$query = "SELECT ID,LABEL,OWNING_LIB,RECORD FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
+updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{	
 			my @row = @{$_};
 			my $acnid = @row[0];
+			my $acnlabel = @row[1];
+			my $acnowninglib = @row[2];
+			my $acnrecord = @row[3];
 			$query = 
 "INSERT INTO seekdestroy.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
 VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
 updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
 			$log->addLine($query);
 			$dbHandler->update($query);
+			$query="SELECT ID,LABEL FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$$acnlabel\$\$ AND OWNING_LIB=\$\$$acnowninglib\$\$ AND RECORD=\$\$$acnrecord\$\$";
+			my @results = @{$dbHandler->query($query)};
+			foreach(@results)
+			{	
+				my @row = @{$_};
+				my $acnid = @row[0];
+				my $acnlabel = @row[1];	$dbHandler->updateWithParameters($query,\@values);
+			}
+			
 			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
 updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 			$log->addLine($query);
 			$dbHandler->update($query);
 		}
 		moveHolds($dbHandler,$currentBibID,$winner,$log);
+	}
+}
+
+sub undeleteBIB
+{
+	my $dbHandler = @_[0];
+	my $bib = @_[1];
+	my $log = @_[2];
+	my $query = "select deleted from biblio.record_entry where id=$bib";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{	
+		my $row = $_;
+		my @row = @{$row};			
+		#make sure that it is in fact deleted
+		if(@row[0] eq 't' || @row[0] == 1)
+		{
+			my $tcn_value = $bib;
+			my $count=1;			
+			#make sure that when we undelete it, it will not collide its tcn_value 
+			while($count>0)
+			{
+				$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $bib";
+				$log->addLine($query);
+updateJob($dbHandler,"Processing","undeleteBIB  $query");
+				my @results = @{$dbHandler->query($query)};
+				foreach(@results)
+				{	
+					my $row = $_;
+					my @row = @{$row};
+					$count=@row[0];
+				}
+				$tcn_value.="_";
+			}
+			#take the last tail off
+			$tcn_value=substr($tcn_value,0,-1);
+			#finally, undelete the bib making it available for the asset.call_number
+			$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$bib";
+			$dbHandler->update($query);
+		}
 	}
 }
 
