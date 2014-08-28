@@ -93,8 +93,10 @@ if(! -e $xmlconf)
 			{
 				#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
 				#updateScoreWithQuery($query,$dbHandler,$log);
-				findPhysicalItemsOnElectronicBooks($mobUtil,$dbHandler,$log);
-				findPhysicalItemsOnElectronicAudioBooks($mobUtil,$dbHandler,$log);
+				findPhysicalItemsOnElectronicBooksUnDedupe($mobUtil,$dbHandler,$log);
+				findPhysicalItemsOnElectronicAudioBooksUnDedupe($mobUtil,$dbHandler,$log);
+				findPhysicalItemsOnElectronicBooksLeftovers($mobUtil,$dbHandler,$log);
+				#findPhysicalItemsOnElectronicAudioBooks($mobUtil,$dbHandler,$log);
 				#findInvalidElectronicMARC($dbHandler,$log);
 				#matchAudioBooks($mobUtil,$dbHandler,$log);
 				#findPossibleDups($mobUtil,$dbHandler,$log);
@@ -315,7 +317,7 @@ sub updateBibCircs
 	}
 }
 
-sub findPhysicalItemsOnElectronicBooks
+sub findPhysicalItemsOnElectronicBooksUnDedupe
 {
 	my $mobUtil = @_[0];
 	my $dbHandler = @_[1];
@@ -342,7 +344,7 @@ sub findPhysicalItemsOnElectronicBooks
 		marc ~ \$\$<leader>.......[acdm]\$\$
 	)
 	";
-	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
+	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksUnDedupe  $query");
 	my @results = @{$dbHandler->query($query)};
 	$log->addLine($#results." Bibs with physical Items attached from the dedupe");
 	foreach(@results)
@@ -357,19 +359,220 @@ sub findPhysicalItemsOnElectronicBooks
 		$dbHandler->update($q);
 		updateScoreCache($dbHandler,$log,\@st);
 		recordAssetCopyMove($bibid,$dbHandler,$log);
+		findPhysicalItemsOnElectronicBooksLeftovers($mobUtil,$dbHandler,$log);
 	}
+}
+
+
+sub findPhysicalItemsOnElectronicBooksLeftovers
+{
+	my $mobUtil = @_[0];
+	my $dbHandler = @_[1];
+	my $log = @_[2];
 	
-	if(0)
-	{
-	# Find Electronic bibs with physical items but not in the dedupe project
-	$query = "
+	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
 	and id in
 	(
 	select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
+	)	
+	and 
+	(
+		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
 	)
-	and id not in
-	(select lead_bibid from m_dedupe.merge_map)
+	and
+	(
+		marc ~ \$\$<leader>......[at]\$\$
+	)
+	and
+	(
+		marc ~ \$\$<leader>.......[acdm]\$\$
+	)
+	and
+	id in(select prev_bib from seekdestroy.item_reassignment)	
+	";
+	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+	my @results = @{$dbHandler->query($query)};	
+	$log->addLine($#results." Bibs with physical Items attached leftovers");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $bibid = @row[0];
+		my $marc = @row[1];
+		my @scorethis = ($bibid,$marc);
+		my @st = ([@scorethis]);
+		my $q = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		$dbHandler->update($q);
+		updateScoreCache($dbHandler,$log,\@st);
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+		my @values = ($bibid,"Physical items attched to Electronic Bibs",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);
+		## Now find likely candidates elsewhere in the ME DB	
+		$query="SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
+		updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+		my @results2 = @{$dbHandler->query($query)};
+		foreach(@results2)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $title = @row[0];
+			if(length($title)>5)
+			{
+				$query =
+				"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
+				updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+				$log->addLine($query);
+				updateScoreWithQuery($query,$dbHandler,$log);
+			}
+		}
+		$query =
+		"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE FINGERPRINT = (SELECT EG_FINGERPRINT FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid)";
+		updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+		$log->addLine($query);
+		updateScoreWithQuery($query,$dbHandler,$log);
+
+		$query = "SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+		WHERE 
+		DATE1 = (SELECT DATE1 FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND RECORD_TYPE = (SELECT RECORD_TYPE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)
+		AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+		AND ITEM_FORM !~ \$\$[oqs]\$\$
+		AND RECORD != $bibid";
+		updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+		$log->addLine($query);
+		## Exact matches!
+		
+		my @result = @{$dbHandler->query($query)};
+		for my $i (0..$#result)
+		{
+			my @ro = @{@result[$i]};
+			my $mbibid=@ro[1];
+			my $holds = findHoldsOnBib($mbibid,$dbHandler);
+			$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
+			VALUES(\$1,\$2,\$3,\$4,\$5)";
+			updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+			$log->addLine($query);
+			my @values = ($bibid,$mbibid,"Physical Items to Electronic Bib exact",$holds,$jobid);
+			$dbHandler->updateWithParameters($query,\@values);
+		}
+		if($#result==-1)
+		{
+			## Loosen the matching ignore date1
+			$query = "SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+			WHERE 			
+			RECORD_TYPE = (SELECT RECORD_TYPE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+			AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+			AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+			AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)
+			AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+			AND ITEM_FORM !~ \$\$[oqs]\$\$
+			AND RECORD != $bibid";
+			updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+			$log->addLine($query);
+			my @result = @{$dbHandler->query($query)};
+			for my $i (0..$#result)
+			{
+				my @ro = @{@result[$i]};				
+				my $mbibid=@ro[1];
+				my $holds = findHoldsOnBib($mbibid,$dbHandler);
+				$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)	
+				VALUES(\$1,\$2,\$3,\$4,\$5)";
+				updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+				$log->addLine($query);
+				my @values = ($bibid,$mbibid,"Physical Items to Electronic Bib exact minus date1",$holds,$jobid);
+				$dbHandler->updateWithParameters($query,\@values);
+			}
+			if($#result==-1)
+			{
+				## Loosen the matching down to just author and title and record type
+				$query = "SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+				WHERE TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid)
+				AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)			
+				AND RECORD_TYPE = (SELECT RECORD_TYPE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+				AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+				AND ITEM_FORM !~ \$\$[oqs]\$\$
+				AND RECORD != $bibid";
+				updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+				$log->addLine($query);
+				my @result = @{$dbHandler->query($query)};
+				for my $i (0..$#result)
+				{
+					my @ro = @{@result[$i]};				
+					my $mbibid=@ro[1];
+					my $holds = findHoldsOnBib($mbibid,$dbHandler);
+					$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)	
+					VALUES(\$1,\$2,\$3,\$4,\$5)";
+					updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksLeftovers  $query");
+					$log->addLine($query);
+					my @values = ($bibid,$mbibid,"Physical Items to Electronic Bib loose: Author, Title, Record Type",$holds,$jobid);
+					$dbHandler->updateWithParameters($query,\@values);
+				}
+			}
+		}
+		
+		#print "findPhysicalItemsOnElectronicBooksLeftovers from: $bibid\n";
+		moveCopiesOntoHighestScoringBibCandidate($dbHandler,$bibid,"Physical Items to Electronic Bib exact",$log);
+		moveCopiesOntoHighestScoringBibCandidate($dbHandler,$bibid,"Physical Items to Electronic Bib exact minus date1",$log);
+		
+	}
+}
+
+sub moveCopiesOntoHighestScoringBibCandidate
+{
+	my $dbHandler = @_[0];	
+	my $oldbib = @_[1];	
+	my $matchReason = @_[2];
+	my $log = @_[3];
+	my $query = "select sbm.bib2,sbs.score from SEEKDESTROY.BIB_MATCH sbm,seekdestroy.bib_score sbs where 
+	sbm.bib1=$oldbib and
+	sbm.match_reason=\$\$$matchReason\$\$ and
+	sbs.record=sbm.bib2
+	order by sbs.score";
+	$log->addLine($query);
+	updateJob($dbHandler,"Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
+	my @results = @{$dbHandler->query($query)};	
+	$log->addLine($#results." potiential bibs for destination");
+	my $hscore=0;
+	my $winner=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $bibid = @row[0];
+		my $score = @row[1];
+		if($score>$hscore)
+		{
+			$winner=$bibid;
+			$hscore=$score;
+		}
+	}
+	if($winner!=0)
+	{
+		undeleteBIB($dbHandler,$winner,$log);
+		#print "moveCopiesOntoHighestScoringBibCandidate from: $oldbib\n";
+		moveAllCallNumbers($dbHandler,$oldbib,$winner,$matchReason,$log);
+	}
+
+}
+
+
+sub findPhysicalItemsOnElectronicBooks
+{
+	my $mobUtil = @_[0];
+	my $dbHandler = @_[1];
+	my $log = @_[2];
+	# Find Electronic bibs with physical items but not in the dedupe project
+	my $query = "
+	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
+	and id in
+	(
+	select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
+	)	
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
@@ -429,6 +632,7 @@ sub findPhysicalItemsOnElectronicBooks
 		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
 		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)
 		AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+		AND ITEM_FORM !~ \$\$[oqs]\$\$
 		AND RECORD != $bibid";
 		updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
 		$log->addLine($query);
@@ -453,6 +657,7 @@ sub findPhysicalItemsOnElectronicBooks
 			AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)			
 			AND RECORD_TYPE = (SELECT RECORD_TYPE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
 			AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+			AND ITEM_FORM !~ \$\$[oqs]\$\$
 			AND RECORD != $bibid";
 			updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
 			$log->addLine($query);
@@ -474,6 +679,7 @@ sub findPhysicalItemsOnElectronicBooks
 				WHERE TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid)
 				AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)
 				AND (ELECTRONIC < (SELECT ELECTRONIC FROM seekdestroy.bib_score WHERE RECORD = $bibid) OR ELECTRONIC < 1)
+				AND ITEM_FORM !~ \$\$[oqs]\$\$
 				AND RECORD != $bibid";
 				updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
 				$log->addLine($query);
@@ -491,10 +697,10 @@ sub findPhysicalItemsOnElectronicBooks
 			}
 		}
 	}
-	}
+	
 }
 
-sub findPhysicalItemsOnElectronicAudioBooks
+sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 {
 	my $mobUtil = @_[0];
 	my $dbHandler = @_[1];
@@ -533,17 +739,21 @@ sub findPhysicalItemsOnElectronicAudioBooks
 		updateScoreCache($dbHandler,$log,\@st);
 		recordAssetCopyMove($bibid,$dbHandler,$log);
 	}
-	if(0)
-	{
-	# Find Electronic bibs with physical items but not in the dedupe project
-	$query = "
+
+}
+
+sub findPhysicalItemsOnElectronicAudioBooks
+{
+	my $mobUtil = @_[0];
+	my $dbHandler = @_[1];
+	my $log = @_[2];
+	# Find Electronic bibs with physical items
+	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
 	and id in
 	(
 	select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-	)
-	and id not in
-	(select lead_bibid from m_dedupe.merge_map)
+	)	
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
@@ -661,7 +871,7 @@ sub findPhysicalItemsOnElectronicAudioBooks
 			}
 		}
 	}
-	}
+	
 }
 
 
@@ -944,7 +1154,7 @@ sub recordAssetCopyMove
 		$log->addLine("$query");
 updateJob($dbHandler,"Processing","recordAssetCopyMove  $query");
 		$dbHandler->update($query);
-	}
+	}	
 }
 
 sub moveAssetCopyToPreviouslyDedupedBib
@@ -954,7 +1164,10 @@ sub moveAssetCopyToPreviouslyDedupedBib
 	my $log = @_[2];
 	my %possibles;	
 	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
-	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid";
+	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid
+	and
+	bre.marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
+	";
 updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 	#print $query."\n";
 	my @results = @{$dbHandler->query($query)};
@@ -997,33 +1210,18 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 	{
 		undeleteBIB($dbHandler,$winner,$log);
 		#find all of the eligible call_numbers
-		$query = "SELECT ID,LABEL,OWNING_LIB,RECORD FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
+		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$";
 updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{	
 			my @row = @{$_};
-			my $acnid = @row[0];
-			my $acnlabel = @row[1];
-			my $acnowninglib = @row[2];
-			my $acnrecord = @row[3];
+			my $acnid = @row[0];			
+			my $callNID = moveCallNumber($dbHandler,$acnid,$currentBibID,$winner,"Dedupe pool",$log);
 			$query = 
-"INSERT INTO seekdestroy.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
-VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
+			"INSERT INTO seekdestroy.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
+			VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$callNID,$jobid)";
 updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-			$log->addLine($query);
-			$dbHandler->update($query);
-			$query="SELECT ID,LABEL FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$$acnlabel\$\$ AND OWNING_LIB=\$\$$acnowninglib\$\$ AND RECORD=\$\$$acnrecord\$\$";
-			my @results = @{$dbHandler->query($query)};
-			foreach(@results)
-			{	
-				my @row = @{$_};
-				my $acnid = @row[0];
-				my $acnlabel = @row[1];	$dbHandler->updateWithParameters($query,\@values);
-			}
-			
-			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 			$log->addLine($query);
 			$dbHandler->update($query);
 		}
@@ -1069,6 +1267,110 @@ updateJob($dbHandler,"Processing","undeleteBIB  $query");
 			$dbHandler->update($query);
 		}
 	}
+}
+
+sub moveAllCallNumbers
+{
+	my $dbHandler = @_[0];	
+	my $oldbib = @_[1];
+	my $destbib = @_[2];
+	my $matchReason = @_[3];
+	my $log = @_[4];	
+	my $query = "select id from asset.call_number where record=$oldbib and label!=\$\$##URI##\$\$";
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my @row = @{$_};
+		my $calln = @row[0];
+		#print "moveAllCallNumbers from: $oldbib\n";
+		moveCallNumber($dbHandler,$calln,$oldbib,$destbib,$matchReason,$log);
+	}
+	
+}
+
+sub recordCopyMove
+{
+	my $dbHandler = @_[0];	
+	my $callnumberid = @_[1];
+	my $destcall = @_[2];
+	my $matchReason = @_[3];	
+	my $log = @_[4];
+	my $query = "SELECT ID FROM ASSET.COPY WHERE CALL_NUMBER=$callnumberid";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my @row = @{$_};
+		my $copy = @row[0];
+		$query="INSERT INTO SEEKDESTROY.COPY_MOVE(COPY,FROMCALL,TOCALL,EXTRA,JOB) VALUES(\$1,\$2,\$3,\$4,\$5)";
+		my @values = ($copy,$callnumberid,$destcall,$matchReason,$jobid);
+		$log->addLine($query);
+		$dbHandler->updateWithParameters($query,\@values);
+	}
+}
+
+sub recordCallNumberMove
+{
+	my $dbHandler = @_[0];	
+	my $callnumber = @_[1];
+	my $record = @_[2];
+	my $destrecord = @_[3];
+	my $matchReason = @_[4];	
+	my $log = @_[5];
+	#print "recordCallNumberMove from: $record\n";
+	my $query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,FROMBIB,TOBIB,EXTRA,JOB) VALUES(\$1,\$2,\$3,\$4,\$5)";	
+	my @values = ($callnumber,$record,$destrecord,$matchReason,$jobid);
+	$log->addLine($query);
+	$dbHandler->updateWithParameters($query,\@values);
+}
+	
+sub moveCallNumber
+{
+	my $dbHandler = @_[0];	
+	my $callnumberid = @_[1];
+	my $frombib = @_[2];
+	#print "moveCallNumber from: $frombib\n";
+	my $destbib = @_[3];
+	my $matchReason = @_[4];	
+	my $log = @_[5];
+	my $finalCallNumber=$callnumberid;
+	my $query = "SELECT ID,LABEL,RECORD FROM ASSET.CALL_NUMBER WHERE RECORD = $destbib
+	AND LABEL=(SELECT LABEL FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) 
+	AND OWNING_LIB=(SELECT OWNING_LIB FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) AND NOT DELETED";
+	$log->addLine($query);
+	my $moveCopies=0;
+	my @results = @{$dbHandler->query($query)};
+	#print "about to loop the callnumber results\n";
+	foreach(@results)
+	{
+		#print "it had a duplciate call number\n";
+		## Call number already exists on that record for that 
+		## owning library and label. So let's just move the 
+		## copies to it instead of moving the call number			
+		$moveCopies=1;
+		my @row = @{$_};
+		my $destcall = @row[0];
+		recordCopyMove($dbHandler,$callnumberid,$destcall,$matchReason,$log);	
+		$query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destcall WHERE CALL_NUMBER=$callnumberid";
+		updateJob($dbHandler,"Processing","moveCallNumber  $query");
+		$log->addLine($query);
+		$dbHandler->update($query);
+		$finalCallNumber=$destcall;
+	}	
+	
+	if(!$moveCopies)
+	{	
+	#print "it didnt have a duplciate call number... going into recordCallNumberMove\n";
+		recordCallNumberMove($dbHandler,$callnumberid,$frombib,$destbib,$matchReason,$log);		
+		#print "done with recordCallNumberMove\n";
+		$query="UPDATE ASSET.CALL_NUMBER SET RECORD=$destbib WHERE ID=$callnumberid";
+		#print "$query\n";
+		updateJob($dbHandler,"Processing","moveCallNumber  $query");
+		$log->addLine($query);
+		$dbHandler->update($query);		
+	}
+	return $finalCallNumber;
+
 }
 
 sub moveHolds
@@ -1685,7 +1987,7 @@ sub setupSchema
 {
 	my $dbHandler = @_[0];
 	my $query = "DROP SCHEMA seekdestroy CASCADE";
-	$dbHandler->update($query);
+	#$dbHandler->update($query);
 	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'seekdestroy'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
@@ -1777,6 +2079,28 @@ sub setupSchema
 		record bigint,
 		problem text,
 		extra text,
+		job  bigint NOT NULL,
+		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.call_number_move(
+		id serial,
+		call_number bigint,
+		frombib bigint,
+		tobib bigint,
+		extra text,
+		change_time timestamp default now(),
+		job  bigint NOT NULL,
+		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.copy_move(
+		id serial,
+		copy bigint,
+		fromcall bigint,
+		tocall bigint,
+		extra text,
+		change_time timestamp default now(),
 		job  bigint NOT NULL,
 		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
