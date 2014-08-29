@@ -95,10 +95,10 @@ if(! -e $xmlconf)
 				#updateScoreWithQuery($query,$dbHandler,$log);
 				findPhysicalItemsOnElectronicBooksUnDedupe($mobUtil,$dbHandler,$log);
 				findPhysicalItemsOnElectronicAudioBooksUnDedupe($mobUtil,$dbHandler,$log);				
-				#findPhysicalItemsOnElectronicAudioBooks($mobUtil,$dbHandler,$log);
-				#findInvalidElectronicMARC($dbHandler,$log);
-				#matchAudioBooks($mobUtil,$dbHandler,$log);
-				#findPossibleDups($mobUtil,$dbHandler,$log);
+				findPhysicalItemsOnElectronicAudioBooks($mobUtil,$dbHandler,$log);
+				findItemsCircedAsAudioBooksButAttachedNonAudioBib($dbHandler,0,$log);
+				findInvalidElectronicMARC($dbHandler,$log);
+				findPossibleDups($mobUtil,$dbHandler,$log);
 				#print "regular cache\n";
 				#updateScoreCache($dbHandler,$log);
 			}
@@ -378,13 +378,13 @@ sub addBibMatch
 		my @row = @{$row};
 		my $bibid = @row[0];
 		my $marc = @row[1];
-		my $extra = @row[2]?$extra:'';		
+		my $extra = @row[2] ? @row[2] : '';
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);		
 		updateScoreCache($dbHandler,$log,\@st);
-		my $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,EXTRA,JOB) VALUES (\$1,\$2,\$3,\$4)";
 		updateJob($dbHandler,"Processing","addBibMatch  $query");
-		my @values = ($bibid,$problem,$jobid);
+		my @values = ($bibid,$problem,$extra,$jobid);
 		$dbHandler->updateWithParameters($query,\@values);
 		## Now find likely candidates elsewhere in the ME DB	
 		addRelatedBibScores($dbHandler,$bibid,$log);
@@ -436,28 +436,39 @@ sub addRelatedBibScores
 	my $dbHandler = @_[0];
 	my $rootbib = @_[1];
 	my $log = @_[2];
-	my $query="SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib";
-	updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
-	my @results = @{$dbHandler->query($query)};		
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $title = @row[0];
-		if(length($title)>5)
-		{
-			$query =
-			"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
-			updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
-			$log->addLine($query);
-			updateScoreWithQuery($query,$dbHandler,$log);
-		}
-	}
-	$query =
+	
+	# Score bibs that have the same evergreen fingerprint
+	my $query =
 	"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE FINGERPRINT = (SELECT EG_FINGERPRINT FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
 	updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
 	$log->addLine($query);
 	updateScoreWithQuery($query,$dbHandler,$log);
+	
+	# Pickup a few more bibs that contain the same title anywhere in the MARC
+	# This is very slow and it doesn't help get real matches
+	# This is disabled
+	
+	if(0)
+	{
+		$query="
+		SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib";
+		updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
+		my @results = @{$dbHandler->query($query)};		
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $title = @row[0];
+			if(length($title)>5)
+			{		
+				$query =
+				"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
+				updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
+				$log->addLine($query);
+				updateScoreWithQuery($query,$dbHandler,$log);
+			}
+		}
+	}
 	
 }
 
@@ -737,7 +748,7 @@ sub attemptMovePhysicalItemsOnAnElectronicAudioBook
 	}
 	my @matchQueries = 
 	(
-		"SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+		"SELECT RECORD FROM  seekdestroy.bib_score
 		WHERE 
 		DATE1 = (SELECT DATE1 FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
 		AND RECORD_TYPE = (SELECT RECORD_TYPE FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
@@ -811,28 +822,28 @@ limit 1000
 	}
 	my @matchQueries = 
 	(
-		"SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+		"SELECT RECORD FROM  seekdestroy.bib_score
 		WHERE 
-		DATE1 = (SELECT DATE1 FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
+		DATE1 = (SELECT DATE1 FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
 		AND RECORD_TYPE = \$\$i\$\$
-		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
-		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
-		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)		
-		AND RECORD != $bibid","AudioBooks attached to non AudioBook Bib exact",		
+		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = \$bibid)		
+		AND RECORD != \$bibid","AudioBooks attached to non AudioBook Bib exact",		
 		
-		"SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
+		"SELECT RECORD FROM  seekdestroy.bib_score
 		WHERE 		
 		RECORD_TYPE = \$\$i\$\$
-		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
-		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid) 
-		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)		
-		AND RECORD != $bibid","AudioBooks attached to non AudioBook Bib exact minus date1",		
+		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = \$bibid)		
+		AND RECORD != \$bibid","AudioBooks attached to non AudioBook Bib exact minus date1",		
 		
-		"SELECT ID,RECORD,SCORE,ELECTRONIC FROM  seekdestroy.bib_score
-		WHERE TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = $bibid)
-		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = $bibid)			
+		"SELECT RECORD FROM  seekdestroy.bib_score
+		WHERE TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = \$bibid)
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = \$bibid)			
 		AND RECORD_TYPE = \$\$i\$\$
-		AND RECORD != $bibid","AudioBooks attached to non AudioBook Bib loose"
+		AND RECORD != \$bibid","AudioBooks attached to non AudioBook Bib loose"
 				
 	);
 	
@@ -855,6 +866,7 @@ sub updateScoreWithQuery
 		my $bibid = @row[0];
 		my $marc = @row[1];
 		my @scorethis = ($bibid,$marc);
+		$log->addLine("Scoring: $bibid");
 		my @st = ([@scorethis]);
 		updateScoreCache($dbHandler,$log,\@st);
 	}
@@ -928,6 +940,7 @@ updateJob($dbHandler,"Processing","findPossibleDups  looping results");
 		)
 		order by sd_fingerprint,score desc
 		";
+		$log->addLine($query);
 updateJob($dbHandler,"Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
 	my $current_fp ='';
@@ -1072,7 +1085,7 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 			$winner=$bib;
 			$currentWinnerElectricScore=@atts[1];
 			$currentWinnerMARCScore=@atts[2];
-		}		
+		}
 	}
 	if($winner!=0)
 	{
