@@ -51,11 +51,12 @@ if(! -e $xmlconf)
 	exit;
  }
 
- my $mobUtil = new Mobiusutil(); 
+ our $mobUtil = new Mobiusutil(); 
  my $conf = $mobUtil->readConfFile($configFile);
 
  
   our $jobid=-1;
+  our $log;
   
  if($conf)
  {
@@ -66,7 +67,7 @@ if(! -e $xmlconf)
 		my $fdate = $dt->ymd; 
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
-		my $log = new Loghandler($conf->{"logfile"});
+		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");		
 		my @reqs = ("logfile"); 
@@ -83,27 +84,26 @@ if(! -e $xmlconf)
 		}
 		if($valid)
 		{	
-			my $log = new Loghandler($conf{"logfile"});			
-			my $dbHandler;
-			my %dbconf = %{getDBconnects($xmlconf,$log)};
+			my %dbconf = %{getDBconnects($xmlconf)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
 			setupSchema($dbHandler);			
-			$jobid = createNewJob($dbHandler,'processing');
+			$jobid = createNewJob('processing');
 			if($jobid!=-1)
 			{
 				#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
-				#updateScoreWithQuery($query,$dbHandler,$log);
-				findPhysicalItemsOnElectronicBooksUnDedupe($mobUtil,$dbHandler,$log);
-				findPhysicalItemsOnElectronicAudioBooksUnDedupe($mobUtil,$dbHandler,$log);				
-				findPhysicalItemsOnElectronicAudioBooks($mobUtil,$dbHandler,$log);
-				findItemsCircedAsAudioBooksButAttachedNonAudioBib($dbHandler,0,$log);
-				findInvalidElectronicMARC($dbHandler,$log);
-				findPossibleDups($mobUtil,$dbHandler,$log);
+				#updateScoreWithQuery($query);
+				findPhysicalItemsOnElectronicBooksUnDedupe();
+				findPhysicalItemsOnElectronicAudioBooksUnDedupe();
+				findPhysicalItemsOnElectronicAudioBooks();
+				findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
+				findInvalidElectronicMARC();
+				findPossibleDups();
+				#findPhysicalItemsOnElectronicBooks();
 				#print "regular cache\n";
-				#updateScoreCache($dbHandler,$log);
+				#updateScoreCache();
 			}
-			#searchDestroyLeaders($dbHandler,$log);
-			updateJob($dbHandler,"Completed","");
+			#searchDestroyLeaders();
+			updateJob("Completed","");
 		}
 		
 		my $afterProcess = DateTime->now(time_zone => "local");
@@ -126,8 +126,6 @@ if(! -e $xmlconf)
 
 sub findInvalidElectronicMARC
 {
-	my $dbHandler = @_[0];
-	my $log = @_[1];
 	my $query = "
 	select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag=\$\$856\$\$ and ind2=\$\$0\$\$) AND  
 marc ~ \$\$<leader>......a\$\$
@@ -144,11 +142,11 @@ marc !~ \$\$<leader>.......p\$\$
 		my @row = @{$row};
 		my $id = @row[0];
 		my $marc = @row[1];
-		if(!isScored($dbHandler, $id))
+		if(!isScored( $id))
 		{
 			my @scorethis = ($id,$marc);
 			my @st = ([@scorethis]);			
-			updateScoreCache($dbHandler,$log,\@st);
+			updateScoreCache(\@st);
 		}
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
 		my @values = ($id,"MARC with E-Links but 008 tag is missing o,q,s",$jobid);
@@ -157,9 +155,8 @@ marc !~ \$\$<leader>.......p\$\$
 }
 
 sub isScored
-{
-	my $dbHandler = @_[0];
-	my $bibid = @_[1];
+{	
+	my $bibid = @_[0];
 	my $query = "SELECT ID FROM SEEKDESTROY.BIB_SCORE WHERE RECORD = $bibid";
 	my @results = @{$dbHandler->query($query)};
 	if($#results>-1)
@@ -171,15 +168,12 @@ sub isScored
 
 sub updateScoreCache
 {
-	
-	my $dbHandler = @_[0];
-	my $log = @_[1];
 	my @newIDs;
 	my @newAndUpdates;
 	my @updateIDs;
-	if(@_[2])
+	if(@_[0])
 	{	
-		@newIDs=@{@_[2]};
+		@newIDs=@{@_[0]};
 	}
 	else
 	{
@@ -205,14 +199,16 @@ sub updateScoreCache
 		my $marcob = $marc;
 		$marcob =~ s/(<leader>.........)./${1}a/;
 		$marcob = MARC::Record->new_from_xml($marcob);
-		my $score = scoreMARC($marcob,$log);
-		my $electricScore = determineElectric($marcob);
+		my $score = scoreMARC($marcob);
+		my $electricScore = determineElectricScore($marcob);
+		my $audioBookScore = determineAudioBookScore($marcob);
 		my %fingerprints = %{getFingerprints($marcob)};
 		#$log->addLine(Dumper(%fingerprints));
 		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE
 		(RECORD,
 		SCORE,
 		ELECTRONIC,
+		audiobook_score,
 		item_form,
 		date1,
 		record_type,
@@ -222,7 +218,7 @@ sub updateScoreCache
 		sd_fingerprint,
 		audioformat,
 		eg_fingerprint) 
-		VALUES($bibid,$score,$electricScore,
+		VALUES($bibid,$score,$electricScore,$audioBookScore,
 		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		)";		
 		my @values = (
@@ -248,11 +244,14 @@ sub updateScoreCache
 		my $marcob = $marc;
 		$marcob =~ s/(<leader>.........)./${1}a/;
 		$marcob = MARC::Record->new_from_xml($marcob);		
-		my $score = scoreMARC($marcob,$log);		
-		my $electricScore = determineElectric($marcob);		
+		my $score = scoreMARC($marcob);		
+		my $electricScore = determineElectricScore($marcob);
+		my $audioBookScore = determineAudioBookScore($marcob);		
 		my %fingerprints = %{getFingerprints($marcob)};		
 		my $improved = $score - $oldscore;
-		my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), ELECTRONIC=$electricScore ,
+		my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), 
+		ELECTRONIC=$electricScore,
+		audiobook_score=$audioBookScore,
 		item_form = \$1,
 		date1 = \$2,
 		record_type = \$3,
@@ -280,8 +279,7 @@ sub updateScoreCache
 
 sub updateBibCircs
 {	
-	my $bibid = @_[0];
-	my $dbHandler = @_[1];
+	my $bibid = @_[0];	
 	my $query = "DELETE FROM seekdestroy.bib_item_circ_mods WHERE RECORD=$bibid";
 	$dbHandler->update($query);
 	
@@ -318,9 +316,6 @@ sub updateBibCircs
 
 sub findPhysicalItemsOnElectronicBooksUnDedupe
 {
-	my $mobUtil = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
 	# Find Electronic bibs with physical items but and in the dedupe project
 	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
@@ -343,7 +338,7 @@ sub findPhysicalItemsOnElectronicBooksUnDedupe
 		marc ~ \$\$<leader>.......[acdm]\$\$
 	)
 	";
-	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicBooksUnDedupe  $query");
+	updateJob("Processing","findPhysicalItemsOnElectronicBooksUnDedupe  $query");
 	my @results = @{$dbHandler->query($query)};
 	$log->addLine($#results." Bibs with physical Items attached from the dedupe");
 	foreach(@results)
@@ -354,22 +349,20 @@ sub findPhysicalItemsOnElectronicBooksUnDedupe
 		my $marc = @row[1];
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);		
-		updateScoreCache($dbHandler,$log,\@st);
-		recordAssetCopyMove($bibid,$dbHandler,$log);		
+		updateScoreCache(\@st);
+		recordAssetCopyMove($bibid);		
 	}
 }
 
 sub addBibMatch
 {
-	my $dbHandler = @_[0];
-	my %queries = %{@_[1]};
-	my $log = @_[2];
+	my %queries = %{@_[0]};
 	my $matchedSomething=0;
 	my $searchQuery = $queries{'searchQuery'};
 	my $problem = $queries{'problem'};
 	my @matchQueries = @{$queries{'matchQueries'}};
 	my @takeActionWithTheseMatchingMethods = @{$queries{'takeActionWithTheseMatchingMethods'}};	
-	updateJob($dbHandler,"Processing","addBibMatch  $searchQuery");
+	updateJob("Processing","addBibMatch  $searchQuery");
 	my @results = @{$dbHandler->query($searchQuery)};
 	$log->addLine($#results." Search Query results");
 	foreach(@results)
@@ -381,13 +374,13 @@ sub addBibMatch
 		my $extra = @row[2] ? @row[2] : '';
 		my @scorethis = ($bibid,$marc);
 		my @st = ([@scorethis]);		
-		updateScoreCache($dbHandler,$log,\@st);
+		updateScoreCache(\@st);
 		my $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,EXTRA,JOB) VALUES (\$1,\$2,\$3,\$4)";
-		updateJob($dbHandler,"Processing","addBibMatch  $query");
+		updateJob("Processing","addBibMatch  $query");
 		my @values = ($bibid,$problem,$extra,$jobid);
 		$dbHandler->updateWithParameters($query,\@values);
 		## Now find likely candidates elsewhere in the ME DB	
-		addRelatedBibScores($dbHandler,$bibid,$log);
+		addRelatedBibScores($bibid);
 		## Now run match queries starting with tight and moving down to loose
 		my $i=0;
 		while(!$matchedSomething && @matchQueries[$i])
@@ -397,7 +390,7 @@ sub addBibMatch
 			my $matchReason = @matchQueries[$i+1];
 			$i+=2;
 			$log->addLine($matchQ);
-			updateJob($dbHandler,"Processing","addBibMatch  $matchQ");
+			updateJob("Processing","addBibMatch  $matchQ");
 			my @results2 = @{$dbHandler->query($matchQ)};
 			foreach(@results2)
 			{
@@ -406,7 +399,7 @@ sub addBibMatch
 				my $holds = findHoldsOnBib($mbibid,$dbHandler);
 				$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
 				VALUES(\$1,\$2,\$3,\$4,\$5)";
-				updateJob($dbHandler,"Processing","addBibMatch  $query");
+				updateJob("Processing","addBibMatch  $query");
 				$log->addLine($query);
 				my @values = ($bibid,$mbibid,$matchReason,$holds,$jobid);
 				$dbHandler->updateWithParameters($query,\@values);
@@ -417,7 +410,7 @@ sub addBibMatch
 					{
 						if($queries{'action'} eq 'movecopies')
 						{
-							moveCopiesOntoHighestScoringBibCandidate($dbHandler,$bibid,$matchReason,$log);
+							moveCopiesOntoHighestScoringBibCandidate($bibid,$matchReason);
 						}
 						elsif($queries{'action'} eq 'mergebibs')
 						{
@@ -433,16 +426,13 @@ sub addBibMatch
 
 sub addRelatedBibScores
 {
-	my $dbHandler = @_[0];
-	my $rootbib = @_[1];
-	my $log = @_[2];
-	
+	my $rootbib = @_[0];
 	# Score bibs that have the same evergreen fingerprint
 	my $query =
 	"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE FINGERPRINT = (SELECT EG_FINGERPRINT FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
-	updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
+	updateJob("Processing","addRelatedBibScores  $query");
 	$log->addLine($query);
-	updateScoreWithQuery($query,$dbHandler,$log);
+	updateScoreWithQuery($query);
 	
 	# Pickup a few more bibs that contain the same title anywhere in the MARC
 	# This is very slow and it doesn't help get real matches
@@ -452,7 +442,7 @@ sub addRelatedBibScores
 	{
 		$query="
 		SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib";
-		updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
+		updateJob("Processing","addRelatedBibScores  $query");
 		my @results = @{$dbHandler->query($query)};		
 		foreach(@results)
 		{
@@ -463,9 +453,9 @@ sub addRelatedBibScores
 			{		
 				$query =
 				"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
-				updateJob($dbHandler,"Processing","addRelatedBibScores  $query");
+				updateJob("Processing","addRelatedBibScores  $query");
 				$log->addLine($query);
-				updateScoreWithQuery($query,$dbHandler,$log);
+				updateScoreWithQuery($query);
 			}
 		}
 	}
@@ -475,10 +465,7 @@ sub addRelatedBibScores
 
 sub attemptMovePhysicalItemsOnAnElectronicBook
 {
-	my $dbHandler = @_[0];
-	my $oldbib = @_[1];
-	my $log = @_[2];
-	
+	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
 	$queries{'action'} = 'movecopies';
@@ -549,23 +536,21 @@ sub attemptMovePhysicalItemsOnAnElectronicBook
 	);
 	
 	$queries{'matchQueries'} = \@matchQueries;
-	my $success = addBibMatch($dbHandler,\%queries,$log);
+	my $success = addBibMatch(\%queries);
 	return $success;
 }
 
 sub moveCopiesOntoHighestScoringBibCandidate
 {
-	my $dbHandler = @_[0];	
-	my $oldbib = @_[1];	
-	my $matchReason = @_[2];
-	my $log = @_[3];
+	my $oldbib = @_[0];	
+	my $matchReason = @_[1];
 	my $query = "select sbm.bib2,sbs.score from SEEKDESTROY.BIB_MATCH sbm,seekdestroy.bib_score sbs where 
 	sbm.bib1=$oldbib and
 	sbm.match_reason=\$\$$matchReason\$\$ and
 	sbs.record=sbm.bib2
 	order by sbs.score";
 	$log->addLine($query);
-	updateJob($dbHandler,"Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
+	updateJob("Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine($#results." potential bibs for destination");
 	my $hscore=0;
@@ -586,18 +571,15 @@ sub moveCopiesOntoHighestScoringBibCandidate
 	$log->addLine("Winning Score: $hscore - $winner");
 	if($winner!=0)
 	{
-		undeleteBIB($dbHandler,$winner,$log);
+		undeleteBIB($winner);
 		#print "moveCopiesOntoHighestScoringBibCandidate from: $oldbib\n";
-		moveAllCallNumbers($dbHandler,$oldbib,$winner,$matchReason,$log);
-		moveHolds($dbHandler,$oldbib,$winner,$log);
+		moveAllCallNumbers($oldbib,$winner,$matchReason);
+		moveHolds($oldbib,$winner);
 	}
 }
 
 sub findPhysicalItemsOnElectronicBooks
 {
-	my $mobUtil = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
 	my $success = 0;
 	# Find Electronic bibs with physical items
 	my $query = "
@@ -619,7 +601,7 @@ sub findPhysicalItemsOnElectronicBooks
 		marc ~ \$\$<leader>.......[acdm]\$\$
 	)	
 	";
-	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronic  $query");
+	updateJob("Processing","findPhysicalItemsOnElectronic  $query");
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine($#results." Bibs with physical Items attached");
 	foreach(@results)
@@ -627,7 +609,7 @@ sub findPhysicalItemsOnElectronicBooks
 		my $row = $_;
 		my @row = @{$row};
 		my $bibid = @row[0];
-		$success = attemptMovePhysicalItemsOnAnElectronicBook($dbHandler,$bibid,$log);		
+		$success = attemptMovePhysicalItemsOnAnElectronicBook($bibid);		
 	}
 	
 	return $success;
@@ -636,9 +618,6 @@ sub findPhysicalItemsOnElectronicBooks
 
 sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 {
-	my $mobUtil = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
 	# Find Electronic bibs with physical items but and in the dedupe project
 	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
@@ -657,7 +636,7 @@ sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 		marc ~ \$\$<leader>......i\$\$
 	)	
 	";
-	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
+	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
 	my @results = @{$dbHandler->query($query)};
 	$log->addLine($#results." Bibs with physical Items attached from the dedupe");
 	foreach(@results)
@@ -667,20 +646,15 @@ sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 		my $bibid = @row[0];
 		my $marc = @row[1];
 		my @scorethis = ($bibid,$marc);
-		my @st = ([@scorethis]);
-		my $q = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bibid";
-		$dbHandler->update($q);
-		updateScoreCache($dbHandler,$log,\@st);
-		recordAssetCopyMove($bibid,$dbHandler,$log);
+		my @st = ([@scorethis]);		
+		updateScoreCache(\@st);
+		recordAssetCopyMove($bibid);
 	}
 
 }
 
 sub findPhysicalItemsOnElectronicAudioBooks
 {
-	my $mobUtil = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
 	my $success = 0;
 	# Find Electronic Audio bibs with physical items
 	my $query = "
@@ -698,7 +672,7 @@ sub findPhysicalItemsOnElectronicAudioBooks
 		marc ~ \$\$<leader>......i\$\$
 	)
 	";
-	updateJob($dbHandler,"Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
+	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine($#results." Audio Bibs with physical Items attached");
 	foreach(@results)
@@ -706,7 +680,7 @@ sub findPhysicalItemsOnElectronicAudioBooks
 		my $row = $_;
 		my @row = @{$row};
 		my $bibid = @row[0];
-		$success = attemptMovePhysicalItemsOnAnElectronicAudioBook($dbHandler,$bibid,$log);		
+		$success = attemptMovePhysicalItemsOnAnElectronicAudioBook($bibid);		
 	}
 	
 	return $success;
@@ -716,10 +690,7 @@ sub findPhysicalItemsOnElectronicAudioBooks
 
 sub attemptMovePhysicalItemsOnAnElectronicAudioBook
 {
-	my $dbHandler = @_[0];
-	my $oldbib = @_[1];
-	my $log = @_[2];
-	
+	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
 	$queries{'action'} = 'movecopies';
@@ -786,16 +757,13 @@ sub attemptMovePhysicalItemsOnAnElectronicAudioBook
 	);
 	
 	$queries{'matchQueries'} = \@matchQueries;
-	my $success = addBibMatch($dbHandler,\%queries,$log);
+	my $success = addBibMatch(\%queries);
 	return $success;
 }
 
 sub findItemsCircedAsAudioBooksButAttachedNonAudioBib
 {
-	my $dbHandler = @_[0];
-	my $oldbib = @_[1];
-	my $log = @_[2];
-	
+	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
 	$queries{'action'} = 'movecopies';
@@ -848,7 +816,7 @@ limit 1000
 	);
 	
 	$queries{'matchQueries'} = \@matchQueries;
-	my $success = addBibMatch($dbHandler,\%queries,$log);
+	my $success = addBibMatch(\%queries);
 	return $success;
 }
 
@@ -856,8 +824,6 @@ limit 1000
 sub updateScoreWithQuery
 {
 	my $query = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -868,15 +834,12 @@ sub updateScoreWithQuery
 		my @scorethis = ($bibid,$marc);
 		$log->addLine("Scoring: $bibid");
 		my @st = ([@scorethis]);
-		updateScoreCache($dbHandler,$log,\@st);
+		updateScoreCache(\@st);
 	}
 }
 
 sub findPossibleDups
 {
-	my $mobUtil = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
 	my $query="
 		select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
 		(
@@ -892,12 +855,12 @@ sub findPossibleDups
 		group by fingerprint
 		limit 1000;
 		";
-updateJob($dbHandler,"Processing","findPossibleDups  $query");
+updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
 	my @st=();
 	my %alreadycached;
 	my $deleteoldscorecache="";
-updateJob($dbHandler,"Processing","findPossibleDups  looping results");
+updateJob("Processing","findPossibleDups  looping results");
 	foreach(@results)
 	{
 		my $row = $_;
@@ -922,15 +885,12 @@ updateJob($dbHandler,"Processing","findPossibleDups  looping results");
 		}
 	}
 
-	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);
-	my $q = "delete from SEEKDESTROY.BIB_SCORE where RECORD IN( $deleteoldscorecache)";
-	updateJob($dbHandler,"Processing","findPossibleDups deleting old cache    $query");
-	#print $dbHandler->update($q);				
-	$q = "delete from SEEKDESTROY.BIB_MATCH where BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)";
-	updateJob($dbHandler,"Processing","findPossibleDups deleting old cache bib_match   $query");
-	#print $dbHandler->update($q);	
-	updateJob($dbHandler,"Processing","findPossibleDups updating scorecache selectivly");
-	updateScoreCache($dbHandler,$log,\@st);
+	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
+	$q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
+	updateJob("Processing","findPossibleDups deleting old cache bib_match   $query");
+	print $dbHandler->update($q);	
+	updateJob("Processing","findPossibleDups updating scorecache selectivly");
+	updateScoreCache(\@st);
 	
 	
 	my $query="
@@ -941,7 +901,7 @@ updateJob($dbHandler,"Processing","findPossibleDups  looping results");
 		order by sd_fingerprint,score desc
 		";
 		$log->addLine($query);
-updateJob($dbHandler,"Processing","findPossibleDups  $query");
+updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
 	my $current_fp ='';
 	my $master_record=-2;
@@ -971,15 +931,14 @@ updateJob($dbHandler,"Processing","findPossibleDups  $query");
 
 sub findHoldsOnBib
 {
-	my $bibid=@_[0];
-	my $dbHandler=@_[1];	
+	my $bibid=@_[0];	
 	my $hold = 0;
 	my $query = "select id from action.hold_request ahr where 
 	ahr.target=$bibid and
 	ahr.hold_type=\$\$T\$\$ and
 	ahr.capture_time is null and
 	ahr.cancel_time is null";
-	updateJob($dbHandler,"Processing","findHolds $query");
+	updateJob("Processing","findHolds $query");
 	my @results = @{$dbHandler->query($query)};
 	if($#results != -1)
 	{
@@ -991,9 +950,7 @@ sub findHoldsOnBib
 
 sub recordAssetCopyMove
 {
-	my $oldbib = @_[0];	
-	my $dbHandler = @_[1];
-	my $log = @_[2];
+	my $oldbib = @_[0];		
 	my $query = "select distinct call_number from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$)";
 	my @cids;
 	my @results = @{$dbHandler->query($query)};
@@ -1006,7 +963,7 @@ sub recordAssetCopyMove
 	if($#cids>-1)
 	{		
 		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
-		moveAssetCopyToPreviouslyDedupedBib($dbHandler,$oldbib,$log);		
+		moveAssetCopyToPreviouslyDedupedBib($oldbib);		
 	}
 	
 	#Check again after the attempt to undedupe
@@ -1019,7 +976,7 @@ sub recordAssetCopyMove
 	}
 	if($#cids>-1)
 	{
-		attemptMovePhysicalItemsOnAnElectronicBook($dbHandler,$oldbib,$log);
+		attemptMovePhysicalItemsOnAnElectronicBook($oldbib);
 	}
 	@cids = ();
 	my @results = @{$dbHandler->query($query)};
@@ -1033,23 +990,21 @@ sub recordAssetCopyMove
 		VALUES(\$1,\$2,\$3,\$4,\$5)";	
 		my @values = ($callnum,$oldbib,"FAILED",'false',$jobid);
 		$log->addLine($query);				
-		updateJob($dbHandler,"Processing","recordAssetCopyMove  $query");
+		updateJob("Processing","recordAssetCopyMove  $query");
 		$dbHandler->updateWithParameters($query,\@values);		
 	}	
 }
 
 sub moveAssetCopyToPreviouslyDedupedBib
 {
-	my $dbHandler = @_[0];	
-	my $currentBibID = @_[1];
-	my $log = @_[2];
+	my $currentBibID = @_[0];
 	my %possibles;	
 	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
 	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid
 	and
 	bre.marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
 	";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 	#print $query."\n";
 	my @results = @{$dbHandler->query($query)};
 	my $winner=0;
@@ -1061,7 +1016,7 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 		my $prevmarc = @row[1];
 		$prevmarc =~ s/(<leader>.........)./${1}a/;
 		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my @temp=($prevmarc,determineElectric($prevmarc),scoreMARC($prevmarc,$log));
+		my @temp=($prevmarc,determineElectricScore($prevmarc),scoreMARC($prevmarc));
 		#need to initialize the winner values
 		$winner=@row[0];
 		$currentWinnerElectricScore = @temp[1];
@@ -1089,32 +1044,30 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 	}
 	if($winner!=0)
 	{
-		undeleteBIB($dbHandler,$winner,$log);
+		undeleteBIB($winner);
 		#find all of the eligible call_numbers
 		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{	
 			my @row = @{$_};
 			my $acnid = @row[0];			
-			my $callNID = moveCallNumber($dbHandler,$acnid,$currentBibID,$winner,"Dedupe pool",$log);
+			my $callNID = moveCallNumber($acnid,$currentBibID,$winner,"Dedupe pool");
 			$query = 
 			"INSERT INTO seekdestroy.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
 			VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$callNID,$jobid)";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
 			$log->addLine($query);
 			$dbHandler->update($query);
 		}
-		moveHolds($dbHandler,$currentBibID,$winner,$log);
+		moveHolds($currentBibID,$winner);
 	}
 }
 
 sub undeleteBIB
 {
-	my $dbHandler = @_[0];
-	my $bib = @_[1];
-	my $log = @_[2];
+	my $bib = @_[0];	
 	my $query = "select deleted from biblio.record_entry where id=$bib";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
@@ -1131,7 +1084,7 @@ sub undeleteBIB
 			{
 				$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $bib";
 				$log->addLine($query);
-updateJob($dbHandler,"Processing","undeleteBIB  $query");
+updateJob("Processing","undeleteBIB  $query");
 				my @results = @{$dbHandler->query($query)};
 				foreach(@results)
 				{	
@@ -1152,11 +1105,10 @@ updateJob($dbHandler,"Processing","undeleteBIB  $query");
 
 sub moveAllCallNumbers
 {
-	my $dbHandler = @_[0];	
-	my $oldbib = @_[1];
-	my $destbib = @_[2];
-	my $matchReason = @_[3];
-	my $log = @_[4];	
+	my $oldbib = @_[0];
+	my $destbib = @_[1];
+	my $matchReason = @_[2];
+	
 	my $query = "select id from asset.call_number where record=$oldbib and label!=\$\$##URI##\$\$";
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};	
@@ -1165,18 +1117,16 @@ sub moveAllCallNumbers
 		my @row = @{$_};
 		my $calln = @row[0];
 		#print "moveAllCallNumbers from: $oldbib\n";
-		moveCallNumber($dbHandler,$calln,$oldbib,$destbib,$matchReason,$log);
+		moveCallNumber($calln,$oldbib,$destbib,$matchReason);
 	}
 	
 }
 
 sub recordCopyMove
 {
-	my $dbHandler = @_[0];	
-	my $callnumberid = @_[1];
-	my $destcall = @_[2];
-	my $matchReason = @_[3];	
-	my $log = @_[4];
+	my $callnumberid = @_[0];
+	my $destcall = @_[1];
+	my $matchReason = @_[2];
 	my $query = "SELECT ID FROM ASSET.COPY WHERE CALL_NUMBER=$callnumberid";
 	my @results = @{$dbHandler->query($query)};	
 	foreach(@results)
@@ -1192,12 +1142,11 @@ sub recordCopyMove
 
 sub recordCallNumberMove
 {
-	my $dbHandler = @_[0];	
-	my $callnumber = @_[1];
-	my $record = @_[2];
-	my $destrecord = @_[3];
-	my $matchReason = @_[4];	
-	my $log = @_[5];
+	my $callnumber = @_[0];
+	my $record = @_[1];
+	my $destrecord = @_[2];
+	my $matchReason = @_[3];	
+	
 	#print "recordCallNumberMove from: $record\n";
 	my $query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,FROMBIB,TOBIB,EXTRA,JOB) VALUES(\$1,\$2,\$3,\$4,\$5)";	
 	my @values = ($callnumber,$record,$destrecord,$matchReason,$jobid);
@@ -1207,14 +1156,13 @@ sub recordCallNumberMove
 	
 sub moveCallNumber
 {
-	my $dbHandler = @_[0];	
-	my $callnumberid = @_[1];
-	my $frombib = @_[2];
+	my $callnumberid = @_[0];
+	my $frombib = @_[1];
 	#print "moveCallNumber from: $frombib\n";
-	my $destbib = @_[3];
-	my $matchReason = @_[4];	
-	my $log = @_[5];
-	my $finalCallNumber=$callnumberid;
+	my $destbib = @_[2];
+	my $matchReason = @_[3];
+
+	my $finalCallNumber = $callnumberid;
 	my $query = "SELECT ID,LABEL,RECORD FROM ASSET.CALL_NUMBER WHERE RECORD = $destbib
 	AND LABEL=(SELECT LABEL FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) 
 	AND OWNING_LIB=(SELECT OWNING_LIB FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) AND NOT DELETED";
@@ -1231,9 +1179,9 @@ sub moveCallNumber
 		$moveCopies=1;
 		my @row = @{$_};
 		my $destcall = @row[0];
-		recordCopyMove($dbHandler,$callnumberid,$destcall,$matchReason,$log);	
+		recordCopyMove($callnumberid,$destcall,$matchReason);	
 		$query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destcall WHERE CALL_NUMBER=$callnumberid";
-		updateJob($dbHandler,"Processing","moveCallNumber  $query");
+		updateJob("Processing","moveCallNumber  $query");
 		$log->addLine($query);
 		$dbHandler->update($query);
 		$finalCallNumber=$destcall;
@@ -1242,11 +1190,11 @@ sub moveCallNumber
 	if(!$moveCopies)
 	{	
 	#print "it didnt have a duplciate call number... going into recordCallNumberMove\n";
-		recordCallNumberMove($dbHandler,$callnumberid,$frombib,$destbib,$matchReason,$log);		
+		recordCallNumberMove($callnumberid,$frombib,$destbib,$matchReason);		
 		#print "done with recordCallNumberMove\n";
 		$query="UPDATE ASSET.CALL_NUMBER SET RECORD=$destbib WHERE ID=$callnumberid";
 		#print "$query\n";
-		updateJob($dbHandler,"Processing","moveCallNumber  $query");
+		updateJob("Processing","moveCallNumber  $query");
 		$log->addLine($query);
 		$dbHandler->update($query);		
 	}
@@ -1256,18 +1204,16 @@ sub moveCallNumber
 
 sub moveHolds
 {
-	my $dbHandler = @_[0];	
-	my $oldBib = @_[1];
-	my $newBib = @_[2];
-	my $log = @_[3];	
+	my $oldBib = @_[0];
+	my $newBib = @_[1];
 	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE=\$\$T\$\$ AND fulfillment_time IS NULL AND capture_time IS NULL AND cancel_time IS NULL"; 
 	$log->addLine($query);
-	updateJob($dbHandler,"Processing","moveHolds  $query");
+	updateJob("Processing","moveHolds  $query");
 	#print $query."\n";
 	$dbHandler->update($query);
 }
 
-sub determineElectric
+sub determineElectricScore
 {
 	my $marc = @_[0];
 	my @e56s = $marc->field('856');
@@ -1278,7 +1224,7 @@ sub determineElectric
 	my $textmarc = $marc->as_formatted();
 	my $scoreTipToElectronic=3;
 	my $score=0;
-	my @phrases = ("electronic resource","ebook","eaudiobook","overdrive","download");
+	my @phrases = ("electronic resource","ebook","eaudiobook","overdrive","download","ebrary");
 	my $has856 = 0;
 	my $has245h = getsubfield($marc,'245','h');
 	my $found=0;	
@@ -1307,7 +1253,7 @@ sub determineElectric
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
-		if($#c>1) # Found more than 1 match on that phrase
+		if($#c>0) # Found more than 1 match on that phrase
 		{
 			$score++;
 		}
@@ -1316,9 +1262,47 @@ sub determineElectric
 	return $score;
 }
 
+sub determineAudioBookScore
+{
+	my $marc = @_[0];
+	my @two45 = $marc->field('245');
+	
+	my $textmarc = $marc->as_formatted();	
+	my $score=0;
+	my @phrases = ("cd","sound","recording","spoken","audiobook","audio book","compact disc","sound disc","narrated by","hachette audio");
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@phrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+				}
+			}
+		}
+	}
+	if($found)
+	{
+		$score++;
+	}
+	foreach(@phrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		$score+=$#c+1;
+	}	
+	return $score;
+}
+
 sub identifyBibsToScore
 {
-	my $dbHandler = @_[0];
 	my @ret;
 #This query finds bibs that have not received a score at all
 	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE LIMIT 1";
@@ -1355,28 +1339,27 @@ sub identifyBibsToScore
 
 sub scoreMARC
 {
-	my $marc = shift;
-	my $log = shift;
+	my $marc = shift;	
 	
 	my $score = 0;
-	$score+= score($marc,2,100,400,$log,'245');
-	$score+= score($marc,1,1,150,$log,'100');
-	$score+= score($marc,1,1.1,150,$log,'110');
-	$score+= score($marc,0,50,200,$log,'6..');
-	$score+= score($marc,0,50,100,$log,'02.');
+	$score+= score($marc,2,100,400,'245');
+	$score+= score($marc,1,1,150,'100');
+	$score+= score($marc,1,1.1,150,'110');
+	$score+= score($marc,0,50,200,'6..');
+	$score+= score($marc,0,50,100,'02.');
 	
-	$score+= score($marc,0,100,200,$log,'246');
-	$score+= score($marc,0,100,100,$log,'130');
-	$score+= score($marc,0,100,100,$log,'010');
-	$score+= score($marc,0,100,200,$log,'490');
-	$score+= score($marc,0,10,50,$log,'830');
+	$score+= score($marc,0,100,200,'246');
+	$score+= score($marc,0,100,100,'130');
+	$score+= score($marc,0,100,100,'010');
+	$score+= score($marc,0,100,200,'490');
+	$score+= score($marc,0,10,50,'830');
 	
-	$score+= score($marc,1,.5,50,$log,'300');
-	$score+= score($marc,0,1,100,$log,'7..');
-	$score+= score($marc,2,2,100,$log,'50.');
-	$score+= score($marc,2,2,100,$log,'52.');
+	$score+= score($marc,1,.5,50,'300');
+	$score+= score($marc,0,1,100,'7..');
+	$score+= score($marc,2,2,100,'50.');
+	$score+= score($marc,2,2,100,'52.');
 	
-	$score+= score($marc,2,.5,200,$log,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
+	$score+= score($marc,2,.5,200,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
 
 	return $score;
 }
@@ -1387,7 +1370,6 @@ sub score
 	my ($type) = shift;
 	my ($weight) = shift;
 	my ($cap) = shift;
-	my ($log) = shift;
 	my @tags = @_;
 	my $ou = Dumper(@tags);
 	#$log->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
@@ -1395,17 +1377,17 @@ sub score
 	if($type == 0) #0 is field count
 	{
 		#$log->addLine("Calling count_field");
-		$score = count_field($marc,$log,\@tags);
+		$score = count_field($marc,\@tags);
 	}
 	elsif($type == 1) #1 is length of field
 	{
 		#$log->addLine("Calling field_length");
-		$score = field_length($marc,$log,\@tags);
+		$score = field_length($marc,\@tags);
 	}
 	elsif($type == 2) #2 is subfield count
 	{
 		#$log->addLine("Calling count_subfield");
-		$score = count_subfield($marc,$log,\@tags);
+		$score = count_subfield($marc,\@tags);
 	}
 	$score = $score * $weight;
 	if($score > $cap)
@@ -1419,9 +1401,8 @@ sub score
 
 sub count_subfield
 {
-	my ($marc) = $_[0];
-	my $log = $_[1];
-	my @tags = @{$_[2]};
+	my ($marc) = $_[0];	
+	my @tags = @{$_[1]};
 	my $total = 0;
 	#$log->addLine("Starting count_subfield");
 	foreach my $tag (@tags) 
@@ -1445,9 +1426,8 @@ sub count_subfield
 
 sub count_field 
 {
-	my ($marc) = $_[0];
-	my $log = $_[1];
-	my @tags = @{$_[2]};
+	my ($marc) = $_[0];	
+	my @tags = @{$_[1]};
 	my $total = 0;
 	foreach my $tag (@tags) 
 	{
@@ -1459,9 +1439,8 @@ sub count_field
 
 sub field_length 
 {
-	my ($marc) = $_[0];
-	my $log = $_[1];
-	my @tags = @{$_[2]};
+	my ($marc) = $_[0];	
+	my @tags = @{$_[1]};
 
 	my @f = $marc->field(@tags[0]);
 	return 0 unless @f;
@@ -1570,8 +1549,7 @@ sub readyMARCForInsertIntoME
 sub mergeMARC856
 {
 	my $marc = @_[0];
-	my $marc2 = @_[1];
-	my $log = @_[2];
+	my $marc2 = @_[1];	
 	my @eight56s = $marc->field("856");
 	my @eight56s_2 = $marc2->field("856");
 	my @eights;
@@ -1661,9 +1639,9 @@ sub mergeMARC856
 
 
 	while ((my $internal, my $mvalue ) = each(%urls))
-		{	
-			$marc->insert_grouped_field( $mvalue );
-		}
+	{	
+		$marc->insert_grouped_field( $mvalue );
+	}
 	return $marc;
 }
 
@@ -1684,8 +1662,7 @@ sub convertMARCtoXML
 
 sub createNewJob
 {
-	my $dbHandler = @_[0];
-	my $status = @_[1];
+	my $status = @_[0];
 	my $query = "INSERT INTO seekdestroy.job(status) values('$status')";
 	my $results = $dbHandler->update($query);
 	if($results)
@@ -1866,7 +1843,6 @@ sub marc_isvalid {
 
 sub setupSchema
 {
-	my $dbHandler = @_[0];
 	my $query = "DROP SCHEMA seekdestroy CASCADE";
 	$dbHandler->update($query);
 	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'seekdestroy'";
@@ -1893,6 +1869,7 @@ sub setupSchema
 		improved_score_amount bigint default 0,
 		score_time timestamp default now(), 		
 		electronic bigint,
+		audiobook_score bigint,
 		item_form text,
 		date1 text,
 		record_type text,
@@ -1981,9 +1958,8 @@ sub setupSchema
 
 sub updateJob
 {
-	my $dbHandler = @_[0];
-	my $status = @_[1];
-	my $action = @_[2];
+	my $status = @_[0];
+	my $action = @_[1];
 	my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
 	my $results = $dbHandler->update($query);
 	return $results;
@@ -1992,7 +1968,6 @@ sub updateJob
 sub getDBconnects
 {
 	my $openilsfile = @_[0];
-	my $log = @_[1];
 	my $xml = new XML::Simple;
 	my $data = $xml->XMLin($openilsfile);
 	my %conf;
