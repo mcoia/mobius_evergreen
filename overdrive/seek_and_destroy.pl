@@ -51,12 +51,11 @@ if(! -e $xmlconf)
 	exit;
  }
 
- our $mobUtil = new Mobiusutil(); 
- my $conf = $mobUtil->readConfFile($configFile);
-
- 
-  our $jobid=-1;
-  our $log;
+	our $mobUtil = new Mobiusutil();  
+	our $jobid=-1;
+	our $log;
+	our $dbHandler;
+	my $conf = $mobUtil->readConfFile($configFile);
   
  if($conf)
  {
@@ -92,11 +91,12 @@ if(! -e $xmlconf)
 			{
 				#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
 				#updateScoreWithQuery($query);
-				findPhysicalItemsOnElectronicBooksUnDedupe();
-				findPhysicalItemsOnElectronicAudioBooksUnDedupe();
-				findPhysicalItemsOnElectronicAudioBooks();
-				findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
-				findInvalidElectronicMARC();
+				#findPhysicalItemsOnElectronicBooksUnDedupe();
+				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
+				#findPhysicalItemsOnElectronicAudioBooks();
+				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
+				#findInvalidElectronicMARC();
+				#findInvalid856TOCURL();
 				findPossibleDups();
 				#findPhysicalItemsOnElectronicBooks();
 				#print "regular cache\n";
@@ -123,6 +123,35 @@ if(! -e $xmlconf)
 		print "Config file does not define 'logfile'\n";		
 	}
 }
+
+sub findInvalid856TOCURL
+{
+	my $query = "
+	select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag=\$\$856\$\$ and ind2=\$\$0\$\$) AND  
+marc ~ \$\$<leader>......a\$\$
+and
+lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">table of contents</subfield>\$\$
+ limit 1000";
+ 
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
+		if(!isScored( $id))
+		{
+			my @scorethis = ($id,$marc);
+			my @st = ([@scorethis]);			
+			updateScoreCache(\@st);
+		}
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with E-Links but 008 tag is missing o,q,s",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);
+	}
+}
+
 
 sub findInvalidElectronicMARC
 {
@@ -853,7 +882,7 @@ sub findPossibleDups
 		and not deleted
 		and fingerprint != \$\$\$\$
 		group by fingerprint
-		limit 1000;
+		limit 10;
 		";
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
@@ -886,7 +915,7 @@ updateJob("Processing","findPossibleDups  looping results");
 	}
 
 	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
-	$q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
+	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
 	updateJob("Processing","findPossibleDups deleting old cache bib_match   $query");
 	print $dbHandler->update($q);	
 	updateJob("Processing","findPossibleDups updating scorecache selectivly");
@@ -1253,7 +1282,7 @@ sub determineElectricScore
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
-		if($#c>0) # Found more than 1 match on that phrase
+		if($#c>1) # Found more than 1 match on that phrase
 		{
 			$score++;
 		}
@@ -1266,7 +1295,7 @@ sub determineAudioBookScore
 {
 	my $marc = @_[0];
 	my @two45 = $marc->field('245');
-	
+	$log->addLine(getsubfield($marc,'254','a'));
 	my $textmarc = $marc->as_formatted();	
 	my $score=0;
 	my @phrases = ("cd","sound","recording","spoken","audiobook","audio book","compact disc","sound disc","narrated by","hachette audio");
@@ -1284,19 +1313,19 @@ sub determineAudioBookScore
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
+					$log->addLine("$phrase + 5 points 245h");
 				}
 			}
 		}
-	}
-	if($found)
-	{
-		$score++;
 	}
 	foreach(@phrases)
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
-		$score+=$#c+1;
+		if($#c>1) # Found more than 1 match on that phrase
+		{
+			$score++;
+		}
 	}	
 	return $score;
 }
