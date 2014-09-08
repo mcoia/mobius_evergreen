@@ -52,14 +52,18 @@ if(! -e $xmlconf)
  }
 
 	our $mobUtil = new Mobiusutil();  
+	my $conf = $mobUtil->readConfFile($configFile);
 	our $jobid=-1;
 	our $log;
 	our $dbHandler;
-	my $conf = $mobUtil->readConfFile($configFile);
+	our @electronicSearchPhrases;
+	our @audioBookSearchPhrases;
   
  if($conf)
  {
 	my %conf = %{$conf};
+	@electronicSearchPhrases = $conf{"electronicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"electronicsearchphrases"})} : ();
+	@audioBookSearchPhrases = $conf{"audiobooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"audiobooksearchphrases"})} : ();
 	if ($conf{"logfile"})
 	{
 		my $dt = DateTime->now(time_zone => "local"); 
@@ -68,7 +72,8 @@ if(! -e $xmlconf)
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
-		$log->addLogLine(" ---------------- Script Starting ---------------- ");		
+		$log->addLogLine(" ---------------- Script Starting ---------------- ");
+	
 		my @reqs = ("logfile"); 
 		my $valid = 1;
 		my $errorMessage="";
@@ -89,17 +94,17 @@ if(! -e $xmlconf)
 			$jobid = createNewJob('processing');
 			if($jobid!=-1)
 			{
-				#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE id in(1320891,1044364)";
-				#updateScoreWithQuery($query);
 				#findPhysicalItemsOnElectronicBooksUnDedupe();
 				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
+				#findPhysicalItemsOnElectronicBooks();
 				#findPhysicalItemsOnElectronicAudioBooks();
-				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
+				findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
 				#findInvalidElectronicMARC();
 				#findInvalid856TOCURL();
-				findPossibleDups();
-				#findPhysicalItemsOnElectronicBooks();
+				#findPossibleDups();
 				#print "regular cache\n";
+				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=1305532");
+				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 				#updateScoreCache();
 			}
 			#searchDestroyLeaders();
@@ -127,11 +132,11 @@ if(! -e $xmlconf)
 sub findInvalid856TOCURL
 {
 	my $query = "
-	select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag=\$\$856\$\$ and ind2=\$\$0\$\$) AND  
-marc ~ \$\$<leader>......a\$\$
-and
-lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">table of contents</subfield>\$\$
- limit 1000";
+select id,marc from biblio.record_entry where not deleted and 
+lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">table of contents.+?</datafield>\$\$
+or
+lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">publisher description.+?</datafield>\$\$
+	";
  
 	my @results = @{$dbHandler->query($query)};	
 	foreach(@results)
@@ -147,7 +152,7 @@ lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"
 			updateScoreCache(\@st);
 		}
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		my @values = ($id,"MARC with E-Links but 008 tag is missing o,q,s",$jobid);
+		my @values = ($id,"MARC with table of contents E-Links",$jobid);
 		$dbHandler->updateWithParameters($query,\@values);
 	}
 }
@@ -157,26 +162,25 @@ sub findInvalidElectronicMARC
 {
 	my $query = "
 	select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag=\$\$856\$\$ and ind2=\$\$0\$\$) AND  
-marc ~ \$\$<leader>......a\$\$
+marc ~ \$\$<leader>......[at]\$\$
 and
 marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
 and
-marc !~ \$\$<leader>.......p\$\$
- limit 1000";
+marc !~ \$\$<leader>.......p\$\$";
  
 	my @results = @{$dbHandler->query($query)};	
+	$log->addLine($#results." possible invalid Electronic MARC");
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
 		my $id = @row[0];
 		my $marc = @row[1];
-		if(!isScored( $id))
-		{
-			my @scorethis = ($id,$marc);
-			my @st = ([@scorethis]);			
-			updateScoreCache(\@st);
-		}
+		
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);			
+		updateScoreCache(\@st);
+		
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
 		my @values = ($id,"MARC with E-Links but 008 tag is missing o,q,s",$jobid);
 		$dbHandler->updateWithParameters($query,\@values);
@@ -437,9 +441,13 @@ sub addBibMatch
 				{
 					if($_ eq $matchReason)
 					{
-						if($queries{'action'} eq 'movecopies')
+						if($queries{'action'} eq 'moveallcopies')
 						{
 							moveCopiesOntoHighestScoringBibCandidate($bibid,$matchReason);
+						}
+						elsif($queries{'action'} eq 'movesomecopies')
+						{
+							
 						}
 						elsif($queries{'action'} eq 'mergebibs')
 						{
@@ -449,7 +457,7 @@ sub addBibMatch
 				}
 			}
 		}
-	}	
+	}
 	return $matchedSomething;
 }
 
@@ -497,7 +505,7 @@ sub attemptMovePhysicalItemsOnAnElectronicBook
 	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
-	$queries{'action'} = 'movecopies';
+	$queries{'action'} = 'moveallcopies';
 	$queries{'problem'} = "Physical items attched to Electronic Bibs";
 	my @okmatchingreasons=("Physical Items to Electronic Bib exact","Physical Items to Electronic Bib exact minus date1");
 	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
@@ -722,7 +730,7 @@ sub attemptMovePhysicalItemsOnAnElectronicAudioBook
 	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
-	$queries{'action'} = 'movecopies';
+	$queries{'action'} = 'moveallcopies';
 	$queries{'problem'} = "Physical items attched to Electronic Audio Bibs";
 	my @okmatchingreasons=("Physical Items to Electronic Audio Bib exact","Physical Items to Electronic Audio Bib exact minus date1");
 	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
@@ -795,7 +803,7 @@ sub findItemsCircedAsAudioBooksButAttachedNonAudioBib
 	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
-	$queries{'action'} = 'movecopies';
+	$queries{'action'} = 'moveallcopies';
 	$queries{'problem'} = "Non-audiobook Bib with items that circulate as 'AudioBooks'";
 	my @okmatchingreasons=();
 	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
@@ -1246,22 +1254,19 @@ sub determineElectricScore
 {
 	my $marc = @_[0];
 	my @e56s = $marc->field('856');
+	my @two45 = $marc->field('245');
 	if(!@e56s)
 	{
 		return 0;
 	}
 	my $textmarc = $marc->as_formatted();
-	my $scoreTipToElectronic=3;
 	my $score=0;
-	my @phrases = ("electronic resource","ebook","eaudiobook","overdrive","download","ebrary");
-	my $has856 = 0;
-	my $has245h = getsubfield($marc,'245','h');
 	my $found=0;	
 	foreach(@e56s)
 	{
 		my $field = $_;
-		my $ind2 = $field->indicator(2);
-		if($ind2==0) #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
+		my $ind2 = $field->indicator(2);		
+		if($ind2 eq '0') #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
 		{	
 			my @subs = $field->subfield('u');
 			foreach(@subs)
@@ -1274,13 +1279,32 @@ sub determineElectricScore
 			}
 		}
 	}
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@electronicSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
 	if($found)
 	{
 		$score++;
 	}
-	foreach(@phrases)
+	foreach(@electronicSearchPhrases)
 	{
-		my $phrase = $_;
+		my $phrase = lc$_;
 		my @c = split($phrase,lc$textmarc);
 		if($#c>1) # Found more than 1 match on that phrase
 		{
@@ -1295,10 +1319,10 @@ sub determineAudioBookScore
 {
 	my $marc = @_[0];
 	my @two45 = $marc->field('245');
-	$log->addLine(getsubfield($marc,'254','a'));
+	#$log->addLine(getsubfield($marc,'245','a'));
 	my $textmarc = $marc->as_formatted();	
 	my $score=0;
-	my @phrases = ("cd","sound","recording","spoken","audiobook","audio book","compact disc","sound disc","narrated by","hachette audio");
+	
 	foreach(@two45)
 	{
 		my $field = $_;		
@@ -1306,7 +1330,7 @@ sub determineAudioBookScore
 		foreach(@subs)
 		{
 			my $subf = lc($_);
-			foreach(@phrases)
+			foreach(@audioBookSearchPhrases)
 			{
 				#if the phrases are found in the 245h, they are worth 5 each
 				my $phrase=lc($_);
@@ -1318,15 +1342,16 @@ sub determineAudioBookScore
 			}
 		}
 	}
-	foreach(@phrases)
+	foreach(@audioBookSearchPhrases)
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
 		if($#c>1) # Found more than 1 match on that phrase
 		{
 			$score++;
+			$log->addLine("$phrase + 1 points elsewhere");
 		}
-	}	
+	}
 	return $score;
 }
 
@@ -1334,7 +1359,7 @@ sub identifyBibsToScore
 {
 	my @ret;
 #This query finds bibs that have not received a score at all
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE LIMIT 1";
+	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE LIMIT 100";
 	my @results = @{$dbHandler->query($query)};
 	my @news;
 	my @updates;
@@ -1740,6 +1765,7 @@ sub populate_marc {
     # date1, date2
     my $my_008 = $record->field('008');
 	my $my_007 = $record->field('007');
+	my $my_006 = $record->field('006');
     $marc{tag008} = $my_008->as_string() if ($my_008);
     if (defined $marc{tag008}) {
         unless (length $marc{tag008} == 40) {
@@ -1763,6 +1789,7 @@ sub populate_marc {
     }
 
 	$marc{tag007} = $my_007->as_string() if ($my_007);
+	$marc{tag006} = $my_006->as_string() if ($my_006);
 	if (defined $marc{tag007}) {
 		$marc{audioformat} = substr($marc{tag007},3,1) unless (length $marc{tag007} < 4 );
 	}
@@ -1772,7 +1799,12 @@ sub populate_marc {
         $marc{item_form} = substr($marc{tag008},29,1) if ($marc{tag008});
     } else {
         $marc{item_form} = substr($marc{tag008},23,1) if ($marc{tag008});
-    }
+    }	
+	#fall through to 006 if 008 doesn't have info for item form
+	if ( length($mobUtil->trim($marc{item_form}))<1)
+	{
+		$marc{item_form} = substr($marc{tag006},6,1) if ($marc{tag006} && (length $marc{tag006} > 6 ));
+	}
 
     # isbns
     my @isbns = $record->field('020') if $record->field('020');
@@ -1873,7 +1905,7 @@ sub marc_isvalid {
 sub setupSchema
 {
 	my $query = "DROP SCHEMA seekdestroy CASCADE";
-	$dbHandler->update($query);
+	#$dbHandler->update($query);
 	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'seekdestroy'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
@@ -1938,7 +1970,7 @@ sub setupSchema
 		merged boolean default false,
 		has_holds boolean default false,
 		job  bigint NOT NULL,
-		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		CONSTRAINT bib_match_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.bib_item_circ_mods(
@@ -1947,7 +1979,7 @@ sub setupSchema
 		circ_modifier text,
 		different_circs bigint,
 		job  bigint NOT NULL,
-		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		CONSTRAINT bib_item_circ_mods_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.problem_bibs(
@@ -1956,7 +1988,7 @@ sub setupSchema
 		problem text,
 		extra text,
 		job  bigint NOT NULL,
-		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		CONSTRAINT problem_bibs_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.call_number_move(
@@ -1968,7 +2000,7 @@ sub setupSchema
 		success boolean default true,
 		change_time timestamp default now(),
 		job  bigint NOT NULL,
-		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		CONSTRAINT call_number_move_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.copy_move(
@@ -1979,7 +2011,18 @@ sub setupSchema
 		extra text,
 		change_time timestamp default now(),
 		job  bigint NOT NULL,
-		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
+		CONSTRAINT copy_move_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		$query = "CREATE TABLE seekdestroy.bib_marc_update(
+		id serial,
+		record bigint,
+		prev_marc text,
+		changed_marc text,
+		new_record boolean NOT NULL DEFAULT false,
+		change_time timestamp default now(),
+		job  bigint NOT NULL,
+		CONSTRAINT bib_marc_update_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 	}
