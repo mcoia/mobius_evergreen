@@ -502,7 +502,7 @@ sub addBibMatch
 			$matchQ =~ s/\$bibid/$bibid/gi;
 			my $matchReason = @matchQueries[$i+1];
 			$i+=2;
-			$log->addLine($matchQ);
+			#$log->addLine($matchQ);
 			updateJob("Processing","addBibMatch  $matchQ");
 			my @results2 = @{$dbHandler->query($matchQ)};
 			my $foundResults=0;
@@ -514,7 +514,7 @@ sub addBibMatch
 				$query = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
 				VALUES(\$1,\$2,\$3,\$4,\$5)";
 				updateJob("Processing","addBibMatch  $query");
-				$log->addLine($query);
+				$log->addLine("Possible $bibid match: $mbibid $matchReason");
 				my @values = ($bibid,$mbibid,$matchReason,$holds,$jobid);
 				$dbHandler->updateWithParameters($query,\@values);
 				$matchedSomething = 1;
@@ -696,7 +696,7 @@ sub moveCopiesOntoHighestScoringBibCandidate
 	sbm.match_reason=\$\$$matchReason\$\$ and
 	sbs.record=sbm.bib2
 	order by sbs.score";
-	$log->addLine($query);
+	$log->addLine("Looking through matches");
 	updateJob("Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine(($#results+1)." potential bibs for destination");
@@ -1411,7 +1411,7 @@ sub recordCopyMove
 		my $copy = @row[0];
 		$query="INSERT INTO SEEKDESTROY.COPY_MOVE(COPY,FROMCALL,TOCALL,EXTRA,JOB) VALUES(\$1,\$2,\$3,\$4,\$5)";
 		my @values = ($copy,$callnumberid,$destcall,$matchReason,$jobid);
-		$log->addLine($query);
+		#$log->addLine($query);
 		$dbHandler->updateWithParameters($query,\@values);
 	}
 }
@@ -1442,7 +1442,7 @@ sub moveCallNumber
 	my $query = "SELECT ID,LABEL,RECORD FROM ASSET.CALL_NUMBER WHERE RECORD = $destbib
 	AND LABEL=(SELECT LABEL FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) 
 	AND OWNING_LIB=(SELECT OWNING_LIB FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) AND NOT DELETED";
-	$log->addLine($query);
+	
 	my $moveCopies=0;
 	my @results = @{$dbHandler->query($query)};
 	#print "about to loop the callnumber results\n";
@@ -1452,13 +1452,14 @@ sub moveCallNumber
 		## Call number already exists on that record for that 
 		## owning library and label. So let's just move the 
 		## copies to it instead of moving the call number			
-		$moveCopies=1;
+		$moveCopies=1;		
 		my @row = @{$_};
 		my $destcall = @row[0];
+		$log->addLine("Call number $callnumberid had a match on the destination bib $destbib and we will be moving the copies to the call number instead of moving the call number");
 		recordCopyMove($callnumberid,$destcall,$matchReason);	
 		$query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destcall WHERE CALL_NUMBER=$callnumberid";
 		updateJob("Processing","moveCallNumber  $query");
-		$log->addLine($query);
+		$log->addLine("Moving copies from $calnumberid call number to $destcall");
 		$dbHandler->update($query);
 		$finalCallNumber=$destcall;
 	}	
@@ -1471,7 +1472,7 @@ sub moveCallNumber
 		$query="UPDATE ASSET.CALL_NUMBER SET RECORD=$destbib WHERE ID=$callnumberid";
 		#print "$query\n";
 		updateJob("Processing","moveCallNumber  $query");
-		$log->addLine($query);
+		$log->addLine("Moving all of the call numbers from record $callnumberid to =$destbib");
 		$dbHandler->update($query);		
 	}
 	return $finalCallNumber;
