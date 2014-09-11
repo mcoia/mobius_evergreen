@@ -23,13 +23,6 @@ use Unicode::Normalize;
 
 
 
-# select sbm.bib1,sbm.bib2,sbm.match_reason,merged,has_holds,job,sbs1.score,sbs2.score,sbs2.sd_fingerprint from seekdestroy.bib_match sbm,seekdestroy.bib_score sbs1,seekdestroy.bib_score sbs2
-# where
-# sbs1.record=sbm.bib1 and
-# sbs2.record=sbm.bib2
-# order by bib1,sbs1.score
-
-
 
 my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
@@ -56,12 +49,18 @@ if(! -e $xmlconf)
 	our $jobid=-1;
 	our $log;
 	our $dbHandler;
+	our $audio_book_score_when_audiobooks_dont_belong;
+	our $electronic_score_when_bib_is_considered_electronic;
 	our @electronicSearchPhrases;
 	our @audioBookSearchPhrases;
   
  if($conf)
  {
 	my %conf = %{$conf};
+	$audio_book_score_when_audiobooks_dont_belong = $conf{"audio_book_score_when_audiobooks_dont_belong"};
+	$electronic_score_when_bib_is_considered_electronic = $conf{"electronic_score_when_bib_is_considered_electronic"};
+	print "electronic_score_when_bib_is_considered_electronic = $electronic_score_when_bib_is_considered_electronic\n";
+	print "audio_book_score_when_audiobooks_dont_belong = $audio_book_score_when_audiobooks_dont_belong\n";
 	@electronicSearchPhrases = $conf{"electronicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"electronicsearchphrases"})} : ();
 	@audioBookSearchPhrases = $conf{"audiobooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"audiobooksearchphrases"})} : ();
 	if ($conf{"logfile"})
@@ -96,14 +95,15 @@ if(! -e $xmlconf)
 			{
 				#findPhysicalItemsOnElectronicBooksUnDedupe();
 				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
-				#findPhysicalItemsOnElectronicBooks();
-				#findPhysicalItemsOnElectronicAudioBooks();
-				findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
-				#findInvalidElectronicMARC();
+				findInvalidElectronicMARC();
+				findPhysicalItemsOnElectronicBooks();
+				findPhysicalItemsOnElectronicAudioBooks();
+				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
+				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
 				#findInvalid856TOCURL();
 				#findPossibleDups();
 				#print "regular cache\n";
-				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=1305532");
+				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=262387");
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 				#updateScoreCache();
 			}
@@ -166,10 +166,14 @@ marc ~ \$\$<leader>......[at]\$\$
 and
 marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
 and
-marc !~ \$\$<leader>.......p\$\$";
+marc !~ \$\$tag=\"006\">......[oqs]\$\$
+and
+marc !~ \$\$<leader>.......p\$\$
+
+";
  
 	my @results = @{$dbHandler->query($query)};	
-	$log->addLine($#results." possible invalid Electronic MARC");
+	$log->addLine(($#results+1)." possible invalid Electronic MARC");
 	foreach(@results)
 	{
 		my $row = $_;
@@ -184,7 +188,64 @@ marc !~ \$\$<leader>.......p\$\$";
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
 		my @values = ($id,"MARC with E-Links but 008 tag is missing o,q,s",$jobid);
 		$dbHandler->updateWithParameters($query,\@values);
+		$query = "select electronic from seekdestroy.bib_score where record=$id";
+		my @results2= @{$dbHandler->query($query)};	
+		foreach(@results2)
+		{
+			my @row2 = @{$_};
+			if(@row2[0]  > $electronic_score_when_bib_is_considered_electronic)
+			{
+				updateMARCSetElectronic($id,$marc);
+			}
+		}
 	}
+}
+
+sub updateMARCSetElectronic
+{	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
+	if($marcr{tag008})
+	{
+		my $z08 = $marcob->field('008');
+		$marcob->delete_field($z08);		
+		$replacement=substr($marcr{tag008},0,23).'s'.substr($marcr{tag008},24);		
+		$z08->update($replacement);
+		$marcob->insert_fields_ordered($z08);
+		
+	}
+	elsif($marcr{tag006})
+	{
+		my $z06 = $marcob->field('006');
+		$marcob->delete_fields($z06);		
+		$replacement=substr($marcr{tag006},0,6).'s'.substr($marcr{tag006},7);
+		$z06->update($replacement);
+		$marcob->insert_fields_ordered($z06);		
+	}
+	
+	my $xmlresult = convertMARCtoXML($marcob);
+	updateMARC($xmlresult,$bibid,'false','Correcting for Electronic in the 008/006');
+}
+
+sub updateMARC
+{
+	my $newmarc = @_[0];
+	my $bibid = @_[1];
+	my $newrecord = @_[2];
+	my $extra = @_[3];
+	my $query = "INSERT INTO SEEKDESTROY.BIB_MARC_UPDATE (RECORD,PREV_MARC,CHANGED_MARC,NEW_RECORD,EXTRA,JOB)
+	VALUES(\$1,(SELECT MARC FROM BIBLIO.RECORD_ENTRY WHERE ID=\$2),\$3,\$4,\$5,\$6)";		
+	my @values = ($bibid,$bibid,$newmarc,$newrecord,$extra,$jobid);
+	$dbHandler->updateWithParameters($query,\@values);
+	$query = "UPDATE BIBLIO.RECORD_ENTRY SET MARC=\$1 WHERE ID=\$2";
+	@values = ($newmarc,$bibid);
+	$dbHandler->updateWithParameters($query,\@values);
 }
 
 sub isScored
@@ -218,7 +279,7 @@ sub updateScoreCache
 	if(@newAndUpdates[1])
 	{
 		@updateIDs = @{@newAndUpdates[1]};
-		$log->addLine("Found ".($#updateIDs+1)." new Bibs to update score");	
+		#$log->addLine("Found ".($#updateIDs+1)." new Bibs to update score");	
 	}
 	foreach(@newIDs)
 	{
@@ -361,6 +422,8 @@ sub findPhysicalItemsOnElectronicBooksUnDedupe
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+		or
+		marc ~ \$\$tag=\"006\">......[oqs]\$\$
 	)
 	and
 	(
@@ -373,7 +436,7 @@ sub findPhysicalItemsOnElectronicBooksUnDedupe
 	";
 	updateJob("Processing","findPhysicalItemsOnElectronicBooksUnDedupe  $query");
 	my @results = @{$dbHandler->query($query)};
-	$log->addLine($#results." Bibs with physical Items attached from the dedupe");
+	$log->addLine(($#results+1)." Bibs with physical Items attached from the dedupe");
 	foreach(@results)
 	{
 		my $row = $_;
@@ -387,9 +450,24 @@ sub findPhysicalItemsOnElectronicBooksUnDedupe
 	}
 }
 
+sub getBibScores
+{
+	my $bib = @_[0];
+	my $scoreType = @_[1];
+	my $query = "SELECT $scoreType FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$bib";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		return @row[0];
+	}
+	return -1;
+}
+
 sub addBibMatch
 {
-	my %queries = %{@_[0]};
+	my %queries = %{@_[0]};	
 	my $matchedSomething=0;
 	my $searchQuery = $queries{'searchQuery'};
 	my $problem = $queries{'problem'};
@@ -397,12 +475,14 @@ sub addBibMatch
 	my @takeActionWithTheseMatchingMethods = @{$queries{'takeActionWithTheseMatchingMethods'}};	
 	updateJob("Processing","addBibMatch  $searchQuery");
 	my @results = @{$dbHandler->query($searchQuery)};
-	$log->addLine($#results." Search Query results");
+	$log->addLine(($#results+1)." Search Query results");
 	foreach(@results)
 	{
+		my $matchedSomethingThisRound=0;
 		my $row = $_;
 		my @row = @{$row};
 		my $bibid = @row[0];
+		my $bibAudioScore = getBibScores($bibid,'audiobook_score');
 		my $marc = @row[1];
 		my $extra = @row[2] ? @row[2] : '';
 		my @scorethis = ($bibid,$marc);
@@ -416,7 +496,7 @@ sub addBibMatch
 		addRelatedBibScores($bibid);
 		## Now run match queries starting with tight and moving down to loose
 		my $i=0;
-		while(!$matchedSomething && @matchQueries[$i])
+		while(!$matchedSomethingThisRound && @matchQueries[$i])
 		{
 			my $matchQ = @matchQueries[$i];
 			$matchQ =~ s/\$bibid/$bibid/gi;
@@ -425,6 +505,7 @@ sub addBibMatch
 			$log->addLine($matchQ);
 			updateJob("Processing","addBibMatch  $matchQ");
 			my @results2 = @{$dbHandler->query($matchQ)};
+			my $foundResults=0;
 			foreach(@results2)
 			{
 				my @ro = @{$_};
@@ -437,17 +518,37 @@ sub addBibMatch
 				my @values = ($bibid,$mbibid,$matchReason,$holds,$jobid);
 				$dbHandler->updateWithParameters($query,\@values);
 				$matchedSomething = 1;
+				$matchedSomethingThisRound = 1;				
+				$foundResults = 1;
+			}
+			if($foundResults)
+			{
+				my $tookAction=0;
 				foreach(@takeActionWithTheseMatchingMethods)
 				{
 					if($_ eq $matchReason)
 					{
 						if($queries{'action'} eq 'moveallcopies')
 						{
-							moveCopiesOntoHighestScoringBibCandidate($bibid,$matchReason);
+							$tookAction = moveCopiesOntoHighestScoringBibCandidate($bibid,$matchReason);
 						}
 						elsif($queries{'action'} eq 'movesomecopies')
 						{
-							
+							if($queries{'ifaudioscorebelow'})
+							{
+								if( $bibAudioScore < $queries{'ifaudioscorebelow'} )
+								{
+									$tookAction = moveCopiesOntoHighestScoringBibCandidate($bibid,$matchReason,$extra);
+								}
+							}
+							elsif($queries{'ifaudioscoreabove'})
+							{
+								if( $bibAudioScore > $queries{'ifaudioscoreabove'} )
+								{
+									$tookAction = moveCopiesOntoHighestScoringBibCandidate($bibid,$matchReason,$extra);
+								}
+							}
+
 						}
 						elsif($queries{'action'} eq 'mergebibs')
 						{
@@ -456,7 +557,7 @@ sub addBibMatch
 					}
 				}
 			}
-		}
+		}		
 	}
 	return $matchedSomething;
 }
@@ -468,7 +569,7 @@ sub addRelatedBibScores
 	my $query =
 	"SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE FINGERPRINT = (SELECT EG_FINGERPRINT FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
 	updateJob("Processing","addRelatedBibScores  $query");
-	$log->addLine($query);
+	#$log->addLine($query);
 	updateScoreWithQuery($query);
 	
 	# Pickup a few more bibs that contain the same title anywhere in the MARC
@@ -518,6 +619,8 @@ sub attemptMovePhysicalItemsOnAnElectronicBook
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+		or
+		marc ~ \$\$tag=\"006\">......[oqs]\$\$
 	)
 	and
 	(
@@ -581,6 +684,13 @@ sub moveCopiesOntoHighestScoringBibCandidate
 {
 	my $oldbib = @_[0];	
 	my $matchReason = @_[1];
+	my @copies;
+	my $moveOnlyCopies=0;
+	if(@_[2])
+	{
+		$moveOnlyCopies=1;
+		@copies = @{$mobUtil->makeArrayFromComma(@_[2])};		
+	}
 	my $query = "select sbm.bib2,sbs.score from SEEKDESTROY.BIB_MATCH sbm,seekdestroy.bib_score sbs where 
 	sbm.bib1=$oldbib and
 	sbm.match_reason=\$\$$matchReason\$\$ and
@@ -589,7 +699,7 @@ sub moveCopiesOntoHighestScoringBibCandidate
 	$log->addLine($query);
 	updateJob("Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
 	my @results = @{$dbHandler->query($query)};	
-	$log->addLine($#results." potential bibs for destination");
+	$log->addLine(($#results+1)." potential bibs for destination");
 	my $hscore=0;
 	my $winner=0;
 	foreach(@results)
@@ -610,8 +720,68 @@ sub moveCopiesOntoHighestScoringBibCandidate
 	{
 		undeleteBIB($winner);
 		#print "moveCopiesOntoHighestScoringBibCandidate from: $oldbib\n";
-		moveAllCallNumbers($oldbib,$winner,$matchReason);
-		moveHolds($oldbib,$winner);
+		if(!$moveOnlyCopies)
+		{
+			moveAllCallNumbers($oldbib,$winner,$matchReason);
+			moveHolds($oldbib,$winner);
+		}
+		else
+		{
+			moveCopies(\@copies,$winner,$matchReason);			
+		}
+		return $winner;
+	}
+	else
+	{
+		$query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(FROMBIB,EXTRA,SUCCESS,JOB)
+		VALUES(\$1,\$2,\$3,\$4,\$5)";	
+		my @values = ($oldbib,"FAILED - $matchReason",'false',$jobid);
+		$log->addLine($query);				
+		$log->addLine("$oldbib,\"FAILED - $matchReason\",'false',$jobid");
+		updateJob("Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
+		$dbHandler->updateWithParameters($query,\@values);		
+	}
+	return 0;
+}
+
+sub moveCopies
+{
+	my @copies = @{@_[0]};
+	my $destBib = @_[1];
+	my $reason = @_[2];
+	foreach(@copies)
+	{		
+		my $copyBarcode = $_;
+		print "Working on copy $copyBarcode\n";
+		my $query = "SELECT OWNING_LIB,EDITOR,CREATOR,LABEL,ID,RECORD FROM ASSET.CALL_NUMBER WHERE ID = 
+		(SELECT CALL_NUMBER FROM ASSET.COPY WHERE BARCODE=\$\$$copyBarcode\$\$)";
+		my @results = @{$dbHandler->query($query)};					
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $owning_lib = @row[0];
+			my $editor = @row[1];
+			my $creator = @row[2];
+			my $label = @row[3];
+			my $oldcall = @row[4];
+			my $oldbib = @row[5];
+			my $destCallNumber = createCallNumberOnBib($destBib,$label,$owning_lib,$creator,$editor);
+			if($destCallNumber!=-1)
+			{
+				print "received $destCallNumber and moving into recordCopyMove($oldcall,$destCallNumber,$reason)\n";
+				recordCopyMove($oldcall,$destCallNumber,$reason);
+				$query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destCallNumber WHERE BARCODE=\$\$$copyBarcode\$\$";
+				updateJob("Processing","moveCopies  $query");
+				$log->addLine($query);
+				$log->addLine("Moving $copyBarcode from $oldcall $oldbib to $destCallNumber $destBib" );
+				#$dbHandler->update($query);
+			}
+			else
+			{
+				$log->addLine("ERROR! DID NOT GET A CALL NUMBER FROM createCallNumberOnBib($destBib,$label,$owning_lib,$creator,$editor)");
+			}
+		}
 	}
 }
 
@@ -628,6 +798,8 @@ sub findPhysicalItemsOnElectronicBooks
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+		or
+		marc ~ \$\$tag=\"006\">......[oqs]\$\$
 	)
 	and
 	(
@@ -640,7 +812,7 @@ sub findPhysicalItemsOnElectronicBooks
 	";
 	updateJob("Processing","findPhysicalItemsOnElectronic  $query");
 	my @results = @{$dbHandler->query($query)};	
-	$log->addLine($#results." Bibs with physical Items attached");
+	$log->addLine(($#results+1)." Bibs with physical Items attached");
 	foreach(@results)
 	{
 		my $row = $_;
@@ -667,6 +839,8 @@ sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+		or
+		marc ~ \$\$tag=\"006\">......[oqs]\$\$
 	)
 	and
 	(
@@ -675,7 +849,7 @@ sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 	";
 	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
 	my @results = @{$dbHandler->query($query)};
-	$log->addLine($#results." Bibs with physical Items attached from the dedupe");
+	$log->addLine(($#results+1)." Bibs with physical Items attached from the dedupe");
 	foreach(@results)
 	{
 		my $row = $_;
@@ -703,6 +877,8 @@ sub findPhysicalItemsOnElectronicAudioBooks
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+		or
+		marc ~ \$\$tag=\"006\">......[oqs]\$\$
 	)
 	and
 	(
@@ -711,7 +887,7 @@ sub findPhysicalItemsOnElectronicAudioBooks
 	";
 	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
 	my @results = @{$dbHandler->query($query)};	
-	$log->addLine($#results." Audio Bibs with physical Items attached");
+	$log->addLine(($#results+1)." Audio Bibs with physical Items attached");
 	foreach(@results)
 	{
 		my $row = $_;
@@ -743,6 +919,8 @@ sub attemptMovePhysicalItemsOnAnElectronicAudioBook
 	and 
 	(
 		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+		or
+		marc ~ \$\$tag=\"006\">......[oqs]\$\$
 	)
 	and
 	(
@@ -803,9 +981,10 @@ sub findItemsCircedAsAudioBooksButAttachedNonAudioBib
 	my $oldbib = @_[0];
 	my $query;
 	my %queries=();
-	$queries{'action'} = 'moveallcopies';
+	$queries{'action'} = 'movesomecopies';
+	$queries{'ifaudioscorebelow'} = $audio_book_score_when_audiobooks_dont_belong;
 	$queries{'problem'} = "Non-audiobook Bib with items that circulate as 'AudioBooks'";
-	my @okmatchingreasons=();
+	my @okmatchingreasons=("AudioBooks attached to non AudioBook Bib exact","AudioBooks attached to non AudioBook Bib exact minus date1");
 	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
 	# Find Bibs that are not Audiobooks and have physical items that are circed as audiobooks
 	$queries{'searchQuery'} = "
@@ -820,7 +999,6 @@ ac.circ_modifier=\$\$AudioBooks\$\$
 group by bre.id,bre.marc
 limit 1000
 	";
-	my @results;
 	if($oldbib)
 	{
 		$queries{'searchQuery'} = "select id,marc from biblio.record_entry where id=$oldbib";
@@ -858,6 +1036,65 @@ limit 1000
 }
 
 
+sub findItemsNotCircedAsAudioBooksButAttachedAudioBib
+{
+	my $oldbib = @_[0];
+	my $query;
+	my %queries=();
+	$queries{'action'} = 'movesomecopies';
+	$queries{'ifaudioscoreabove'} = $audio_book_score_when_audiobooks_dont_belong;
+	$queries{'problem'} = "Audiobook Bib with items that do not circulate as 'AudioBooks'";
+	my @okmatchingreasons=("Non-AudioBooks attached to AudioBook Bib exact","Non-AudioBooks attached to AudioBook Bib exact minus date1");
+	$queries{'takeActionWithTheseMatchingMethods'}=(); #\@okmatchingreasons;
+	# Find Bibs that are Audiobooks and have physical items that are not circed as audiobooks
+	$queries{'searchQuery'} = "
+	select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn where 
+bre.marc ~ \$\$<leader>......i\$\$
+and
+bre.id=acn.record and
+acn.id=ac.call_number and
+not acn.deleted and
+not ac.deleted and
+ac.circ_modifier != \$\$AudioBooks\$\$
+group by bre.id,bre.marc
+limit 1000
+	";
+	if($oldbib)
+	{
+		$queries{'searchQuery'} = "select id,marc from biblio.record_entry where id=$oldbib";
+	}
+	my @matchQueries = 
+	(
+		"SELECT RECORD FROM  seekdestroy.bib_score
+		WHERE 
+		DATE1 = (SELECT DATE1 FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND RECORD_TYPE != \$\$i\$\$
+		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = \$bibid)		
+		AND RECORD != \$bibid","Non-AudioBooks attached to AudioBook Bib exact",		
+		
+		"SELECT RECORD FROM  seekdestroy.bib_score
+		WHERE 		
+		RECORD_TYPE != \$\$i\$\$
+		AND BIB_LVL = (SELECT BIB_LVL FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = \$bibid) 
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = \$bibid)		
+		AND RECORD != \$bibid","Non-AudioBooks attached to AudioBook Bib exact minus date1",		
+		
+		"SELECT RECORD FROM  seekdestroy.bib_score
+		WHERE TITLE = (SELECT TITLE FROM seekdestroy.bib_score WHERE RECORD = \$bibid)
+		AND AUTHOR = (SELECT AUTHOR FROM seekdestroy.bib_score WHERE RECORD = \$bibid)			
+		AND RECORD_TYPE = \$\$i\$\$
+		AND RECORD != \$bibid","Non-AudioBooks attached to AudioBook Bib Bib loose"
+				
+	);
+	
+	$queries{'matchQueries'} = \@matchQueries;
+	my $success = addBibMatch(\%queries);
+	return $success;
+}
+
 sub updateScoreWithQuery
 {
 	my $query = @_[0];
@@ -869,7 +1106,7 @@ sub updateScoreWithQuery
 		my $bibid = @row[0];
 		my $marc = @row[1];
 		my @scorethis = ($bibid,$marc);
-		$log->addLine("Scoring: $bibid");
+		#$log->addLine("Scoring: $bibid");
 		my @st = ([@scorethis]);
 		updateScoreCache(\@st);
 	}
@@ -1040,6 +1277,8 @@ sub moveAssetCopyToPreviouslyDedupedBib
 	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid
 	and
 	bre.marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
+	and
+	bre.marc !~ \$\$tag=\"006\">......[oqs]\$\$
 	";
 updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 	#print $query."\n";
@@ -1239,6 +1478,44 @@ sub moveCallNumber
 
 }
 
+sub createCallNumberOnBib
+{
+	my $bibid = @_[0];
+	my $call_label = @_[1];
+	my $owning_lib = @_[2];
+	my $creator = @_[3];
+	my $editor = @_[4];
+	my $query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$$call_label\$\$ AND RECORD=$bibid AND OWNING_LIB=$owning_lib";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};	
+		print "got a call number that was on the record already\n";
+		return @row[0];
+	}
+	$query = "INSERT INTO ASSET.CALL_NUMBER (CREATOR,EDITOR,OWNING_LIB,LABEL,LABEL_CLASS,RECORD) 
+	VALUES (\$1,\$2,\$3,\$4,\$5,\$6)";
+	$log->addLine($query);
+	$log->addLine("$creator,$editor,$owning_lib,$call_label,1,$bibid");
+	my @values = ($creator,$editor,$owning_lib,$call_label,1,$bibid);
+	$dbHandler->updateWithParameters($query,\@values);
+	print "Creating new call number: $creator,$editor,$owning_lib,$call_label,1,$bibid \n";
+	$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$$call_label\$\$ AND RECORD=$bibid AND OWNING_LIB=$owning_lib";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,TOBIB,JOB) VALUES(\$1,\$2,\$3)";	
+		@values = (@row[0],$bibid,$jobid);
+		$log->addLine($query);
+		$dbHandler->updateWithParameters($query,\@values);
+		return @row[0];
+	}
+	return -1;	
+}
+
 sub moveHolds
 {
 	my $oldBib = @_[0];
@@ -1259,7 +1536,9 @@ sub determineElectricScore
 	{
 		return 0;
 	}
+	$marc->delete_fields(@two45);
 	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
 	my $score=0;
 	my $found=0;	
 	foreach(@e56s)
@@ -1293,7 +1572,7 @@ sub determineElectricScore
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
-					$log->addLine("$phrase + 5 points 245h");
+					#$log->addLine("$phrase + 5 points 245h");
 				}
 			}
 		}
@@ -1320,7 +1599,9 @@ sub determineAudioBookScore
 	my $marc = @_[0];
 	my @two45 = $marc->field('245');
 	#$log->addLine(getsubfield($marc,'245','a'));
-	my $textmarc = $marc->as_formatted();	
+	$marc->delete_fields(@two45);
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
 	my $score=0;
 	
 	foreach(@two45)
@@ -1337,7 +1618,7 @@ sub determineAudioBookScore
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
-					$log->addLine("$phrase + 5 points 245h");
+					#$log->addLine("$phrase + 5 points 245h");
 				}
 			}
 		}
@@ -1346,10 +1627,10 @@ sub determineAudioBookScore
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
-		if($#c>1) # Found more than 1 match on that phrase
+		if($#c>0) # Found more than 1 match on that phrase
 		{
 			$score++;
-			$log->addLine("$phrase + 1 points elsewhere");
+			#$log->addLine("$phrase + 1 points elsewhere");
 		}
 	}
 	return $score;
@@ -2021,6 +2302,7 @@ sub setupSchema
 		changed_marc text,
 		new_record boolean NOT NULL DEFAULT false,
 		change_time timestamp default now(),
+		extra text,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_marc_update_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
