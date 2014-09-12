@@ -53,6 +53,10 @@ if(! -e $xmlconf)
 	our $electronic_score_when_bib_is_considered_electronic;
 	our @electronicSearchPhrases;
 	our @audioBookSearchPhrases;
+	our @microficheSearchPhrases;
+	our @microfilmSearchPhrases;
+	our @videoSearchPhrases;
+	our @largePrintBookSearchPhrases;
   
  if($conf)
  {
@@ -63,6 +67,11 @@ if(! -e $xmlconf)
 	print "audio_book_score_when_audiobooks_dont_belong = $audio_book_score_when_audiobooks_dont_belong\n";
 	@electronicSearchPhrases = $conf{"electronicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"electronicsearchphrases"})} : ();
 	@audioBookSearchPhrases = $conf{"audiobooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"audiobooksearchphrases"})} : ();
+	@microficheSearchPhrases = $conf{"microfichesearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"microfichesearchphrases"})} : ();
+	@microfilmSearchPhrases = $conf{"microfilmsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"microfilmsearchphrases"})} : ();
+	@videoSearchPhrases = $conf{"videosearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"videosearchphrases"})} : ();
+	@largePrintBookSearchPhrases = $conf{"largeprintbooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"largeprintbooksearchphrases"})} : ();
+	
 	if ($conf{"logfile"})
 	{
 		my $dt = DateTime->now(time_zone => "local"); 
@@ -72,7 +81,6 @@ if(! -e $xmlconf)
 		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-	
 		my @reqs = ("logfile"); 
 		my $valid = 1;
 		my $errorMessage="";
@@ -294,8 +302,7 @@ sub updateScoreCache
 		$marcob =~ s/(<leader>.........)./${1}a/;
 		$marcob = MARC::Record->new_from_xml($marcob);
 		my $score = scoreMARC($marcob);
-		my $electricScore = determineElectricScore($marcob);
-		my $audioBookScore = determineAudioBookScore($marcob);
+		my %allscores = %{getAllScores($marcob)};
 		my %fingerprints = %{getFingerprints($marcob)};
 		#$log->addLine(Dumper(%fingerprints));
 		my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE
@@ -303,6 +310,10 @@ sub updateScoreCache
 		SCORE,
 		ELECTRONIC,
 		audiobook_score,
+		largeprint_score,
+		video_score,
+		microfilm_score,
+		microfiche_score,
 		item_form,
 		date1,
 		record_type,
@@ -312,7 +323,13 @@ sub updateScoreCache
 		sd_fingerprint,
 		audioformat,
 		eg_fingerprint) 
-		VALUES($bibid,$score,$electricScore,$audioBookScore,
+		VALUES($bibid,$score,
+		$allscores{'electricScore'},
+		$allscores{'audioBookScore'},
+		$allscores{'largeprint_score'},
+		$allscores{'video_score'},
+		$allscores{'microfilm_score'},
+		$allscores{'microfiche_score'},
 		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		)";		
 		my @values = (
@@ -324,7 +341,7 @@ sub updateScoreCache
 		$fingerprints{author},
 		$fingerprints{baseline},
 		$fingerprints{audioformat}
-		);
+		);		
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircs($bibid,$dbHandler);	
 	}
@@ -339,13 +356,16 @@ sub updateScoreCache
 		$marcob =~ s/(<leader>.........)./${1}a/;
 		$marcob = MARC::Record->new_from_xml($marcob);		
 		my $score = scoreMARC($marcob);		
-		my $electricScore = determineElectricScore($marcob);
-		my $audioBookScore = determineAudioBookScore($marcob);		
+		my %allscores = %{getAllScores($marcob)};
 		my %fingerprints = %{getFingerprints($marcob)};		
 		my $improved = $score - $oldscore;
 		my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(), 
-		ELECTRONIC=$electricScore,
-		audiobook_score=$audioBookScore,
+		ELECTRONIC=$allscores{'electricScore'},
+		audiobook_score=$allscores{'audioBookScore'},
+		largeprint_score=$allscores{'largeprint_score'},
+		video_score=$allscores{'video_score'},
+		microfilm_score=$allscores{'microfilm_score'},
+		microfiche_score=$allscores{'microfiche_score'},
 		item_form = \$1,
 		date1 = \$2,
 		record_type = \$3,
@@ -1459,7 +1479,7 @@ sub moveCallNumber
 		recordCopyMove($callnumberid,$destcall,$matchReason);	
 		$query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destcall WHERE CALL_NUMBER=$callnumberid";
 		updateJob("Processing","moveCallNumber  $query");
-		$log->addLine("Moving copies from $calnumberid call number to $destcall");
+		$log->addLine("Moving copies from $callnumberid call number to $destcall");
 		$dbHandler->update($query);
 		$finalCallNumber=$destcall;
 	}	
@@ -1528,6 +1548,19 @@ sub moveHolds
 	$dbHandler->update($query);
 }
 
+sub getAllScores
+{
+	my $marc = @_[0];
+	my %allscores = ();
+	$allscores{'electricScore'}=determineElectricScore($marc);
+	$allscores{'audioBookScore'}=determineAudioBookScore($marc);
+	$allscores{'largeprint_score'}=determineLargePrintScore($marc);
+	$allscores{'video_score'}=determineVideoScore($marc);
+	$allscores{'microfilm_score'}=determineMicrofilmScore($marc);
+	$allscores{'microfiche_score'}=determineMicroficheScore($marc);
+	return \%allscores;
+}
+
 sub determineElectricScore
 {
 	my $marc = @_[0];
@@ -1586,7 +1619,7 @@ sub determineElectricScore
 	{
 		my $phrase = lc$_;
 		my @c = split($phrase,lc$textmarc);
-		if($#c>1) # Found more than 1 match on that phrase
+		if($#c>1) # Found more than 2 matches on that phrase
 		{
 			$score++;
 		}
@@ -1625,6 +1658,174 @@ sub determineAudioBookScore
 		}
 	}
 	foreach(@audioBookSearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found more than 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	return $score;
+}
+
+sub determineLargePrintScore
+{
+	my $marc = @_[0];
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@largePrintBookSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
+	foreach(@largePrintBookSearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found more than 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	return $score;
+}
+
+sub determineVideoScore
+{
+	my $marc = @_[0];
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@videoSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
+	foreach(@videoSearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found more than 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	return $score;
+}
+
+sub determineMicrofilmScore
+{
+	my $marc = @_[0];
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@microfilmSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
+	foreach(@microfilmSearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found more than 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	return $score;
+}
+
+sub determineMicroficheScore
+{
+	my $marc = @_[0];
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@microficheSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
+	foreach(@microficheSearchPhrases)
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
@@ -2035,7 +2236,7 @@ sub getFingerprints
 	return \%fingerprints;
 }
 
-#This is borrowed from fingerprinter
+#This is borrowed from fingerprinter and altered a bit for the item form
 sub populate_marc {
     my $record = @_[0];
     my %marc = (); $marc{isbns} = [];
@@ -2078,15 +2279,15 @@ sub populate_marc {
 	
     # item_form
     if ( $marc{record_type} =~ /[gkroef]/ ) { # MAP, VIS
-        $marc{item_form} = substr($marc{tag008},29,1) if ($marc{tag008});
+        $marc{item_form} = substr($marc{tag008},29,1) if ($marc{tag008} && (length $marc{tag008} > 29 ));
     } else {
-        $marc{item_form} = substr($marc{tag008},23,1) if ($marc{tag008});
+        $marc{item_form} = substr($marc{tag008},23,1) if ($marc{tag008} && (length $marc{tag008} > 23 ));
     }	
 	#fall through to 006 if 008 doesn't have info for item form
-	if ( length($mobUtil->trim($marc{item_form}))<1)
+	if ($marc{item_form} eq '|')
 	{
 		$marc{item_form} = substr($marc{tag006},6,1) if ($marc{tag006} && (length $marc{tag006} > 6 ));
-	}
+	}	
 
     # isbns
     my @isbns = $record->field('020') if $record->field('020');
@@ -2213,6 +2414,10 @@ sub setupSchema
 		score_time timestamp default now(), 		
 		electronic bigint,
 		audiobook_score bigint,
+		largeprint_score bigint,
+		video_score bigint,		
+		microfilm_score bigint,
+		microfiche_score bigint,
 		item_form text,
 		date1 text,
 		record_type text,
