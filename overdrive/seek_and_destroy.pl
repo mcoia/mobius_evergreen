@@ -23,6 +23,17 @@ use Unicode::Normalize;
 
 
 
+# 007 byte 4: v=DVD b=VHS s=Blueray
+# substr(007,4,1)
+# Blue-ray:
+# http://missourievergreen.org/eg/opac/record/586602?query=c;qtype=keyword;fi%3Asearch_format=blu-ray;locg=1
+# vd uscza-
+# DVD:
+# missourievergreen.org/eg/opac/record/1066653?query=c;qtype=keyword;fi%3Asearch_format=dvd;locg=1
+# vd mvaizu
+# VHS:
+# http://missourievergreen.org/eg/opac/record/604075?query=c;qtype=keyword;fi%3Asearch_format=vhs;locg=1
+# vf-cbahou
 
 my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
@@ -58,6 +69,7 @@ if(! -e $xmlconf)
 	our @videoSearchPhrases;
 	our @largePrintBookSearchPhrases;
 	our @musicSearchPhrases;
+	our @playawaySearchPhrases;
   
  if($conf)
  {
@@ -73,6 +85,7 @@ if(! -e $xmlconf)
 	@videoSearchPhrases = $conf{"videosearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"videosearchphrases"})} : ();
 	@largePrintBookSearchPhrases = $conf{"largeprintbooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"largeprintbooksearchphrases"})} : ();
 	@musicSearchPhrases = $conf{"musicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"musicsearchphrases"})} : ();
+	@playawaySearchPhrases = $conf{"playawaysearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"playawaysearchphrases"})} : ();
 	
 	if ($conf{"logfile"})
 	{
@@ -114,9 +127,16 @@ if(! -e $xmlconf)
 				#findInvalid856TOCURL();
 				#findPossibleDups();
 				#print "regular cache\n";
-				updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-				(select record from
-				SEEKDESTROY.PROBLEM_BIBS where problem ~ \$\$MARC with audiobook phrases but leader i missing\$\$)");
+				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=702871");
+				
+				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in
+				# (select record from 
+				# SEEKDESTROY.problem_bibs where problem~\$\$MARC with audiobook phrases but leader i missing\$\$)");
+				
+				updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
+				(select record from 
+				SEEKDESTROY.bib_score where audiobook_score>0)");
+				
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 				#updateScoreCache();
 			}
@@ -368,6 +388,7 @@ sub updateScoreCache
 		microfilm_score,
 		microfiche_score,
 		music_score,
+		playaway_score,
 		item_form,
 		date1,
 		record_type,
@@ -385,6 +406,7 @@ sub updateScoreCache
 		$allscores{'microfilm_score'},
 		$allscores{'microfiche_score'},
 		$allscores{'music_score'},
+		$allscores{'playaway_score'},
 		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		)";		
 		my @values = (
@@ -422,6 +444,7 @@ sub updateScoreCache
 		microfilm_score=$allscores{'microfilm_score'},
 		microfiche_score=$allscores{'microfiche_score'},
 		music_score=$allscores{'music_score'},
+		playaway_score=$allscores{'playaway_score'},
 		item_form = \$1,
 		date1 = \$2,
 		record_type = \$3,
@@ -1614,7 +1637,8 @@ sub getAllScores
 	$allscores{'video_score'}=determineScoreWithPhrases($marc,\@videoSearchPhrases);
 	$allscores{'microfilm_score'}=determineScoreWithPhrases($marc,\@microfilmSearchPhrases);
 	$allscores{'microfiche_score'}=determineScoreWithPhrases($marc,\@microficheSearchPhrases);
-	$allscores{'music_score'}=determineScoreWithPhrases($marc,\@musicSearchPhrases);
+	$allscores{'music_score'}=determineMusicScore($marc);
+	$allscores{'playaway_score'}=determinePlayawayScore($marc);	
 	return \%allscores;
 }
 
@@ -1676,7 +1700,7 @@ sub determineElectricScore
 	{
 		my $phrase = lc$_;
 		my @c = split($phrase,lc$textmarc);
-		if($#c>1) # Found more than 2 matches on that phrase
+		if($#c>1) # Found at least 2 matches on that phrase
 		{
 			$score++;
 		}
@@ -1685,6 +1709,134 @@ sub determineElectricScore
 	return $score;
 }
 
+
+sub determineMusicScore
+{
+	my $marc = @_[0];	
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@musicSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
+	foreach(@musicSearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found at least 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	
+	# if the 505 contains a bunch of $t's then it's defiantly a music bib
+	my @five05 = $marc->field('505');
+	my $tcount;
+	foreach(@five05)
+	{
+		my $field = $_;
+		my @subfieldts = $field->subfield('t');
+		foreach(@subfieldts)
+		{
+			$tcount++;
+		}
+		
+	}
+	#tip the score to music if those subfield t's are found (these are track listings)
+	$score=100 unless $tcount<4;
+	
+	my @nonmusicphrases = ('non music', 'non-music');
+	# Make the score 0 if non musical shows up
+	foreach(@nonmusicphrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found at least 1 match on that phrase
+		{
+			$score=0;
+			#$log->addLine("$phrase 0 points!");
+		}
+	}
+	
+	return $score;
+}
+
+sub determinePlayawayScore
+{
+	my $marc = @_[0];		
+	my $score=0;
+	my $textmarc = $marc->as_formatted();
+	my @zero07 = $marc->field('007');
+	my %zero07looking = ('cz'=>0,'sz'=>0);
+	
+	foreach(@playawaySearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found at least 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	
+	if($#zero07>0)
+	{
+		foreach(@zero07)
+		{
+			my $field=$_;
+			while ((my $looking, my $val ) = each(%zero07looking))
+			{		
+				if($field->data() =~ m/^$looking/)
+				{
+					$zero07looking{$looking}=1;
+				}
+			}
+		}
+		if($zero07looking{'cz'} && $zero07looking{'sz'})
+		{
+			my $my_008 = $marc->field('008')->data();
+			my $my_006 = $marc->field('006')->data() unless not defined $marc->field('006');
+			my $type = substr($marc->leader, 6, 1);				
+			my $form=0;
+			if($my_008)
+			{
+				$form = substr($my_008,23,1) if ($my_008 && (length $my_008 > 23 ));			
+			}
+			if (!$form)
+			{
+				$form = substr($my_006,6,1) if ($my_006 && (length $my_006 > 6 ));
+			}			
+			if($type eq 'i' && $form eq 'q')
+			{
+				$score=100;
+			}
+		}
+	}
+	
+	return $score;
+}
 
 sub determineScoreWithPhrases
 {
@@ -1720,7 +1872,7 @@ sub determineScoreWithPhrases
 	{
 		my $phrase = $_;
 		my @c = split($phrase,lc$textmarc);
-		if($#c>-1) # Found more than 0 match on that phrase
+		if($#c>0) # Found at least 1 match on that phrase
 		{
 			$score++;
 			#$log->addLine("$phrase + 1 points elsewhere");
@@ -2310,6 +2462,7 @@ sub setupSchema
 		microfilm_score bigint,
 		microfiche_score bigint,
 		music_score bigint,
+		playaway_score bigint,
 		item_form text,
 		date1 text,
 		record_type text,
