@@ -35,6 +35,26 @@ use Unicode::Normalize;
 # http://missourievergreen.org/eg/opac/record/604075?query=c;qtype=keyword;fi%3Asearch_format=vhs;locg=1
 # vf-cbahou
 
+# Playaway query chunk:
+# (
+		# (
+		# split_part(marc,$$tag="007">$$,3) ~ 'sz' 
+		# and 
+		# split_part(marc,$$tag="007">$$,2) ~ 'cz' 
+		# )
+	# or
+		# (
+		# split_part(marc,$$tag="007">$$,2) ~ 'sz' 
+		# and 
+		# split_part(marc,$$tag="007">$$,3) ~ 'cz' 
+		# )
+	# )
+	
+	# Find Biblio.record_entry without opac icons:
+# select id from biblio.record_entry where not deleted and 
+# id not in(select id from metabib.record_attr_flat where attr='icon_format')
+# 32115 rows
+
 my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
  
@@ -76,8 +96,8 @@ if(! -e $xmlconf)
 	my %conf = %{$conf};
 	$audio_book_score_when_audiobooks_dont_belong = $conf{"audio_book_score_when_audiobooks_dont_belong"};
 	$electronic_score_when_bib_is_considered_electronic = $conf{"electronic_score_when_bib_is_considered_electronic"};
-	print "electronic_score_when_bib_is_considered_electronic = $electronic_score_when_bib_is_considered_electronic\n";
-	print "audio_book_score_when_audiobooks_dont_belong = $audio_book_score_when_audiobooks_dont_belong\n";
+	#print "electronic_score_when_bib_is_considered_electronic = $electronic_score_when_bib_is_considered_electronic\n";
+	#print "audio_book_score_when_audiobooks_dont_belong = $audio_book_score_when_audiobooks_dont_belong\n";
 	@electronicSearchPhrases = $conf{"electronicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"electronicsearchphrases"})} : ();
 	@audioBookSearchPhrases = $conf{"audiobooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"audiobooksearchphrases"})} : ();
 	@microficheSearchPhrases = $conf{"microfichesearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"microfichesearchphrases"})} : ();
@@ -121,7 +141,8 @@ if(! -e $xmlconf)
 				#findInvalidElectronicMARC();
 				#findPhysicalItemsOnElectronicBooks();
 				#findPhysicalItemsOnElectronicAudioBooks();
-				#findInvalidAudioBookMARC();
+				
+				findInvalidAudioBookMARC();
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
 				#findInvalid856TOCURL();
@@ -133,14 +154,13 @@ if(! -e $xmlconf)
 				# (select record from 
 				# SEEKDESTROY.problem_bibs where problem~\$\$MARC with audiobook phrases but leader i missing\$\$)");
 				
-				updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
-				(select record from 
-				SEEKDESTROY.bib_score where audiobook_score>0)");
+				# updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
+				# (select record from 
+				# SEEKDESTROY.bib_score where audiobook_score>0)");
 				
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 				#updateScoreCache();
 			}
-			#searchDestroyLeaders();
 			updateJob("Completed","");
 		}
 		
@@ -266,6 +286,73 @@ sub updateMARCSetElectronic
 	updateMARC($xmlresult,$bibid,'false','Correcting for Electronic in the 008/006');
 }
 
+sub updateMARCSetCDAudioBook
+{	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
+	if($marcr{tag008})
+	{
+		my $z08 = $marcob->field('008');
+		$marcob->delete_field($z08);
+		#print "$marcr{tag008}\n";
+		$replacement=substr($marcr{tag008},0,23).' '.substr($marcr{tag008},24);		
+		#print "$replacement\n";
+		$z08->update($replacement);
+		$marcob->insert_fields_ordered($z08);
+		
+	}
+	elsif($marcr{tag006})
+	{
+		my $z06 = $marcob->field('006');
+		$marcob->delete_fields($z06);
+		$replacement=substr($marcr{tag006},0,6).' '.substr($marcr{tag006},7);
+		$z06->update($replacement);
+		$marcob->insert_fields_ordered($z06);		
+	}
+	my $altered=0;
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print $z07->data()."\n";
+			$replacement='s'.substr($z07->data(),1);
+			$replacement=substr($replacement,0,3).'f'.substr($replacement,4);
+			#print "$replacement\n";
+			$z07->update($replacement);
+			$marcob->insert_fields_ordered($z07);
+			$altered=1;
+		}
+		elsif(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print "removed video 007\n";
+		}
+	}
+	if(!$altered)
+	{
+		my $z07 = MARC::Field->new( '007', 'sd fsngnnmmned' );
+		#print "inserted new 007\n".$z07->data()."\n";
+		$marcob->insert_fields_ordered($z07);
+	}
+	my $leader = $marcob->leader();
+	#print $leader."\n";
+	$leader=substr($leader,0,6).'i'.substr($leader,7);
+	#print $leader."\n";
+	$marcob->leader($leader);
+	#print $marcob->leader()."\n";
+	my $xmlresult = convertMARCtoXML($marcob);
+	updateMARC($xmlresult,$bibid,'false','Correcting for Audiobook in the leader/007 rem 008_23');
+}
+
 sub updateMARC
 {
 	my $newmarc = @_[0];
@@ -284,18 +371,48 @@ sub updateMARC
 
 sub findInvalidAudioBookMARC
 {
+
+
+
+# my $query = "
+		# select id,marc from biblio.record_entry where 		
+		# id=912099 --1325615
+		# ";
+		# $log->addLine($query);
+		# my @results = @{$dbHandler->query($query)};		
+		# $log->addLine(($#results+1)." possible invalid Audiobook MARC");
+		# foreach(@results)
+		# {
+			# my $row = $_;
+			# my @row = @{$row};
+			# my $id = @row[0];
+			# my $marc = @row[1];
+			
+			# my @scorethis = ($id,$marc);
+			# my @st = ([@scorethis]);			
+			# updateScoreCache(\@st);
+			# updateMARCSetCDAudioBook($id,$marc);
+		
+		# }
+	
+	
+	
 	 foreach(@audioBookSearchPhrases)
 	 {
 		my $phrase = lc$_;
 		my $query = "
-		select id,marc from biblio.record_entry where 
+		select id,marc from biblio.record_entry where 		
+		(
+		marc !~ \$\$tag=\"007\">s..[fl]\$\$
+		OR
 		marc !~ \$\$<leader>......[i]\$\$
+		)
 		AND
 		lower(marc) ~* \$\$$phrase\$\$
 		AND
 		id not in
 		(
-		select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but leader i missing'
+		select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
 		)
 		";
 		$log->addLine($query);
@@ -313,20 +430,78 @@ sub findInvalidAudioBookMARC
 			updateScoreCache(\@st);
 			
 			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			my @values = ($id,"MARC with audiobook phrases but leader i missing",$jobid);
-			$dbHandler->updateWithParameters($query,\@values);
-			# $query = "select electronic from seekdestroy.bib_score where record=$id";
-			# my @results2= @{$dbHandler->query($query)};	
-			# foreach(@results2)
-			# {
-				# my @row2 = @{$_};
-				# if(@row2[0]  > $electronic_score_when_bib_is_considered_electronic)
-				# {
-					# updateMARCSetElectronic($id,$marc);
-				# }
-			# }
+			my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
+			$dbHandler->updateWithParameters($query,\@values);			
 		}
 	}
+	
+	
+	
+	my $query = "
+	select id,marc from biblio.record_entry where 		
+	(
+	marc !~ \$\$tag=\"007\">s..[fl]\$\$
+	OR
+	marc !~ \$\$<leader>......[i]\$\$
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier='AudioBooks'))
+	";
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};		
+	$log->addLine(($#results+1)." possible invalid Audiobook MARC");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
+		
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);			
+		updateScoreCache(\@st);
+		
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);			
+	}
+	
+	
+	# Now that we have digested the possibilities, Lets weed them out into bibs that we want to convert
+	
+	$query = "
+	 select record,
+ 'http://missourievergreen.org/eg/opac/record/'||record||'?expand=marchtml',
+ winning_score,
+  (select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record) \"opac icon\",
+ winning_score_score,winning_score_distance,second_place_score,
+ (select string_agg(circ_modifier,',') from seekdestroy.bib_item_circ_mods where record=sbs.record group by record),
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ from seekdestroy.bib_score sbs where 
+ 
+ winning_score='audioBookScore' 
+ and
+  electronic=0 
+ and not (winning_score_score>1 and winning_score_distance<2)
+ and 
+ (
+	(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record) is null 
+	or
+	(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record) !~'kit'
+ )
+ and not ((select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record)='book' and (select string_agg(circ_modifier,',') from seekdestroy.bib_item_circ_mods where record=sbs.record group by record) = 'Books')
+ and not ((select string_agg(circ_modifier,',') from seekdestroy.bib_item_circ_mods where record=sbs.record group by record) ~* 'Refere')
+ 
+order by winning_score,winning_score_distance,electronic,second_place_score 
+";
+
+
 }
 
 sub isScored
@@ -389,6 +564,10 @@ sub updateScoreCache
 		microfiche_score,
 		music_score,
 		playaway_score,
+		winning_score,
+		winning_score_score,
+		winning_score_distance,
+		second_place_score,
 		item_form,
 		date1,
 		record_type,
@@ -397,6 +576,7 @@ sub updateScoreCache
 		author,
 		sd_fingerprint,
 		audioformat,
+		videoformat,
 		eg_fingerprint) 
 		VALUES($bibid,$score,
 		$allscores{'electricScore'},
@@ -407,7 +587,11 @@ sub updateScoreCache
 		$allscores{'microfiche_score'},
 		$allscores{'music_score'},
 		$allscores{'playaway_score'},
-		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
+		'$allscores{'winning_score'}',
+		$allscores{'winning_score_score'},
+		$allscores{'winning_score_distance'},
+		'$allscores{'second_place_score'}',
+		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		)";		
 		my @values = (
 		$fingerprints{item_form},
@@ -417,7 +601,8 @@ sub updateScoreCache
 		$fingerprints{title},
 		$fingerprints{author},
 		$fingerprints{baseline},
-		$fingerprints{audioformat}
+		$fingerprints{audioformat},
+		$fingerprints{videoformat}
 		);		
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircs($bibid,$dbHandler);	
@@ -445,6 +630,10 @@ sub updateScoreCache
 		microfiche_score=$allscores{'microfiche_score'},
 		music_score=$allscores{'music_score'},
 		playaway_score=$allscores{'playaway_score'},
+		winning_score='$allscores{'winning_score'}',
+		winning_score_score=$allscores{'winning_score_score'},
+		winning_score_distance=$allscores{'winning_score_distance'},
+		second_place_score='$allscores{'second_place_score'}',
 		item_form = \$1,
 		date1 = \$2,
 		record_type = \$3,
@@ -453,6 +642,7 @@ sub updateScoreCache
 		author = \$6,
 		sd_fingerprint = \$7,
 		audioformat = \$8,
+		audioformat = \$9,
 		eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
 		WHERE ID=$bibscoreid";
 		my @values = (
@@ -463,7 +653,8 @@ sub updateScoreCache
 		$fingerprints{title},
 		$fingerprints{author},
 		$fingerprints{baseline},
-		$fingerprints{audioformat}
+		$fingerprints{audioformat},
+		$fingerprints{videoformat}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircs($bibid,$dbHandler);
@@ -1632,13 +1823,50 @@ sub getAllScores
 	my $marc = @_[0];
 	my %allscores = ();
 	$allscores{'electricScore'}=determineElectricScore($marc);
-	$allscores{'audioBookScore'}=determineScoreWithPhrases($marc,\@audioBookSearchPhrases);
+	$allscores{'audioBookScore'}=determineAudioBookScore($marc);
 	$allscores{'largeprint_score'}=determineScoreWithPhrases($marc,\@largePrintBookSearchPhrases);
 	$allscores{'video_score'}=determineScoreWithPhrases($marc,\@videoSearchPhrases);
 	$allscores{'microfilm_score'}=determineScoreWithPhrases($marc,\@microfilmSearchPhrases);
 	$allscores{'microfiche_score'}=determineScoreWithPhrases($marc,\@microficheSearchPhrases);
 	$allscores{'music_score'}=determineMusicScore($marc);
-	$allscores{'playaway_score'}=determinePlayawayScore($marc);	
+	$allscores{'playaway_score'}=determineScoreWithPhrases($marc,\@playawaySearchPhrases);
+	my $highname='';
+	my $highscore=0;
+	my $highscoredistance=0;
+	my $secondplacename='';
+	while ((my $scorename, my $score ) = each(%allscores))
+	{
+		my $tempdistance=$highscore-$score;
+		if($score>$highscore)
+		{
+			$secondplacename=$highname;
+			$highname=$scorename;
+			$highscoredistance=($score-$highscore);
+			$highscore=$score;
+		}
+		elsif($score==$highscore)
+		{
+			$highname.=' tied '.$scorename;
+			$highscoredistance=0;
+			$secondplacename='';
+		}
+		elsif($tempdistance<$highscoredistance)
+		{
+			$highscoredistance=$tempdistance;
+			$secondplacename=$scorename;
+		}
+	}
+	# There is no second place when the high score is the same as the distance
+	# Meaning it's next contender scored a fat 0
+	if($highscoredistance==$highscore)
+	{
+		$secondplacename='';
+	}
+	$allscores{'winning_score'}=$highname;
+	$allscores{'winning_score_score'}=$highscore;
+	$allscores{'winning_score_distance'}=$highscoredistance;
+	$allscores{'second_place_score'}=$secondplacename;
+	
 	return \%allscores;
 }
 
@@ -1766,7 +1994,7 @@ sub determineMusicScore
 	#tip the score to music if those subfield t's are found (these are track listings)
 	$score=100 unless $tcount<4;
 	
-	my @nonmusicphrases = ('non music', 'non-music');
+	my @nonmusicphrases = ('non music', 'non-music', 'abridge');
 	# Make the score 0 if non musical shows up
 	foreach(@nonmusicphrases)
 	{
@@ -1782,11 +2010,61 @@ sub determineMusicScore
 	return $score;
 }
 
+
+sub determineAudioBookScore
+{
+	my $marc = @_[0];
+	my @two45 = $marc->field('245');
+	my @isbn = $marc->field('020');
+	$marc->delete_fields(@isbn);
+	$marc->delete_fields(@two45);	
+	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@two45);
+	$marc->insert_fields_ordered(@isbn);
+	my $score=0;
+	
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@audioBookSearchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+	}
+	foreach(@audioBookSearchPhrases)
+	{
+		my $phrase = $_;
+		my @c = split($phrase,lc$textmarc);
+		if($#c>0) # Found at least 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	
+	return $score;
+}
+
+# Dead function - decided to score the same as the rest
 sub determinePlayawayScore
 {
 	my $marc = @_[0];		
 	my $score=0;
+	my @isbn = $marc->field('020');
+	$marc->delete_fields(@isbn);
 	my $textmarc = $marc->as_formatted();
+	$marc->insert_fields_ordered(@isbn);
 	my @zero07 = $marc->field('007');
 	my %zero07looking = ('cz'=>0,'sz'=>0);
 	
@@ -2275,6 +2553,8 @@ sub getFingerprints
 	$fingerprints{bib_lvl} = $marc{bib_lvl};
 	$fingerprints{title} = $marc{title};
 	$fingerprints{author} = $marc{author};
+	$fingerprints{audioformat} = $marc{audioformat};
+	$fingerprints{videoformat} = $marc{videoformat};
 	#print Dumper(%fingerprints);
 	return \%fingerprints;
 }
@@ -2290,7 +2570,7 @@ sub populate_marc {
 
     # date1, date2
     my $my_008 = $record->field('008');
-	my $my_007 = $record->field('007');
+	my @my_007 = $record->field('007');
 	my $my_006 = $record->field('006');
     $marc{tag008} = $my_008->as_string() if ($my_008);
     if (defined $marc{tag008}) {
@@ -2312,13 +2592,24 @@ sub populate_marc {
  #               print XF ">> using 260c as date1 at rec $count\n";
             }
         }
-    }
-
-	$marc{tag007} = $my_007->as_string() if ($my_007);
+    }	
 	$marc{tag006} = $my_006->as_string() if ($my_006);
-	if (defined $marc{tag007}) {
-		$marc{audioformat} = substr($marc{tag007},3,1) unless (length $marc{tag007} < 4 );
+	$marc{tag007} = \@my_007 if (@my_007);
+	$marc{audioformat}='';
+	$marc{videoformat}='';
+	foreach(@my_007)
+	{
+		if(substr($_->data(),0,1) eq 's' && $marc{audioformat} eq '')
+		{
+			$marc{audioformat} = substr($_->data(),3,1) unless (length $_->data() < 4);
+		}
+		elsif(substr($_->data(),0,1) eq 'v' && $marc{videoformat} eq '')
+		{
+			$marc{videoformat} = substr($_->data(),4,1) unless (length $_->data() < 5);
+		}
 	}
+	#print "$marc{audioformat}\n";
+	#print "$marc{videoformat}\n";
 	
     # item_form
     if ( $marc{record_type} =~ /[gkroef]/ ) { # MAP, VIS
@@ -2463,6 +2754,10 @@ sub setupSchema
 		microfiche_score bigint,
 		music_score bigint,
 		playaway_score bigint,
+		winning_score text,
+		winning_score_score bigint,
+		winning_score_distance bigint,
+		second_place_score text,
 		item_form text,
 		date1 text,
 		record_type text,
@@ -2471,7 +2766,9 @@ sub setupSchema
 		author text,
 		sd_fingerprint text,
 		audioformat text,
-		eg_fingerprint text)";		
+		videoformat text,
+		eg_fingerprint text
+		)";		
 		$dbHandler->update($query);		
 		$query = "CREATE TABLE seekdestroy.bib_merge(
 		id serial,
