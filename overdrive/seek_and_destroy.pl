@@ -148,7 +148,7 @@ if(! -e $xmlconf)
 				#findInvalid856TOCURL();
 				#findPossibleDups();
 				#print "regular cache\n";
-				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=702871");
+				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=578065");
 				
 				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in
 				# (select record from 
@@ -397,111 +397,278 @@ sub findInvalidAudioBookMARC
 	
 	
 	
-	 foreach(@audioBookSearchPhrases)
-	 {
-		my $phrase = lc$_;
-		my $query = "
-		select id,marc from biblio.record_entry where 		
-		(
-		marc !~ \$\$tag=\"007\">s..[fl]\$\$
-		OR
-		marc !~ \$\$<leader>......[i]\$\$
-		)
-		AND
-		lower(marc) ~* \$\$$phrase\$\$
-		AND
-		id not in
-		(
-		select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
-		)
-		";
-		$log->addLine($query);
-		my @results = @{$dbHandler->query($query)};		
-		$log->addLine(($#results+1)." possible invalid Audiobook MARC");
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			my $id = @row[0];
-			my $marc = @row[1];
+	 # foreach(@audioBookSearchPhrases)
+	 # {
+		# my $phrase = lc$_;
+		# my $query = "
+		# select id,marc from biblio.record_entry where 		
+		# (
+		# marc !~ \$\$tag=\"007\">s..[fl]\$\$
+		# OR
+		# marc !~ \$\$<leader>......[i]\$\$
+		# )
+		# AND
+		# lower(marc) ~* \$\$$phrase\$\$
+		# AND
+		# id not in
+		# (
+		# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
+		# )
+		# ";
+		# $log->addLine($query);
+		# my @results = @{$dbHandler->query($query)};		
+		# $log->addLine(($#results+1)." possible invalid Audiobook MARC");
+		# foreach(@results)
+		# {
+			# my $row = $_;
+			# my @row = @{$row};
+			# my $id = @row[0];
+			# my $marc = @row[1];
 			
-			my @scorethis = ($id,$marc);
-			my @st = ([@scorethis]);			
-			updateScoreCache(\@st);
+			# my @scorethis = ($id,$marc);
+			# my @st = ([@scorethis]);			
+			# updateScoreCache(\@st);
 			
-			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
-			$dbHandler->updateWithParameters($query,\@values);			
-		}
-	}
+			# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			# my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
+			# $dbHandler->updateWithParameters($query,\@values);			
+		# }
+	# }
 	
 	
+	
+	# my $query = "
+	# select id,marc from biblio.record_entry where 		
+	# (
+	# marc !~ \$\$tag=\"007\">s..[fl]\$\$
+	# OR
+	# marc !~ \$\$<leader>......[i]\$\$
+	# )
+	# AND	
+	# id not in
+	# (
+	# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
+	# )
+	# AND 
+	# id in
+	# ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier='AudioBooks'))
+	# ";
+	# $log->addLine($query);
+	# my @results = @{$dbHandler->query($query)};		
+	# $log->addLine(($#results+1)." possible invalid Audiobook MARC");
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# my $marc = @row[1];
+		
+		# my @scorethis = ($id,$marc);
+		# my @st = ([@scorethis]);			
+		# updateScoreCache(\@st);
+		
+		# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		# my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
+		# $dbHandler->updateWithParameters($query,\@values);			
+	# }
+	
+	
+	# Now that we have digested the possibilities - 
+	# Lets weed them out into bibs that we want to convert
 	
 	my $query = "
-	select id,marc from biblio.record_entry where 		
-	(
-	marc !~ \$\$tag=\"007\">s..[fl]\$\$
-	OR
-	marc !~ \$\$<leader>......[i]\$\$
-	)
-	AND	
-	id not in
-	(
-	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
-	)
-	AND 
-	id in
-	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier='AudioBooks'))
-	";
-	$log->addLine($query);
-	my @results = @{$dbHandler->query($query)};		
-	$log->addLine(($#results+1)." possible invalid Audiobook MARC");
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
-		
-		my @scorethis = ($id,$marc);
-		my @st = ([@scorethis]);			
-		updateScoreCache(\@st);
-		
-		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
-		$dbHandler->updateWithParameters($query,\@values);			
-	}
-	
-	
-	# Now that we have digested the possibilities, Lets weed them out into bibs that we want to convert
-	
-	$query = "
 	 select record,
- 'http://missourievergreen.org/eg/opac/record/'||record||'?expand=marchtml',
+ 'link',
  winning_score,
-  (select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record) \"opac icon\",
+  opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
- (select string_agg(circ_modifier,',') from seekdestroy.bib_item_circ_mods where record=sbs.record group by record),
+ circ_mods,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
  from seekdestroy.bib_score sbs where 
  
  winning_score='audioBookScore' 
  and
   electronic=0 
- and not (winning_score_score>1 and winning_score_distance<2)
- and 
- (
-	(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record) is null 
-	or
-	(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record) !~'kit'
- )
- and not ((select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=record)='book' and (select string_agg(circ_modifier,',') from seekdestroy.bib_item_circ_mods where record=sbs.record group by record) = 'Books')
- and not ((select string_agg(circ_modifier,',') from seekdestroy.bib_item_circ_mods where record=sbs.record group by record) ~* 'Refere')
+ and not (winning_score_score>1 and winning_score_distance<2) 
+ and
+opac_icon !~'kit' 
+and
+circ_mods !~* 'Refere'
+and not
+(
+	circ_mods ='Books'
+	and
+	opac_icon = 'book'
+)
+and not
+(	
+	(
+	circ_mods !~*'CD'
+	and
+	circ_mods !~*'AudioBooks'
+	and
+	circ_mods !~*'Media'
+	and
+	circ_mods !~*'Kit'
+	and
+	circ_mods !~*'Music'
+	)	
+	and
+	winning_score_score=1	
+)
+ 
  
 order by winning_score,winning_score_distance,electronic,second_place_score 
 ";
 
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $highscore = @row[4];
+		my $highscoredistance = @row[5];
+		my $secondplace = @row[6];
+		my $circmods = @row[7];
+		my $opacicon = @row[3];
+		my $marc = @row[20];
+		#push(@convertList,\@row);		
+	}
+	$log->addLine("Will Convert these to AudioBooks: $#convertList\n\n\n");
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
+	}
+@convertList=();
 
+########## Convert to E-Audio	
+		my $query = "
+	  select record,
+ 'link',
+ winning_score,
+  opac_icon,
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ from seekdestroy.bib_score sbs where 
+electronic>0 
+and
+not
+(
+opac_icon ~'eaudio'
+or
+opac_icon ~'ebook'
+)
+and
+record in(select record from seekdestroy.problem_bibs where problem='MARC with audiobook phrases but incomplete marc')
+order by winning_score_score
+";
+
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $highscore = @row[4];
+		my $highscoredistance = @row[5];
+		my $secondplace = @row[6];
+		my $circmods = @row[7];
+		my $opacicon = @row[3];
+		my $marc = @row[20];
+		#push(@convertList,\@row);		
+	}
+	$log->addLine("Will Convert these to E-AUDIO: $#convertList\n\n\n");
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
+	}
+@convertList=();	
+	
+	########## Human intervention
+		my $query = "	  
+	 select record,
+	 'link', 
+ winning_score,
+  opac_icon,
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ from seekdestroy.bib_score sbs where 
+winning_score='audioBookScore' 
+and
+electronic=0 
+and
+ record not in
+ (
+	select record  
+	from seekdestroy.bib_score sbs where  
+ winning_score='audioBookScore' 
+ and
+  electronic=0 
+ and not (winning_score_score>1 and winning_score_distance<2) 
+ and
+opac_icon !~'kit' 
+and
+circ_mods !~* 'Refere'
+and not
+(
+	circ_mods ='Books'
+	and
+	opac_icon = 'book'
+)
+and not
+(	
+	(
+	circ_mods !~*'CD'
+	and
+	circ_mods !~*'AudioBooks'
+	and
+	circ_mods !~*'Media'
+	and
+	circ_mods !~*'Kit'
+	and
+	circ_mods !~*'Music'
+	)	
+	and
+	winning_score_score=1	
+)
+ 
+ 
+ )
+order by winning_score,winning_score_distance,electronic,second_place_score 
+";
+
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $highscore = @row[4];
+		my $highscoredistance = @row[5];
+		my $secondplace = @row[6];
+		my $circmods = @row[7];
+		my $opacicon = @row[3];
+		my $marc = @row[20];
+		#push(@convertList,\@row);		
+	}
+	$log->addLine("Will NOT Convert these: $#convertList\n\n\n");
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
+	}
+@convertList=();
 }
 
 sub isScored
@@ -683,6 +850,7 @@ sub updateBibCircs
 	not ac.deleted
 	group by ac.circ_modifier,acn.record
 	order by record";
+	my $allcircs='';
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -694,8 +862,24 @@ sub updateBibCircs
 		values
 		(\$1,\$2,\$3,\$4)";
 		my @values = ($record,$circmod,$#results+1,$jobid);
+		$allcircs.=$circmod.',';
 		$dbHandler->updateWithParameters($q,\@values);
 	}
+	$allcircs=substr($allcircs,0,-1);
+	my $opacicons='';
+	# get opac icon string
+	$query = "select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=$bibid";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$opacicons = @row[0];
+	}
+	$query = "UPDATE SEEKDESTROY.BIB_SCORE SET OPAC_ICON=\$1,CIRC_MODS=\$2 WHERE RECORD=$bibid";
+	my @values = ($opacicons,$allcircs);
+	$dbHandler->updateWithParameters($query,\@values);
+	
 }
 
 sub findPhysicalItemsOnElectronicBooksUnDedupe
@@ -2767,6 +2951,8 @@ sub setupSchema
 		sd_fingerprint text,
 		audioformat text,
 		videoformat text,
+		circ_mods text DEFAULT ''::text,
+		opac_icon text DEFAULT ''::text,
 		eg_fingerprint text
 		)";		
 		$dbHandler->update($query);		
