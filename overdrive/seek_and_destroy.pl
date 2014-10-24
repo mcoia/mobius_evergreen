@@ -115,7 +115,7 @@ if(! -e $xmlconf)
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
-		$log->addLogLine(" ---------------- Script Starting ---------------- ");
+		$log->addLogLine(" ---------------- Script Starting ---------------- ");		
 		my @reqs = ("logfile"); 
 		my $valid = 1;
 		my $errorMessage="";
@@ -148,11 +148,13 @@ if(! -e $xmlconf)
 				#findInvalid856TOCURL();
 				#findPossibleDups();
 				#print "regular cache\n";
-				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=578065");
+				 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
+				 # and lower(marc) ~ \$\$abridge\$\$");
+			  #updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
 				
 				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in
 				# (select record from 
-				# SEEKDESTROY.problem_bibs where problem~\$\$MARC with audiobook phrases but leader i missing\$\$)");
+				# SEEKDESTROY.bib_score where score_time>\$\$2014-09-23\$\$::date)");
 				
 				# updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
 				# (select record from 
@@ -374,26 +376,26 @@ sub findInvalidAudioBookMARC
 
 
 
-# my $query = "
-		# select id,marc from biblio.record_entry where 		
-		# id=912099 --1325615
-		# ";
-		# $log->addLine($query);
-		# my @results = @{$dbHandler->query($query)};		
-		# $log->addLine(($#results+1)." possible invalid Audiobook MARC");
-		# foreach(@results)
-		# {
-			# my $row = $_;
-			# my @row = @{$row};
-			# my $id = @row[0];
-			# my $marc = @row[1];
-			
-			# my @scorethis = ($id,$marc);
-			# my @st = ([@scorethis]);			
-			# updateScoreCache(\@st);
-			# updateMARCSetCDAudioBook($id,$marc);
-		
-		# }
+#my $query = "
+#		select id,marc from biblio.record_entry where 		
+#		id=912099 --1325615
+#		";
+#		$log->addLine($query);
+#		my @results = @{$dbHandler->query($query)};		
+#		$log->addLine(($#results+1)." possible invalid Audiobook MARC");
+#		foreach(@results)
+#		{
+#			my $row = $_;
+#			my @row = @{$row};
+#			my $id = @row[0];
+#			my $marc = @row[1];
+#			
+#			my @scorethis = ($id,$marc);
+#			my @st = ([@scorethis]);			
+#			updateScoreCache(\@st);
+#			updateMARCSetCDAudioBook($id,$marc);
+#		
+#		}
 	
 	
 	
@@ -477,8 +479,8 @@ sub findInvalidAudioBookMARC
 	# Lets weed them out into bibs that we want to convert
 	
 	my $query = "
-	 select record,
- 'link',
+	select record,
+ \$\$link\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
@@ -486,44 +488,75 @@ sub findInvalidAudioBookMARC
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
  from seekdestroy.bib_score sbs where 
  
- winning_score='audioBookScore' 
- and
-  electronic=0 
- and not (winning_score_score>1 and winning_score_distance<2) 
- and
-opac_icon !~'kit' 
-and
-circ_mods !~* 'Refere'
+ winning_score=\$\$audioBookScore\$\$ 
+ and 
+electronic=0
+   
+ and 
+ (
+	not (winning_score_score>1 and winning_score_distance<2) 
+	or
+	(
+		second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
+		and
+		(circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
+	)
+	or
+	(
+		opac_icon is null
+		and
+		second_place_score is null
+		and
+		LOWER(circ_mods) ~*\$\$new\$\$
+	)
+	or
+	(
+		opac_icon =\$\$phonospoken\$\$
+		and
+		(second_place_score is null or second_place_score=\$\$\$\$)
+		and
+		(circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
+	)
+	
+ )
+and circ_mods !~* \$\$Refere\$\$
 and not
 (
-	circ_mods ='Books'
+	circ_mods =\$\$Books\$\$
 	and
-	opac_icon = 'book'
+	opac_icon = \$\$book\$\$
 )
 and not
 (	
 	(
-	circ_mods !~*'CD'
+	circ_mods !~*\$\$CD\$\$
 	and
-	circ_mods !~*'AudioBooks'
+	circ_mods !~*\$\$AudioBooks\$\$
 	and
-	circ_mods !~*'Media'
+	circ_mods !~*\$\$Media\$\$
 	and
-	circ_mods !~*'Kit'
+	circ_mods !~*\$\$Kit\$\$
 	and
-	circ_mods !~*'Music'
+	circ_mods !~*\$\$Music\$\$
 	)	
+	and
+	(
+	opac_icon is null 
+	and
+	circ_mods is null 
+	)
 	and
 	winning_score_score=1	
 )
+
+
  
- 
-order by winning_score,winning_score_distance,electronic,second_place_score 
+order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
 ";
 
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
-	my @convertList=@results;
+	my @convertList;#=@results;
 	foreach(@results)
 	{
 		my $row = $_;
@@ -535,7 +568,10 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 		my $circmods = @row[7];
 		my $opacicon = @row[3];
 		my $marc = @row[20];
-		#push(@convertList,\@row);		
+		if($opacicon ne 'kit')
+		{
+			push(@convertList,\@row);		
+		}
 	}
 	$log->addLine("Will Convert these to AudioBooks: $#convertList\n\n\n");
 	foreach(@convertList)
@@ -548,7 +584,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 ########## Convert to E-Audio	
 		my $query = "
 	  select record,
- 'link',
+ \$\$link\$\$,
  winning_score,
   opac_icon,
  winning_score_score,winning_score_distance,second_place_score,
@@ -559,12 +595,12 @@ electronic>0
 and
 not
 (
-opac_icon ~'eaudio'
+opac_icon ~ \$\$eaudio\$\$
 or
-opac_icon ~'ebook'
+opac_icon ~ \$\$ebook\$\$
 )
 and
-record in(select record from seekdestroy.problem_bibs where problem='MARC with audiobook phrases but incomplete marc')
+winning_score=\$\$electricScore\$\$
 order by winning_score_score
 ";
 
@@ -595,14 +631,14 @@ order by winning_score_score
 	########## Human intervention
 		my $query = "	  
 	 select record,
-	 'link', 
+	 \$\$link\$\$, 
  winning_score,
   opac_icon,
  winning_score_score,winning_score_distance,second_place_score,
  circ_mods,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
  from seekdestroy.bib_score sbs where 
-winning_score='audioBookScore' 
+winning_score=\$\$audioBookScore\$\$ 
 and
 electronic=0 
 and
@@ -610,36 +646,67 @@ and
  (
 	select record  
 	from seekdestroy.bib_score sbs where  
- winning_score='audioBookScore' 
+ winning_score=\$\$audioBookScore\$\$ 
  and
   electronic=0 
- and not (winning_score_score>1 and winning_score_distance<2) 
- and
-opac_icon !~'kit' 
-and
-circ_mods !~* 'Refere'
+ 
+ and 
+ (
+	not (winning_score_score>1 and winning_score_distance<2) 
+	or
+	(
+		second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
+		and
+		(circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
+	)
+	or
+	(
+		opac_icon is null
+		and
+		second_place_score is null
+		and
+		LOWER(circ_mods) ~*\$\$new\$\$
+	)
+	or
+	(
+		opac_icon =\$\$phonospoken\$\$
+		and
+		(second_place_score is null or second_place_score=\$\$\$\$)
+		and
+		(circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
+	)
+	
+ )
+and circ_mods !~* \$\$Refere\$\$
 and not
 (
-	circ_mods ='Books'
+	circ_mods =\$\$Books\$\$
 	and
-	opac_icon = 'book'
+	opac_icon = \$\$book\$\$
 )
 and not
 (	
 	(
-	circ_mods !~*'CD'
+	circ_mods !~*\$\$CD\$\$
 	and
-	circ_mods !~*'AudioBooks'
+	circ_mods !~*\$\$AudioBooks\$\$
 	and
-	circ_mods !~*'Media'
+	circ_mods !~*\$\$Media\$\$
 	and
-	circ_mods !~*'Kit'
+	circ_mods !~*\$\$Kit\$\$
 	and
-	circ_mods !~*'Music'
+	circ_mods !~*\$\$Music\$\$
 	)	
+	and
+	(
+	opac_icon is null 
+	and
+	circ_mods is null 
+	)
 	and
 	winning_score_score=1	
 )
+
  
  
  )
@@ -2111,7 +2178,7 @@ sub determineElectricScore
 	foreach(@electronicSearchPhrases)
 	{
 		my $phrase = lc$_;
-		my @c = split($phrase,lc$textmarc);
+		my @c = split(lc$phrase,lc$textmarc);
 		if($#c>1) # Found at least 2 matches on that phrase
 		{
 			$score++;
@@ -2128,7 +2195,7 @@ sub determineMusicScore
 	my @two45 = $marc->field('245');
 	#$log->addLine(getsubfield($marc,'245','a'));
 	$marc->delete_fields(@two45);
-	my $textmarc = $marc->as_formatted();
+	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@two45);
 	my $score=0;
 	
@@ -2153,9 +2220,9 @@ sub determineMusicScore
 	}
 	foreach(@musicSearchPhrases)
 	{
-		my $phrase = $_;
-		my @c = split($phrase,lc$textmarc);
-		if($#c>0) # Found at least 1 match on that phrase
+		my $phrase = lc$_;
+		
+		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
 			#$log->addLine("$phrase + 1 points elsewhere");
@@ -2180,16 +2247,34 @@ sub determineMusicScore
 	
 	my @nonmusicphrases = ('non music', 'non-music', 'abridge');
 	# Make the score 0 if non musical shows up
-	foreach(@nonmusicphrases)
+	my @tags = $marc->fields();
+	my $found=0;
+	foreach(@tags)
 	{
-		my $phrase = $_;
-		my @c = split($phrase,lc$textmarc);
-		if($#c>0) # Found at least 1 match on that phrase
+		my $field = $_;
+		my @subfields = $field->subfields();
+		foreach(@subfields)
 		{
-			$score=0;
-			#$log->addLine("$phrase 0 points!");
+			my @subfield=@{$_};
+			my $test = lc(@subfield[1]);
+			#$log->addLine("0 = ".@subfield[0]."  1 = ".@subfield[1]);
+			foreach(@nonmusicphrases)
+			{
+				my $phrase = lc$_;
+				#$log->addLine("$test\nfor\n$phrase");				
+				if($test =~ m/$phrase/g) # Found at least 1 match on that phrase
+				{
+					$score=0;
+					$found=1;
+					#$log->addLine("$phrase 0 points!");
+				}
+				last if $found;
+			}
+			last if $found;
 		}
+		last if $found;
 	}
+	
 	
 	return $score;
 }
@@ -2202,7 +2287,7 @@ sub determineAudioBookScore
 	my @isbn = $marc->field('020');
 	$marc->delete_fields(@isbn);
 	$marc->delete_fields(@two45);	
-	my $textmarc = $marc->as_formatted();
+	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@two45);
 	$marc->insert_fields_ordered(@isbn);
 	my $score=0;
@@ -2228,9 +2313,8 @@ sub determineAudioBookScore
 	}
 	foreach(@audioBookSearchPhrases)
 	{
-		my $phrase = $_;
-		my @c = split($phrase,lc$textmarc);
-		if($#c>0) # Found at least 1 match on that phrase
+		my $phrase = lc$_;		
+		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
 			#$log->addLine("$phrase + 1 points elsewhere");
@@ -2247,16 +2331,15 @@ sub determinePlayawayScore
 	my $score=0;
 	my @isbn = $marc->field('020');
 	$marc->delete_fields(@isbn);
-	my $textmarc = $marc->as_formatted();
+	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@isbn);
 	my @zero07 = $marc->field('007');
 	my %zero07looking = ('cz'=>0,'sz'=>0);
 	
 	foreach(@playawaySearchPhrases)
 	{
-		my $phrase = $_;
-		my @c = split($phrase,lc$textmarc);
-		if($#c>0) # Found at least 1 match on that phrase
+		my $phrase = lc$_;		
+		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
 			#$log->addLine("$phrase + 1 points elsewhere");
@@ -2307,10 +2390,10 @@ sub determineScoreWithPhrases
 	my @two45 = $marc->field('245');
 	#$log->addLine(getsubfield($marc,'245','a'));
 	$marc->delete_fields(@two45);
-	my $textmarc = $marc->as_formatted();
+	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@two45);
 	my $score=0;
-	
+	#$log->addLine(lc$textmarc);
 	foreach(@two45)
 	{
 		my $field = $_;		
@@ -2332,9 +2415,9 @@ sub determineScoreWithPhrases
 	}
 	foreach(@searchPhrases)
 	{
-		my $phrase = $_;
-		my @c = split($phrase,lc$textmarc);
-		if($#c>0) # Found at least 1 match on that phrase
+		my $phrase = lc$_;
+		#$log->addLine("$phrase");		
+		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
 			#$log->addLine("$phrase + 1 points elsewhere");
