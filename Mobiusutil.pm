@@ -423,7 +423,7 @@ sub makeCommaFromArray
 		my @ogchars = split("",$ret);
 		my @insertChars = split("",$data);
 		my $len = $#insertChars;
-		for my $i (0..$#insertChars-1)
+		for my $i (0..$#insertChars)
 		{
 			@ogchars[$i+$column-1] = @insertChars[$i];
 		}

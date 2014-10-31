@@ -148,9 +148,9 @@ if(! -e $xmlconf)
 				#findInvalid856TOCURL();
 				#findPossibleDups();
 				#print "regular cache\n";
-				 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
-				 # and lower(marc) ~ \$\$abridge\$\$");
-			  #updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
+				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
+				# and lower(marc) ~ \$\$abridge\$\$");
+				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
 				
 				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in
 				# (select record from 
@@ -237,7 +237,7 @@ marc !~ \$\$<leader>.......p\$\$
 		my $marc = @row[1];
 		
 		my @scorethis = ($id,$marc);
-		my @st = ([@scorethis]);			
+		my @st = ([@scorethis]);
 		updateScoreCache(\@st);
 		
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
@@ -250,7 +250,8 @@ marc !~ \$\$<leader>.......p\$\$
 			my @row2 = @{$_};
 			if(@row2[0]  > $electronic_score_when_bib_is_considered_electronic)
 			{
-				updateMARCSetElectronic($id,$marc);
+				my $xmlresult = updateMARCSetElectronic($id,$marc);
+				updateMARC($xmlresult,$id,'false','Correcting for Electronic in the 008/006');
 			}
 		}
 	}
@@ -269,8 +270,8 @@ sub updateMARCSetElectronic
 	if($marcr{tag008})
 	{
 		my $z08 = $marcob->field('008');
-		$marcob->delete_field($z08);		
-		$replacement=substr($marcr{tag008},0,23).'s'.substr($marcr{tag008},24);		
+		$marcob->delete_field($z08);
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},'s',24);	
 		$z08->update($replacement);
 		$marcob->insert_fields_ordered($z08);
 		
@@ -279,13 +280,19 @@ sub updateMARCSetElectronic
 	{
 		my $z06 = $marcob->field('006');
 		$marcob->delete_fields($z06);		
-		$replacement=substr($marcr{tag006},0,6).'s'.substr($marcr{tag006},7);
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},'s',7);
 		$z06->update($replacement);
 		$marcob->insert_fields_ordered($z06);		
 	}
+	else
+	{
+		$replacement = $mobUtil->insertDataIntoColumn('','s',24);
+		my $field = MARC::Field->new( '008', $replacement );		
+		$marcob->insert_fields_ordered($field);
+	}
 	
 	my $xmlresult = convertMARCtoXML($marcob);
-	updateMARC($xmlresult,$bibid,'false','Correcting for Electronic in the 008/006');
+	return $xmlresult;
 }
 
 sub updateMARCSetCDAudioBook
@@ -303,17 +310,18 @@ sub updateMARCSetCDAudioBook
 		my $z08 = $marcob->field('008');
 		$marcob->delete_field($z08);
 		#print "$marcr{tag008}\n";
-		$replacement=substr($marcr{tag008},0,23).' '.substr($marcr{tag008},24);		
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},' ',24);		
 		#print "$replacement\n";
 		$z08->update($replacement);
-		$marcob->insert_fields_ordered($z08);
-		
+		$marcob->insert_fields_ordered($z08);		
 	}
 	elsif($marcr{tag006})
 	{
 		my $z06 = $marcob->field('006');
 		$marcob->delete_fields($z06);
-		$replacement=substr($marcr{tag006},0,6).' '.substr($marcr{tag006},7);
+		#print "$marcr{tag006}\n";
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},' ',7);
+		#print "$replacement\n";
 		$z06->update($replacement);
 		$marcob->insert_fields_ordered($z06);		
 	}
@@ -325,9 +333,9 @@ sub updateMARCSetCDAudioBook
 			my $z07 = $_;
 			$marcob->delete_field($z07);
 			#print $z07->data()."\n";
-			$replacement='s'.substr($z07->data(),1);
-			$replacement=substr($replacement,0,3).'f'.substr($replacement,4);
-			#print "$replacement\n";
+			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'s',1);
+			$replacement=$mobUtil->insertDataIntoColumn($replacement,'f',4);
+			#print "$replacement\n";			
 			$z07->update($replacement);
 			$marcob->insert_fields_ordered($z07);
 			$altered=1;
@@ -345,16 +353,37 @@ sub updateMARCSetCDAudioBook
 		#print "inserted new 007\n".$z07->data()."\n";
 		$marcob->insert_fields_ordered($z07);
 	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'i');
+	updateMARC($xmlresult,$bibid,'false','Correcting for Audiobook in the leader/007 rem 008_23');
+}
+
+sub updateMARCSetSpecifiedLeaderByte  
+{	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	my $leaderByte = @_[2];		#1 based
+	my $value = @_[3];
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);	
 	my $leader = $marcob->leader();
 	#print $leader."\n";
-	$leader=substr($leader,0,6).'i'.substr($leader,7);
+	$leader=$mobUtil->insertDataIntoColumn($leader,$value,$leaderByte);
 	#print $leader."\n";
 	$marcob->leader($leader);
 	#print $marcob->leader()."\n";
 	my $xmlresult = convertMARCtoXML($marcob);
-	updateMARC($xmlresult,$bibid,'false','Correcting for Audiobook in the leader/007 rem 008_23');
+	return $xmlresult
 }
 
+
+sub updateMARCSetElectronicAudioBook
+{	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	updateMARCSetElectronic($id,$marc);
+}
 sub updateMARC
 {
 	my $newmarc = @_[0];
@@ -376,26 +405,26 @@ sub findInvalidAudioBookMARC
 
 
 
-#my $query = "
-#		select id,marc from biblio.record_entry where 		
-#		id=912099 --1325615
-#		";
-#		$log->addLine($query);
-#		my @results = @{$dbHandler->query($query)};		
-#		$log->addLine(($#results+1)." possible invalid Audiobook MARC");
-#		foreach(@results)
-#		{
-#			my $row = $_;
-#			my @row = @{$row};
-#			my $id = @row[0];
-#			my $marc = @row[1];
-#			
-#			my @scorethis = ($id,$marc);
-#			my @st = ([@scorethis]);			
-#			updateScoreCache(\@st);
-#			updateMARCSetCDAudioBook($id,$marc);
-#		
-#		}
+my $query = "
+		select id,marc from biblio.record_entry where 		
+		id=130294 --1325615
+		";
+		$log->addLine($query);
+		my @results = @{$dbHandler->query($query)};		
+		$log->addLine(($#results+1)." possible invalid Audiobook MARC");
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			my $marc = @row[1];
+			
+			my @scorethis = ($id,$marc);
+			my @st = ([@scorethis]);			
+			updateScoreCache(\@st);
+			updateMARCSetCDAudioBook($id,$marc);
+		
+		}
 	
 	
 	
@@ -478,264 +507,266 @@ sub findInvalidAudioBookMARC
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert
 	
-	my $query = "
-	select record,
- \$\$link\$\$,
- winning_score,
-  opac_icon \"opac icon\",
- winning_score_score,winning_score_distance,second_place_score,
- circ_mods,
- score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- from seekdestroy.bib_score sbs where 
+	# my $query = "
+	# select record,
+ # \$\$link\$\$,
+ # winning_score,
+  # opac_icon \"opac icon\",
+ # winning_score_score,winning_score_distance,second_place_score,
+ # circ_mods,
+ # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ # from seekdestroy.bib_score sbs where 
  
- winning_score=\$\$audioBookScore\$\$ 
- and 
-electronic=0
+ # winning_score=\$\$audioBookScore\$\$ 
+ # and 
+# electronic=0
    
- and 
- (
-	not (winning_score_score>1 and winning_score_distance<2) 
-	or
-	(
-		second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
-		and
-		(circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
-	)
-	or
-	(
-		opac_icon is null
-		and
-		second_place_score is null
-		and
-		LOWER(circ_mods) ~*\$\$new\$\$
-	)
-	or
-	(
-		opac_icon =\$\$phonospoken\$\$
-		and
-		(second_place_score is null or second_place_score=\$\$\$\$)
-		and
-		(circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
-	)
+ # and 
+ # (
+	# not (winning_score_score>1 and winning_score_distance<2) 
+	# or
+	# (
+		# second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
+		# and
+		# (circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
+	# )
+	# or
+	# (
+		# opac_icon is null
+		# and
+		# second_place_score is null
+		# and
+		# LOWER(circ_mods) ~*\$\$new\$\$
+	# )
+	# or
+	# (
+		# opac_icon =\$\$phonospoken\$\$
+		# and
+		# (second_place_score is null or second_place_score=\$\$\$\$)
+		# and
+		# (circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
+	# )
 	
- )
-and circ_mods !~* \$\$Refere\$\$
-and not
-(
-	circ_mods =\$\$Books\$\$
-	and
-	opac_icon = \$\$book\$\$
-)
-and not
-(	
-	(
-	circ_mods !~*\$\$CD\$\$
-	and
-	circ_mods !~*\$\$AudioBooks\$\$
-	and
-	circ_mods !~*\$\$Media\$\$
-	and
-	circ_mods !~*\$\$Kit\$\$
-	and
-	circ_mods !~*\$\$Music\$\$
-	)	
-	and
-	(
-	opac_icon is null 
-	and
-	circ_mods is null 
-	)
-	and
-	winning_score_score=1	
-)
+ # )
+# and circ_mods !~* \$\$Refere\$\$
+# and record not in
+# (
+	# select record from seekdestroy.bib_score where 
+	# circ_mods =\$\$Books\$\$
+	# and
+	# opac_icon = \$\$book\$\$
+# )
+# and not
+# (	
+	# (
+	# circ_mods !~*\$\$CD\$\$
+	# and
+	# circ_mods !~*\$\$AudioBooks\$\$
+	# and
+	# circ_mods !~*\$\$Media\$\$
+	# and
+	# circ_mods !~*\$\$Kit\$\$
+	# and
+	# circ_mods !~*\$\$Music\$\$
+	# )	
+	# and
+	# (
+	# opac_icon is null 
+	# and
+	# circ_mods is null 
+	# )
+	# and
+	# winning_score_score=1	
+# )
 
 
  
-order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
-";
+# order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
+# ";
 
-	$log->addLine($query);
-	my @results = @{$dbHandler->query($query)};
-	my @convertList;#=@results;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $highscore = @row[4];
-		my $highscoredistance = @row[5];
-		my $secondplace = @row[6];
-		my $circmods = @row[7];
-		my $opacicon = @row[3];
-		my $marc = @row[20];
-		if($opacicon ne 'kit')
-		{
-			push(@convertList,\@row);		
-		}
-	}
-	$log->addLine("Will Convert these to AudioBooks: $#convertList\n\n\n");
-	foreach(@convertList)
-	{
-		my @line=@{$_};
-		$log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
-	}
-@convertList=();
+	# $log->addLine($query);
+	# my @results = @{$dbHandler->query($query)};
+	# my @convertList;#=@results;
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# my $highscore = @row[4];
+		# my $highscoredistance = @row[5];
+		# my $secondplace = @row[6];
+		# my $circmods = @row[7];
+		# my $opacicon = @row[3];
+		# my $marc = @row[20];
+		# if($opacicon ne 'kit')
+		# {
+			# push(@convertList,\@row);		
+		# }
+	# }
+	# $log->addLine("Will Convert these to AudioBooks: $#convertList\n\n\n");
+	# foreach(@convertList)
+	# {
+		# my @line=@{$_};
+		# $log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
+	# }
+# @convertList=();
 
-########## Convert to E-Audio	
-		my $query = "
-	  select record,
- \$\$link\$\$,
- winning_score,
-  opac_icon,
- winning_score_score,winning_score_distance,second_place_score,
- circ_mods,
- score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- from seekdestroy.bib_score sbs where 
-electronic>0 
-and
-not
-(
-opac_icon ~ \$\$eaudio\$\$
-or
-opac_icon ~ \$\$ebook\$\$
-)
-and
-winning_score=\$\$electricScore\$\$
-order by winning_score_score
-";
+# ########## Convert to E-Audio	
+		# my $query = "
+	  # select record,
+ # \$\$link\$\$,
+ # winning_score,
+  # opac_icon,
+ # winning_score_score,winning_score_distance,second_place_score,
+ # circ_mods,
+ # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ # from seekdestroy.bib_score sbs where 
+# electronic>0 
+# and
+# not
+# (
+# opac_icon ~ \$\$eaudio\$\$
+# or
+# opac_icon ~ \$\$ebook\$\$
+# )
+# and
+# winning_score=\$\$electricScore\$\$
+# order by winning_score_score
+# ";
 
-	$log->addLine($query);
-	my @results = @{$dbHandler->query($query)};
-	my @convertList=@results;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $highscore = @row[4];
-		my $highscoredistance = @row[5];
-		my $secondplace = @row[6];
-		my $circmods = @row[7];
-		my $opacicon = @row[3];
-		my $marc = @row[20];
-		#push(@convertList,\@row);		
-	}
-	$log->addLine("Will Convert these to E-AUDIO: $#convertList\n\n\n");
-	foreach(@convertList)
-	{
-		my @line=@{$_};
-		$log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
-	}
-@convertList=();	
+	# $log->addLine($query);
+	# my @results = @{$dbHandler->query($query)};
+	# my @convertList=@results;
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# my $highscore = @row[4];
+		# my $highscoredistance = @row[5];
+		# my $secondplace = @row[6];
+		# my $circmods = @row[7];
+		# my $opacicon = @row[3];
+		# my $marc = @row[20];
+		# #push(@convertList,\@row);		
+	# }
+	# $log->addLine("Will Convert these to E-AUDIO: $#convertList\n\n\n");
+	# foreach(@convertList)
+	# {
+		# my @line=@{$_};
+		# $log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
+	# }
+# @convertList=();	
 	
-	########## Human intervention
-		my $query = "	  
-	 select record,
-	 \$\$link\$\$, 
- winning_score,
-  opac_icon,
- winning_score_score,winning_score_distance,second_place_score,
- circ_mods,
- score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- from seekdestroy.bib_score sbs where 
-winning_score=\$\$audioBookScore\$\$ 
-and
-electronic=0 
-and
- record not in
- (
-	select record  
-	from seekdestroy.bib_score sbs where  
- winning_score=\$\$audioBookScore\$\$ 
- and
-  electronic=0 
+	# ########## Human intervention
+		# my $query = "	  
+	 # select record,
+	 # \$\$link\$\$, 
+ # winning_score,
+  # opac_icon,
+ # winning_score_score,winning_score_distance,second_place_score,
+ # circ_mods,
+ # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ # from seekdestroy.bib_score sbs where 
+# winning_score=\$\$audioBookScore\$\$ 
+# and
+# electronic=0 
+# and
+ # record not in
+ # (
+	# select record  
+	# from seekdestroy.bib_score sbs where  
+ # winning_score=\$\$audioBookScore\$\$ 
+ # and
+  # electronic=0 
  
- and 
- (
-	not (winning_score_score>1 and winning_score_distance<2) 
-	or
-	(
-		second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
-		and
-		(circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
-	)
-	or
-	(
-		opac_icon is null
-		and
-		second_place_score is null
-		and
-		LOWER(circ_mods) ~*\$\$new\$\$
-	)
-	or
-	(
-		opac_icon =\$\$phonospoken\$\$
-		and
-		(second_place_score is null or second_place_score=\$\$\$\$)
-		and
-		(circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
-	)
+ # and 
+ # (
+	# not (winning_score_score>1 and winning_score_distance<2) 
+	# or
+	# (
+		# second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
+		# and
+		# (circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
+	# )
+	# or
+	# (
+		# opac_icon is null
+		# and
+		# second_place_score is null
+		# and
+		# LOWER(circ_mods) ~*\$\$new\$\$
+	# )
+	# or
+	# (
+		# opac_icon =\$\$phonospoken\$\$
+		# and
+		# (second_place_score is null or second_place_score=\$\$\$\$)
+		# and
+		# (circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
+	# )
 	
- )
-and circ_mods !~* \$\$Refere\$\$
-and not
-(
-	circ_mods =\$\$Books\$\$
-	and
-	opac_icon = \$\$book\$\$
-)
-and not
-(	
-	(
-	circ_mods !~*\$\$CD\$\$
-	and
-	circ_mods !~*\$\$AudioBooks\$\$
-	and
-	circ_mods !~*\$\$Media\$\$
-	and
-	circ_mods !~*\$\$Kit\$\$
-	and
-	circ_mods !~*\$\$Music\$\$
-	)	
-	and
-	(
-	opac_icon is null 
-	and
-	circ_mods is null 
-	)
-	and
-	winning_score_score=1	
-)
+ # )
+# and circ_mods !~* \$\$Refere\$\$
+# and record not in
+# (
+	# select record from seekdestroy.bib_score where
+	# circ_mods =\$\$Books\$\$
+	# and
+	# opac_icon = \$\$book\$\$
+# )
+# and not
+# (	
+	# (
+	# circ_mods !~*\$\$CD\$\$
+	# and
+	# circ_mods !~*\$\$AudioBooks\$\$
+	# and
+	# circ_mods !~*\$\$Media\$\$
+	# and
+	# circ_mods !~*\$\$Kit\$\$
+	# and
+	# circ_mods !~*\$\$Music\$\$
+	# )	
+	# and
+	# (
+	# opac_icon is null 
+	# and
+	# circ_mods is null 
+	# )
+	# and
+	# winning_score_score=1	
+# )
 
  
  
- )
-order by winning_score,winning_score_distance,electronic,second_place_score 
-";
+ # )
+# order by winning_score,winning_score_distance,electronic,second_place_score 
+# ";
 
-	$log->addLine($query);
-	my @results = @{$dbHandler->query($query)};
-	my @convertList=@results;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $highscore = @row[4];
-		my $highscoredistance = @row[5];
-		my $secondplace = @row[6];
-		my $circmods = @row[7];
-		my $opacicon = @row[3];
-		my $marc = @row[20];
-		#push(@convertList,\@row);		
-	}
-	$log->addLine("Will NOT Convert these: $#convertList\n\n\n");
-	foreach(@convertList)
-	{
-		my @line=@{$_};
-		$log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
-	}
-@convertList=();
+	# $log->addLine($query);
+	# my @results = @{$dbHandler->query($query)};
+	# my @convertList=@results;
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# my $highscore = @row[4];
+		# my $highscoredistance = @row[5];
+		# my $secondplace = @row[6];
+		# my $circmods = @row[7];
+		# my $opacicon = @row[3];
+		# my $marc = @row[20];
+		# #push(@convertList,\@row);		
+	# }
+	# $log->addLine("Will NOT Convert these: $#convertList\n\n\n");
+	# foreach(@convertList)
+	# {
+		# my @line=@{$_};
+		# $log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
+	# }
+# @convertList=();
 }
 
 sub isScored
