@@ -126,6 +126,7 @@ sub readConfFile
 	foreach my $line (@lines)
 	{
 		$line =~ s/\n//;  #remove newline characters
+		$line =~ s/^\s+//; #left trim
 		my $cur = trim('',$line);
 		my $len = length($cur);
 		if($len>0)

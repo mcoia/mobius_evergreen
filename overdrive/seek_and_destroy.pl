@@ -57,11 +57,15 @@ use Unicode::Normalize;
 
 my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
- 
+our $dryrun=0;
 
-if(@ARGV[1])
+if(@ARGV[1] && @ARGV[1] eq 'dryrun')
 {
-	$xmlconf = @ARGV[1];
+	$dryrun=1;
+}
+if(@ARGV[2])
+{
+	$xmlconf = @ARGV[2];
 }
 
 if(! -e $xmlconf)
@@ -90,10 +94,30 @@ if(! -e $xmlconf)
 	our @largePrintBookSearchPhrases;
 	our @musicSearchPhrases;
 	our @playawaySearchPhrases;
+	our %queries;
+	
   
  if($conf)
  {
 	my %conf = %{$conf};
+	if($conf{"queryfile"})
+	{
+		my $queries = $mobUtil->readQueryFile($conf{"queryfile"});
+		if($queries)
+		{
+			%queries = %{$queries};
+		}
+		else
+		{
+			print "Please provide a queryfile stanza in the config file\n";
+			exit;
+		}
+	}
+	else
+	{
+		print "Please provide a queryfile stanza in the config file\n";
+		exit;	
+	}
 	$audio_book_score_when_audiobooks_dont_belong = $conf{"audio_book_score_when_audiobooks_dont_belong"};
 	$electronic_score_when_bib_is_considered_electronic = $conf{"electronic_score_when_bib_is_considered_electronic"};
 	#print "electronic_score_when_bib_is_considered_electronic = $electronic_score_when_bib_is_considered_electronic\n";
@@ -115,7 +139,8 @@ if(! -e $xmlconf)
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
-		$log->addLogLine(" ---------------- Script Starting ---------------- ");		
+		$log->addLogLine(" ---------------- Script Starting ---------------- ");
+		print "Executing job  tail the log for information (".$conf{"logfile"}.")\nDryrun = $dryrun\n";		
 		my @reqs = ("logfile"); 
 		my $valid = 1;
 		my $errorMessage="";
@@ -136,6 +161,8 @@ if(! -e $xmlconf)
 			$jobid = createNewJob('processing');
 			if($jobid!=-1)
 			{
+				print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
+		
 				#findPhysicalItemsOnElectronicBooksUnDedupe();
 				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
 				#findInvalidElectronicMARC();
@@ -215,17 +242,8 @@ lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"
 
 sub findInvalidElectronicMARC
 {
-	my $query = "
-	select id,marc from biblio.record_entry where id in (select record from metabib.real_full_rec where tag=\$\$856\$\$ and ind2=\$\$0\$\$) AND  
-marc ~ \$\$<leader>......[at]\$\$
-and
-marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
-and
-marc !~ \$\$tag=\"006\">......[oqs]\$\$
-and
-marc !~ \$\$<leader>.......p\$\$
-
-";
+	my $subq = $queries{"invalid_ebook_marc"};
+	my $query = "select id,marc from biblio.record_entry where id in($subq)";
  
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine(($#results+1)." possible invalid Electronic MARC");
@@ -374,16 +392,9 @@ sub updateMARCSetSpecifiedLeaderByte
 	$marcob->leader($leader);
 	#print $marcob->leader()."\n";
 	my $xmlresult = convertMARCtoXML($marcob);
-	return $xmlresult
+	return $xmlresult;
 }
 
-
-sub updateMARCSetElectronicAudioBook
-{	
-	my $bibid = @_[0];
-	my $marc = @_[1];
-	updateMARCSetElectronic($id,$marc);
-}
 sub updateMARC
 {
 	my $newmarc = @_[0];
@@ -395,21 +406,34 @@ sub updateMARC
 	my @values = ($bibid,$bibid,$newmarc,$newrecord,$extra,$jobid);
 	$dbHandler->updateWithParameters($query,\@values);
 	$query = "UPDATE BIBLIO.RECORD_ENTRY SET MARC=\$1 WHERE ID=\$2";
+	updateJob("Processing","updateMARC $extra  $query");
 	@values = ($newmarc,$bibid);
 	$dbHandler->updateWithParameters($query,\@values);
 }
 
 
 sub findInvalidAudioBookMARC
-{
-
-
-
-my $query = "
-		select id,marc from biblio.record_entry where 		
-		id=130294 --1325615
-		";
+{	
+	foreach(@audioBookSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = "
+				select id,marc from biblio.record_entry where 		
+				(
+				marc !~ \$\$tag=\"007\">s..[fl]\$\$
+				OR
+				marc !~ \$\$<leader>......[i]\$\$
+				)
+				AND
+				lower(marc) ~* \$\$$phrase\$\$
+				AND
+				id not in
+				(
+				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$
+				)
+				";
 		$log->addLine($query);
+		updateJob("Processing","findInvalidAudioBookMARC  $query");
 		my @results = @{$dbHandler->query($query)};		
 		$log->addLine(($#results+1)." possible invalid Audiobook MARC");
 		foreach(@results)
@@ -418,355 +442,161 @@ my $query = "
 			my @row = @{$row};
 			my $id = @row[0];
 			my $marc = @row[1];
-			
+
 			my @scorethis = ($id,$marc);
 			my @st = ([@scorethis]);			
 			updateScoreCache(\@st);
-			updateMARCSetCDAudioBook($id,$marc);
-		
+
+			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
+			$dbHandler->updateWithParameters($query,\@values);			
 		}
+	}
 	
-	
-	
-	 # foreach(@audioBookSearchPhrases)
-	 # {
-		# my $phrase = lc$_;
-		# my $query = "
-		# select id,marc from biblio.record_entry where 		
-		# (
-		# marc !~ \$\$tag=\"007\">s..[fl]\$\$
-		# OR
-		# marc !~ \$\$<leader>......[i]\$\$
-		# )
-		# AND
-		# lower(marc) ~* \$\$$phrase\$\$
-		# AND
-		# id not in
-		# (
-		# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
-		# )
-		# ";
-		# $log->addLine($query);
-		# my @results = @{$dbHandler->query($query)};		
-		# $log->addLine(($#results+1)." possible invalid Audiobook MARC");
-		# foreach(@results)
-		# {
-			# my $row = $_;
-			# my @row = @{$row};
-			# my $id = @row[0];
-			# my $marc = @row[1];
-			
-			# my @scorethis = ($id,$marc);
-			# my @st = ([@scorethis]);			
-			# updateScoreCache(\@st);
-			
-			# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			# my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
-			# $dbHandler->updateWithParameters($query,\@values);			
-		# }
-	# }
-	
-	
-	
-	# my $query = "
-	# select id,marc from biblio.record_entry where 		
-	# (
-	# marc !~ \$\$tag=\"007\">s..[fl]\$\$
-	# OR
-	# marc !~ \$\$<leader>......[i]\$\$
-	# )
-	# AND	
-	# id not in
-	# (
-	# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM='MARC with audiobook phrases but incomplete marc'
-	# )
-	# AND 
-	# id in
-	# ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier='AudioBooks'))
-	# ";
-	# $log->addLine($query);
-	# my @results = @{$dbHandler->query($query)};		
-	# $log->addLine(($#results+1)." possible invalid Audiobook MARC");
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# my $marc = @row[1];
+	my $query = "
+	select id,marc from biblio.record_entry where 		
+	(
+	marc !~ \$\$tag=\"007\">s..[fl]\$\$
+	OR
+	marc !~ \$\$<leader>......[i]\$\$
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=\$\$AudioBooks\$\$))
+	";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidAudioBookMARC  $query");
+	my @results = @{$dbHandler->query($query)};		
+	$log->addLine(($#results+1)." possible invalid Audiobook MARC");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
 		
-		# my @scorethis = ($id,$marc);
-		# my @st = ([@scorethis]);			
-		# updateScoreCache(\@st);
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);			
+		updateScoreCache(\@st);
 		
-		# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		# my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
-		# $dbHandler->updateWithParameters($query,\@values);			
-	# }
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with audiobook phrases but incomplete marc",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);			
+	}
 	
 	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert
+	my $subq = $queries{"non_audiobook_bib_convert_to_audiobook"};
+	my $output;
+	my $query = "
+	select record,
+ \$\$link\$\$,
+ winning_score,
+  opac_icon \"opac icon\",
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
+ (select marc from biblio.record_entry where id=sbs.record)
+ from seekdestroy.bib_score sbs where record in( $subq ) 
+order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods 
+";
+
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;
+	my $kit=0;
+	if(!$dryrun)
+	{
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			my $marc = @row[20];
+			updateMARCSetCDAudioBook($id,$marc);		
+			# my $highscore = @row[4];
+			# my $highscoredistance = @row[5];
+			# my $secondplace = @row[6];
+			# my $circmods = @row[7];
+			# my $opacicon = @row[3];
+		}
+	}
+	$log->addLine("Will Convert these to AudioBooks: $#convertList\n\n\n");
+	$output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+		
+	}
+	$log->addLine($output);
+
+# ########## Possible E-Audio	
+	@convertList=();
+	$subq = $queries{"non_audiobook_bib_possible_eaudiobook"};
+	my $query = "
+			  select record,
+			 \$\$link\$\$,
+			 winning_score,
+			  opac_icon,
+			 winning_score_score,winning_score_distance,second_place_score,
+			 circ_mods,
+			 score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+			 from seekdestroy.bib_score sbs where 
+			record in($subq)
+			order by winning_score_score
+			";
+
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;	
+	$log->addLine("HUMANS NEEDED Possible E-AUDIO: $#convertList\n\n\n");
+	$output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";		
+	}
+	$log->addLine($output);
+@convertList=();	
 	
-	# my $query = "
-	# select record,
- # \$\$link\$\$,
- # winning_score,
-  # opac_icon \"opac icon\",
- # winning_score_score,winning_score_distance,second_place_score,
- # circ_mods,
- # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- # from seekdestroy.bib_score sbs where 
- 
- # winning_score=\$\$audioBookScore\$\$ 
- # and 
-# electronic=0
-   
- # and 
- # (
-	# not (winning_score_score>1 and winning_score_distance<2) 
-	# or
-	# (
-		# second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
-		# and
-		# (circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
-	# )
-	# or
-	# (
-		# opac_icon is null
-		# and
-		# second_place_score is null
-		# and
-		# LOWER(circ_mods) ~*\$\$new\$\$
-	# )
-	# or
-	# (
-		# opac_icon =\$\$phonospoken\$\$
-		# and
-		# (second_place_score is null or second_place_score=\$\$\$\$)
-		# and
-		# (circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
-	# )
-	
- # )
-# and circ_mods !~* \$\$Refere\$\$
-# and record not in
-# (
-	# select record from seekdestroy.bib_score where 
-	# circ_mods =\$\$Books\$\$
-	# and
-	# opac_icon = \$\$book\$\$
-# )
-# and not
-# (	
-	# (
-	# circ_mods !~*\$\$CD\$\$
-	# and
-	# circ_mods !~*\$\$AudioBooks\$\$
-	# and
-	# circ_mods !~*\$\$Media\$\$
-	# and
-	# circ_mods !~*\$\$Kit\$\$
-	# and
-	# circ_mods !~*\$\$Music\$\$
-	# )	
-	# and
-	# (
-	# opac_icon is null 
-	# and
-	# circ_mods is null 
-	# )
-	# and
-	# winning_score_score=1	
-# )
+	$subq = $queries{"non_audiobook_bib_convert_to_audiobook"};
+	my $query = "	  
+	 select record,
+	 \$\$link\$\$, 
+ winning_score,
+  opac_icon,
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ from seekdestroy.bib_score sbs where 
+winning_score=\$\$audioBookScore\$\$ 
+and
+electronic=0 
+and
+ record not in
+ ($subq)
+order by winning_score,winning_score_distance,electronic,second_place_score 
+";
 
-
- 
-# order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
-# ";
-
-	# $log->addLine($query);
-	# my @results = @{$dbHandler->query($query)};
-	# my @convertList;#=@results;
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# my $highscore = @row[4];
-		# my $highscoredistance = @row[5];
-		# my $secondplace = @row[6];
-		# my $circmods = @row[7];
-		# my $opacicon = @row[3];
-		# my $marc = @row[20];
-		# if($opacicon ne 'kit')
-		# {
-			# push(@convertList,\@row);		
-		# }
-	# }
-	# $log->addLine("Will Convert these to AudioBooks: $#convertList\n\n\n");
-	# foreach(@convertList)
-	# {
-		# my @line=@{$_};
-		# $log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
-	# }
-# @convertList=();
-
-# ########## Convert to E-Audio	
-		# my $query = "
-	  # select record,
- # \$\$link\$\$,
- # winning_score,
-  # opac_icon,
- # winning_score_score,winning_score_distance,second_place_score,
- # circ_mods,
- # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- # from seekdestroy.bib_score sbs where 
-# electronic>0 
-# and
-# not
-# (
-# opac_icon ~ \$\$eaudio\$\$
-# or
-# opac_icon ~ \$\$ebook\$\$
-# )
-# and
-# winning_score=\$\$electricScore\$\$
-# order by winning_score_score
-# ";
-
-	# $log->addLine($query);
-	# my @results = @{$dbHandler->query($query)};
-	# my @convertList=@results;
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# my $highscore = @row[4];
-		# my $highscoredistance = @row[5];
-		# my $secondplace = @row[6];
-		# my $circmods = @row[7];
-		# my $opacicon = @row[3];
-		# my $marc = @row[20];
-		# #push(@convertList,\@row);		
-	# }
-	# $log->addLine("Will Convert these to E-AUDIO: $#convertList\n\n\n");
-	# foreach(@convertList)
-	# {
-		# my @line=@{$_};
-		# $log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
-	# }
-# @convertList=();	
-	
-	# ########## Human intervention
-		# my $query = "	  
-	 # select record,
-	 # \$\$link\$\$, 
- # winning_score,
-  # opac_icon,
- # winning_score_score,winning_score_distance,second_place_score,
- # circ_mods,
- # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- # from seekdestroy.bib_score sbs where 
-# winning_score=\$\$audioBookScore\$\$ 
-# and
-# electronic=0 
-# and
- # record not in
- # (
-	# select record  
-	# from seekdestroy.bib_score sbs where  
- # winning_score=\$\$audioBookScore\$\$ 
- # and
-  # electronic=0 
- 
- # and 
- # (
-	# not (winning_score_score>1 and winning_score_distance<2) 
-	# or
-	# (
-		# second_place_score in (\$\$music_score\$\$,\$\$video_score\$\$)
-		# and
-		# (circ_mods ~*\$\$AudioBooks\$\$ or circ_mods ~*\$\$CD\$\$ )
-	# )
-	# or
-	# (
-		# opac_icon is null
-		# and
-		# second_place_score is null
-		# and
-		# LOWER(circ_mods) ~*\$\$new\$\$
-	# )
-	# or
-	# (
-		# opac_icon =\$\$phonospoken\$\$
-		# and
-		# (second_place_score is null or second_place_score=\$\$\$\$)
-		# and
-		# (circ_mods ~\$\$^Books\$\$ or circ_mods ~*\$\$,Books\$\$)
-	# )
-	
- # )
-# and circ_mods !~* \$\$Refere\$\$
-# and record not in
-# (
-	# select record from seekdestroy.bib_score where
-	# circ_mods =\$\$Books\$\$
-	# and
-	# opac_icon = \$\$book\$\$
-# )
-# and not
-# (	
-	# (
-	# circ_mods !~*\$\$CD\$\$
-	# and
-	# circ_mods !~*\$\$AudioBooks\$\$
-	# and
-	# circ_mods !~*\$\$Media\$\$
-	# and
-	# circ_mods !~*\$\$Kit\$\$
-	# and
-	# circ_mods !~*\$\$Music\$\$
-	# )	
-	# and
-	# (
-	# opac_icon is null 
-	# and
-	# circ_mods is null 
-	# )
-	# and
-	# winning_score_score=1	
-# )
-
- 
- 
- # )
-# order by winning_score,winning_score_distance,electronic,second_place_score 
-# ";
-
-	# $log->addLine($query);
-	# my @results = @{$dbHandler->query($query)};
-	# my @convertList=@results;
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# my $highscore = @row[4];
-		# my $highscoredistance = @row[5];
-		# my $secondplace = @row[6];
-		# my $circmods = @row[7];
-		# my $opacicon = @row[3];
-		# my $marc = @row[20];
-		# #push(@convertList,\@row);		
-	# }
-	# $log->addLine("Will NOT Convert these: $#convertList\n\n\n");
-	# foreach(@convertList)
-	# {
-		# my @line=@{$_};
-		# $log->addLine($mobUtil->makeCommaFromArray(\@line,';'));
-	# }
-# @convertList=();
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;	
+	$log->addLine("Will NOT Convert these: $#convertList\n\n\n");
+	$output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+	}
+	$log->addLine($output);
+@convertList=();
 }
 
 sub isScored
@@ -982,7 +812,8 @@ sub updateBibCircs
 
 sub findPhysicalItemsOnElectronicBooksUnDedupe
 {
-	# Find Electronic bibs with physical items but and in the dedupe project
+	# Find Electronic bibs with physical items and in the dedupe project
+	
 	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
 	and id in
@@ -1361,27 +1192,8 @@ sub findPhysicalItemsOnElectronicBooks
 {
 	my $success = 0;
 	# Find Electronic bibs with physical items
-	my $query = "
-	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
-	and id in
-	(
-	select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-	)	
-	and 
-	(
-		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
-		or
-		marc ~ \$\$tag=\"006\">......[oqs]\$\$
-	)
-	and
-	(
-		marc ~ \$\$<leader>......[at]\$\$
-	)
-	and
-	(
-		marc ~ \$\$<leader>.......[acdm]\$\$
-	)	
-	";
+	my $subq = $queries{"electronic_book_with_physical_items_attached"};
+	my $query = "select id,marc from biblio.record_entry where id in($subq)"; 
 	updateJob("Processing","findPhysicalItemsOnElectronic  $query");
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine(($#results+1)." Bibs with physical Items attached");
@@ -1419,7 +1231,7 @@ sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 		marc ~ \$\$<leader>......i\$\$
 	)	
 	";
-	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
+	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooksUnDedupe  $query");
 	my @results = @{$dbHandler->query($query)};
 	$log->addLine(($#results+1)." Bibs with physical Items attached from the dedupe");
 	foreach(@results)
@@ -1440,23 +1252,8 @@ sub findPhysicalItemsOnElectronicAudioBooks
 {
 	my $success = 0;
 	# Find Electronic Audio bibs with physical items
-	my $query = "
-	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
-	and id in
-	(
-	select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-	)	
-	and 
-	(
-		marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
-		or
-		marc ~ \$\$tag=\"006\">......[oqs]\$\$
-	)
-	and
-	(
-		marc ~ \$\$<leader>......i\$\$
-	)
-	";
+	my $subq = $queries{"electronic_audiobook_with_physical_items_attached"};
+	my $query = "select id,marc from biblio.record_entry where id in($subq)"; 	
 	updateJob("Processing","findPhysicalItemsOnElectronicAudioBooks  $query");
 	my @results = @{$dbHandler->query($query)};	
 	$log->addLine(($#results+1)." Audio Bibs with physical Items attached");

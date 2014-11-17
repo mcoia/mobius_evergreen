@@ -82,6 +82,51 @@ TESTVAL=${DAYSBACK:?Error DAYSBACK is not defined or is empty}
 # Create notices for Howard County
 ./notices_14.sh -B $DAYSBACK -S hoco -D hoco -F hoco-overdue-14day -T
 
+# Create notices for Little Dixie
+./notices_14.sh -B $DAYSBACK -S ldxr-hunt -D ldxr -F ldxr-hunt-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S ldxr-mad -D ldxr -F ldxr-mad-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S ldxr-par -D ldxr -F ldxr-par-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S ldxr-mob -D ldxr -F ldxr-mob-overdue-14day -T
+
+# Create Notices for Carthage
+./notices_14.sh -B $DAYSBACK -S cgpl -D cgpl -F cgpl-overdue-14day -T
+
+# Create notices for Webb City
+./notices_14.sh -B $DAYSBACK -S wbcpl -D wbcpl -F wbcpl-overdue-14day -T
+
+./notices_14.sh -B $DAYSBACK -S srl-bk -D srl_wapl -F srl-bk-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-hr -D srl_wapl -F srl-hr-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-nh -D srl_wapl -F srl-nh-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-ow -D srl_wapl -F srl-ow-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-pc -D srl_wapl -F srl-pc-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-sc -D srl_wapl -F srl-sc-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-un -D srl_wapl -F srl-un-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S srl-wr -D srl_wapl -F srl-wr-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S wpl -D srl_wapl -F wpl-overdue-14day -T
+
+# Create notices for Ozark Regional
+./notices_14.sh -B $DAYSBACK -S orl-ir -D orl -F orl-ir-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-an -D orl -F orl-an-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-vi -D orl -F orl-vi-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-fr -D orl -F orl-fr-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-sg -D orl -F orl-sg-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-st -D orl -F orl-st-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-cu -D orl -F orl-cu-overdue-14day -T
+./notices_14.sh -B $DAYSBACK -S orl-bo -D orl -F orl-bo-overdue-14day -T
+
+# Create notices for Caruthersville
+./notices_14.sh -B $DAYSBACK -S cvpl -D cvp -F cvpl-overdue-14day -T
+
+# Create notices for Sullivan
+./notices_14.sh -B $DAYSBACK -S slvnpl -D slvn -F slvnpl-overdue-14day -T
+
+# Create notices for Sikeston
+./notices_14.sh -B $DAYSBACK -S skpl -D skpl -F skpl-overdue-14day -T
+
+# Create notices for Marion
+./notices_14.sh -B $DAYSBACK -S mcl -D mcl -F mcl-overdue-14day -T
+
+
 ###
 # Calcualte the DATE so we can send the corresponding XML_FILE to UMS 
 #DAYS_BACK=0

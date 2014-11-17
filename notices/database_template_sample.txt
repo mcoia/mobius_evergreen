@@ -1,0 +1,96 @@
+[%# 
+REMEMBER TO UPDATE THE notice_text BLOCK
+Without that block, the script will default to 
+"
+If no other patrons have placed holds on the items and your library account is in good
+standing, you may be able to renew them via the online catalog.
+"
+The print template perl script will use the "Processing Delay" field for the
+language:
+Our records indicate these items are (processing delay) overdue:
+
+If you would like to override that, then specify a 
+notify_interval='value you want'
+with in this line:
+notice type='overdue'
+Example:
+<notice type='overdue' notice type='overdue'>
+
+You also need to setup some environment for the action trigger:
+
+"billable_transaction.summary"
+"circ_lib.billing_address"
+"circ_lib.mailing_address"
+"target_copy.call_number"
+"target_copy.location"
+"usr.billing_address"
+"usr.card"
+"usr.mailing_address"
+
+%][%- USE date -%]
+[%- lib = target.0.circ_lib -%]
+[%- SET lib_addr = lib.mailing_address -%]
+[%- IF !lib_addr -%]
+    [%- SET lib_addr = lib.billing_address -%]
+[%- END -%]
+[%- SET user = '' -%]
+[%- SET total_notice_fines = 0 -%]
+
+[%- FOR circ IN target.sort('usr') -%]
+
+    [%- IF !user OR user.id != circ.usr.id -%]
+
+        [%- IF !loop.first -%]
+    <total_notice_fines>[% total_fines %]</total_notice_fines>
+    </notice> [%# close out the notice for the previous user #%]
+        [%- END -%]
+        [%- user = circ.usr -%]
+        [%- SET user_addr = user.mailing_address -%]
+        [%- IF !user_addr -%]
+            [%- SET user_addr = user.billing_address -%]
+        [%- END -%]
+        [%- SET total_fines = 0 -%]
+
+<notice type='overdue' >
+<notice_text></notice_text>
+    <patron>
+        <barcode>[% helpers.escape_xml(user.card.barcode) %]</barcode>
+        <first_given_name>[% helpers.escape_xml(user.first_given_name) %]</first_given_name>
+        <family_name>[% helpers.escape_xml(user.family_name) %]</family_name>
+        <addr_street1>[% helpers.escape_xml(user_addr.street1) %]</addr_street1>
+        <addr_street2>[% helpers.escape_xml(user_addr.street2) %]</addr_street2>
+        <addr_city>[% helpers.escape_xml(user_addr.city) %]</addr_city>
+        <addr_state>[% helpers.escape_xml(user_addr.state) %]</addr_state>
+        <addr_post_code>[% helpers.escape_xml(user_addr.post_code) %]</addr_post_code>
+        <email>[% helpers.escape_xml(user.email) %]</email>
+        <sys_id>[% user.id %]</sys_id>
+    </patron>
+    <location>
+        <name>[% helpers.escape_xml(lib.name) %]</name>
+        <shortname>[% helpers.escape_xml(lib.shortname) FILTER lower %]</shortname>
+        <phone>[% helpers.escape_xml(lib.phone) %]</phone>
+        <addr_street1>[% helpers.escape_xml(lib_addr.street1) %]</addr_street1>
+        <addr_street2>[% helpers.escape_xml(lib_addr.street2) %]</addr_street2>
+        <addr_city>[% helpers.escape_xml(lib_addr.city) %]</addr_city>
+        <addr_state>[% helpers.escape_xml(lib_addr.state) %]</addr_state>
+        <addr_post_code>[% helpers.escape_xml(lib_addr.post_code) %]</addr_post_code>
+        <email>[% helpers.escape_xml(lib.email) %]</email>
+        <sys_id>[% lib.id %]</sys_id>
+    </location>
+    [% END %] [%# if new user #%]
+    <item>
+        [%- copy_details = helpers.get_copy_bib_basics(circ.target_copy.id) %]
+        <title>[% helpers.escape_xml(copy_details.title) %]</title>
+        <author>[% helpers.escape_xml(copy_details.author) %]</author>
+        <due_date>[% date.format(helpers.format_date(circ.due_date), '%Y-%m-%d') %]</due_date>
+        <call_number>[% helpers.escape_xml(circ.target_copy.call_number.label) %]</call_number>
+        <barcode>[% helpers.escape_xml(circ.target_copy.barcode) %]</barcode>
+        <shelf_location>[% helpers.escape_xml(circ.target_copy.location.name) %]</shelf_location>
+        <item_price>[% helpers.get_copy_price(circ.target_copy) %]</item_price>
+        <total_owed>[% circ.billable_transaction.summary.balance_owed | format('%.02f') %]</total_owed>
+        <circ_id>[% circ.id %]</circ_id>
+        [%- SET total_fines = total_fines + circ.billable_transaction.summary.balance_owed %]
+    </item>
+[% END %]
+    <total_notice_fines>[% total_fines | format('%.02f')%]</total_notice_fines>
+</notice>
