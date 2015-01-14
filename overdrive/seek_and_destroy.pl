@@ -169,7 +169,8 @@ if(! -e $xmlconf)
 				#findPhysicalItemsOnElectronicBooks();
 				#findPhysicalItemsOnElectronicAudioBooks();
 				
-				findInvalidAudioBookMARC();
+				#findInvalidAudioBookMARC();
+				#findInvalidDVDMARC();
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
 				#findInvalid856TOCURL();
@@ -179,13 +180,13 @@ if(! -e $xmlconf)
 				# and lower(marc) ~ \$\$abridge\$\$");
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
 				
-				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-				# (select record from 
-				# SEEKDESTROY.bib_score where score_time>\$\$2014-09-23\$\$::date)");
+				 updateScoreWithQuery("select id,marc from biblio.record_entry where id in
+				 (select record from 
+				 SEEKDESTROY.bib_score where score_time>\$\$2014-12-10\$\$::date)");
 				
-				# updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
-				# (select record from 
-				# SEEKDESTROY.bib_score where audiobook_score>0)");
+				 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
+				 # (select record from 
+				 # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
 				
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 				#updateScoreCache();
@@ -597,6 +598,80 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 	}
 	$log->addLine($output);
 @convertList=();
+}
+
+sub findInvalidDVDMARC
+{	
+	foreach(@videoSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = "
+				select id,marc from biblio.record_entry where 		
+				(
+					marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
+				)
+				AND
+				lower(marc) ~* \$\$$phrase\$\$
+				AND
+				id not in
+				(
+				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+				)
+				";
+		$log->addLine($query);
+		updateJob("Processing","findInvalidDVDMARC  $query");
+		my @results = @{$dbHandler->query($query)};		
+		$log->addLine(($#results+1)." possible invalid video MARC");
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			my $marc = @row[1];
+
+			my @scorethis = ($id,$marc);
+			my @st = ([@scorethis]);			
+			updateScoreCache(\@st);
+
+			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+			$dbHandler->updateWithParameters($query,\@values);			
+		}
+	}
+	
+	my $query = "
+	select id,marc from biblio.record_entry where 		
+	(
+	marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
+	";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidDVDMARC  $query");
+	my @results = @{$dbHandler->query($query)};		
+	$log->addLine(($#results+1)." possible invalid video MARC");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
+		
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);			
+		updateScoreCache(\@st);
+		
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);			
+	}
 }
 
 sub isScored
@@ -2226,6 +2301,21 @@ sub determineScoreWithPhrases
 	{
 		my $field = $_;		
 		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@searchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+		my @subs = $field->subfield('a');
 		foreach(@subs)
 		{
 			my $subf = lc($_);

@@ -196,7 +196,7 @@
 		</fo:block>
 
         <!-- ##### STANDARD FOOTER ##################################### -->       
-        <fo:block>
+        <fo:block margin-top="3mm">
           Contact your library for more information:
         </fo:block>
         <fo:block margin-top="3mm" margin-left="3mm">

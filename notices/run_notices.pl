@@ -138,7 +138,7 @@ if($conf)
 						}
 						my $tempxmlfile = $mobUtil->chooseNewFileName($conf{"temp_space"},"temp-$internal-".@date[0],"xml");
 						my $tempfofile = $mobUtil->chooseNewFileName($conf{"temp_space"},"temp-$internal-".@date[0],"fo");
-						my $finalpdffile = $mobUtil->chooseNewFileName($path,"$owning_ou $internal-$name-".@date[0],"pdf");
+						my $finalpdffile = $path."/$owning_ou $internal-$name-".@date[0].".pdf";						
 						my $fopstandardoutput = $conf{"temp_space"}."/fopstandardoutput.out";
 						my $write = new Loghandler($tempxmlfile);
 						$write->addLine("<?xml version='1.0' encoding='UTF-8'?>\n<file type='notice' date='".@date[0]."'>$value</file>");
@@ -147,6 +147,8 @@ if($conf)
 						$tempfofile =~s/\s/\\ /g;
 						$finalpdffile =~s/\s/\\ /g;
 						$fopstandardoutput=~s/\s/\\ /g;
+						#print "Unlinking $finalpdffile\n";
+						unlink $finalpdffile;
 						$log->addLine( $conf{"xsltproc_binary"}." --stringparam gendate \"".@date[1]."\" --stringparam delayvalue \"$delay\" ".$conf{"path_to_xsl_template"}." $tempxmlfile > $tempfofile");
 						system($conf{"xsltproc_binary"}." --stringparam gendate \"".@date[1]."\" --stringparam delayvalue \"$delay\" ".$conf{"path_to_xsl_template"}." $tempxmlfile > $tempfofile");
 						$log->addLine($conf{"fop_binary"}." $tempfofile $finalpdffile > $fopstandardoutput");
@@ -273,7 +275,7 @@ sub gatherDB
 {
 	my $templateID = @_[0];
 	my $date = @_[1];
-	my $query = "SELECT array_to_string(array_accum(coalesce(data, '')),'') FROM action_trigger.event_output where id in (select template_output from action_trigger.event where event_def = $templateID AND run_time::date = '$date');";
+	my $query = "SELECT array_to_string(array_accum(coalesce(data, '')),'') FROM action_trigger.event_output where id in (select template_output from action_trigger.event where event_def = $templateID AND run_time::date = '$date');";	
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};	
 	foreach(@results)
@@ -306,16 +308,29 @@ sub parseXML
 	
 	$log->addLine(Dumper(%data));
 	my $i=0;
+	my $t = ref($data{'notice'});
+	$log->addLine("Reference = $t");
+	$log->addLine(Dumper($data{'notice'}));
 	if(ref($data{'notice'}) eq 'ARRAY')
 	{
+		$log->addLine("It's an Array");
 		foreach (@{$data{'notice'}}) 
 		{
-			
 			my %notice = %{$_};
-			my $location=$notice{location}{shortname};		
+			my $location=$notice{location}{shortname};
 			$lib_notices{$location}.="<notice>".createXML(\%notice,'')."</notice>";		
 			$i++;
 		}
+	}
+	elsif(ref($data{'notice'}) eq 'HASH')
+	{
+		$log->addLine("It's an HASH");		
+		$log->addLine("Looping \%{\$data{'notice'}}");
+		my %notice = %{$data{'notice'}};
+		my $location=$notice{location}{shortname};
+		$lib_notices{$location}.="<notice>".createXML(\%notice,'')."</notice>";		
+		$i++;
+		
 	}
 }
 

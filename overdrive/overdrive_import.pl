@@ -1163,6 +1163,10 @@ sub readyMARCForInsertIntoME
 			{
 				$value = "eAudioBook";
 			}
+			elsif($lbyte6 eq 'g')
+			{
+				$value = "eVideo";
+			}
 			if($two45->subfield('h'))
 			{
 				$two45->update( 'h' => "[Overdrive downloadable $value] /" );
