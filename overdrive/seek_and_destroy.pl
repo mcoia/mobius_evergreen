@@ -169,6 +169,8 @@ if(! -e $xmlconf)
 				#findPhysicalItemsOnElectronicBooks();
 				#findPhysicalItemsOnElectronicAudioBooks();
 				
+				tag902s();
+				
 				#findInvalidAudioBookMARC();
 				#findInvalidDVDMARC();
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
@@ -180,9 +182,9 @@ if(! -e $xmlconf)
 				# and lower(marc) ~ \$\$abridge\$\$");
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
 				
-				 updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-				 (select record from 
-				 SEEKDESTROY.bib_score where score_time>\$\$2014-12-10\$\$::date)");
+				 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
+				 # (select record from 
+				 # SEEKDESTROY.bib_score where score_time>\$\$2014-12-10\$\$::date)");
 				
 				 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
 				 # (select record from 
@@ -209,6 +211,63 @@ if(! -e $xmlconf)
 	else
 	{
 		print "Config file does not define 'logfile'\n";		
+	}
+}
+
+sub tag902s
+{
+	my $query = "
+		select record,extra,(select marc from biblio.record_entry where id=a.record) from SEEKDESTROY.BIB_MARC_UPDATE a";
+ 
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $bibid = @row[0];
+		my $reason = @row[1];
+		my $marc = @row[2];
+		my $note = '';
+		if($reason eq "Correcting for DVD in the leader/007 rem 008_23")
+		{
+			$note='D V D';
+		}
+		elsif($reason eq "Correcting for Audiobook in the leader/007 rem 008_23")
+		{
+			$note='A u d i o b o o k';
+		}
+		elsif($reason eq "Correcting for Electronic in the 008/006")
+		{
+			$note='E l e c t r o n i c';
+		}
+		else
+		{
+			print "Skipping $bibid\n";
+			next;
+		}
+		my $xmlresult = $marc;
+		$xmlresult =~ s/(<leader>.........)./${1}a/;
+		#$log->addLine($xmlresult);
+		my $check = length($xmlresult);
+		#$log->addLine($check);
+		$xmlresult = fingerprintScriptMARC($xmlresult,$note);
+		$xmlresult =~s/<record>//;
+		$xmlresult =~s/<\/record>//;
+		$xmlresult =~s/<\/collection>/<\/record>/;
+		$xmlresult =~s/<collection/<record  /;
+		$xmlresult =~s/XMLSchema-instance"/XMLSchema-instance\"  /;
+		$xmlresult =~s/schema\/MARC21slim.xsd"/schema\/MARC21slim.xsd\"  /;
+		
+		#$log->addLine($xmlresult);
+		#$log->addLine(length($xmlresult));
+		if(length($xmlresult)!=$check)
+		{		
+			updateMARC($xmlresult,$bibid,'false',"Tagging 902 for $note");
+		}
+		else
+		{
+			print "Skipping $bibid - Already had the 902 for $note\n";
+		}
 	}
 }
 
@@ -240,7 +299,6 @@ lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"
 	}
 }
 
-
 sub findInvalidElectronicMARC
 {
 	my $subq = $queries{"invalid_ebook_marc"};
@@ -270,6 +328,7 @@ sub findInvalidElectronicMARC
 			if(@row2[0]  > $electronic_score_when_bib_is_considered_electronic)
 			{
 				my $xmlresult = updateMARCSetElectronic($id,$marc);
+				$xmlresult = fingerprintScriptMARC($xmlresult,'E l e c t r o n i c');
 				updateMARC($xmlresult,$id,'false','Correcting for Electronic in the 008/006');
 			}
 		}
@@ -306,7 +365,7 @@ sub updateMARCSetElectronic
 	else
 	{
 		$replacement = $mobUtil->insertDataIntoColumn('','s',24);
-		my $field = MARC::Field->new( '008', $replacement );		
+		my $field = MARC::Field->new( '008', $replacement );
 		$marcob->insert_fields_ordered($field);
 	}
 	
@@ -329,7 +388,7 @@ sub updateMARCSetCDAudioBook
 		my $z08 = $marcob->field('008');
 		$marcob->delete_field($z08);
 		#print "$marcr{tag008}\n";
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},' ',24);		
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},' ',24);
 		#print "$replacement\n";
 		$z08->update($replacement);
 		$marcob->insert_fields_ordered($z08);		
@@ -373,8 +432,108 @@ sub updateMARCSetCDAudioBook
 		$marcob->insert_fields_ordered($z07);
 	}
 	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = fingerprintScriptMARC($xmlresult,'A u d i o b o o k');
 	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'i');
 	updateMARC($xmlresult,$bibid,'false','Correcting for Audiobook in the leader/007 rem 008_23');
+}
+
+sub updateMARCSetDVD
+{	
+	my $bibid = @_[0];
+	print "updating marc for $bibid\n";
+	my $marc = @_[1];
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
+	if($marcr{tag008})
+	{
+		my $z08 = $marcob->field('008');
+		$marcob->delete_field($z08);
+		#print "$marcr{tag008}\n";
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},' ',24);		
+		#print "$replacement\n";
+		$z08->update($replacement);
+		$marcob->insert_fields_ordered($z08);		
+	}
+	elsif($marcr{tag006})
+	{
+		my $z06 = $marcob->field('006');
+		$marcob->delete_fields($z06);
+		#print "$marcr{tag006}\n";
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},' ',7);
+		#print "$replacement\n";
+		$z06->update($replacement);
+		$marcob->insert_fields_ordered($z06);		
+	}
+	my $altered=0;
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print $z07->data()."\n";
+			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'v',1);
+			$replacement=$mobUtil->insertDataIntoColumn($replacement,'v',5);
+			#print "$replacement\n";			
+			$z07->update($replacement);
+			$marcob->insert_fields_ordered($z07);
+			$altered=1;
+		}
+		elsif(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print "removed video 007\n";
+		}
+	}
+	if(!$altered)
+	{
+		my $z07 = MARC::Field->new( '007', 'vd cvaizq' );
+		#print "inserted new 007\n".$z07->data()."\n";
+		$marcob->insert_fields_ordered($z07);
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = fingerprintScriptMARC($xmlresult,'D V D');
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
+	updateMARC($xmlresult,$bibid,'false','Correcting for DVD in the leader/007 rem 008_23');
+}
+
+sub fingerprintScriptMARC
+{
+	my $marc = @_[0];
+	my $note = @_[1];
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my @n902 = $marcob->field('902');
+	my $altered = 0;
+	my $dt = DateTime->now(time_zone => "local"); 
+	my $fdate = $dt->mdy; 
+	foreach(@n902)
+	{
+		my $field = $_;
+		my $suba = $field->subfield('a');
+		my $subd = $field->subfield('d');
+		if($suba && $suba eq 'mobius-catalog-fix' && $subd && $subd eq "$note")
+		{
+			#print "Found a matching 902 for $note - updating that one\n";
+			$altered = 1;
+			my $new902 = MARC::Field->new( '902',' ',' ','a'=>'mobius-catalog-fix','b'=>"$fdate",'c'=>'formatted','d'=>"$note" );
+			$marcob->delete_field($field);
+			$marcob->append_fields($new902);
+		}
+	}
+	if(!$altered)
+	{
+		my $new902 = MARC::Field->new( '902',' ',' ','a'=>'mobius-catalog-fix','b'=>"$fdate",'c'=>'formatted','d'=>"$note" );
+		$marcob->append_fields($new902);
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	return $xmlresult
 }
 
 sub updateMARCSetSpecifiedLeaderByte  
@@ -602,76 +761,160 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 
 sub findInvalidDVDMARC
 {	
-	foreach(@videoSearchPhrases)
+	# foreach(@videoSearchPhrases)
+	# {
+		# my $phrase = lc$_;
+		# my $query = "
+				# select id,marc from biblio.record_entry where 		
+				# (
+					# marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
+				# )
+				# AND
+				# lower(marc) ~* \$\$$phrase\$\$
+				# AND
+				# id not in
+				# (
+				# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+				# )
+				# ";
+		# $log->addLine($query);
+		# updateJob("Processing","findInvalidDVDMARC  $query");
+		# my @results = @{$dbHandler->query($query)};		
+		# $log->addLine(($#results+1)." possible invalid video MARC");
+		# foreach(@results)
+		# {
+			# my $row = $_;
+			# my @row = @{$row};
+			# my $id = @row[0];
+			# my $marc = @row[1];
+
+			# my @scorethis = ($id,$marc);
+			# my @st = ([@scorethis]);			
+			# updateScoreCache(\@st);
+
+			# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+			# $dbHandler->updateWithParameters($query,\@values);			
+		# }
+	# }
+	
+	# my $query = "
+	# select id,marc from biblio.record_entry where 		
+	# (
+	# marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
+	# )
+	# AND	
+	# id not in
+	# (
+	# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+	# )
+	# AND 
+	# id in
+	# ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
+	# ";
+	# $log->addLine($query);
+	# updateJob("Processing","findInvalidDVDMARC  $query");
+	# my @results = @{$dbHandler->query($query)};		
+	# $log->addLine(($#results+1)." possible invalid video MARC");
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# my $marc = @row[1];
+		
+		# my @scorethis = ($id,$marc);
+		# my @st = ([@scorethis]);			
+		# updateScoreCache(\@st);
+		
+		# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+		# $dbHandler->updateWithParameters($query,\@values);			
+	# }
+	
+	
+	# Now that we have digested the possibilities - 
+	# Lets weed them out into bibs that we want to convert
+	my $subq = $queries{"non_dvd_bib_convert_to_dvd"};
+	my $output;
+	my $query = "
+	select record,
+ \$\$link\$\$,
+ winning_score,
+  opac_icon \"opac icon\",
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
+ (select marc from biblio.record_entry where id=sbs.record)
+ from seekdestroy.bib_score sbs where record in( $subq ) and record in(select id from biblio.record_entry where not deleted) and record=1099553
+order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods limit 1
+";
+
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;
+	my $kit=0;
+	if(!$dryrun)
 	{
-		my $phrase = lc$_;
-		my $query = "
-				select id,marc from biblio.record_entry where 		
-				(
-					marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
-				)
-				AND
-				lower(marc) ~* \$\$$phrase\$\$
-				AND
-				id not in
-				(
-				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-				)
-				";
-		$log->addLine($query);
-		updateJob("Processing","findInvalidDVDMARC  $query");
-		my @results = @{$dbHandler->query($query)};		
-		$log->addLine(($#results+1)." possible invalid video MARC");
 		foreach(@results)
 		{
 			my $row = $_;
 			my @row = @{$row};
 			my $id = @row[0];
-			my $marc = @row[1];
-
-			my @scorethis = ($id,$marc);
-			my @st = ([@scorethis]);			
-			updateScoreCache(\@st);
-
-			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-			$dbHandler->updateWithParameters($query,\@values);			
+			my $marc = @row[20];
+			updateMARCSetDVD($id,$marc);		
+			# my $highscore = @row[4];
+			# my $highscoredistance = @row[5];
+			# my $secondplace = @row[6];
+			# my $circmods = @row[7];
+			# my $opacicon = @row[3];
 		}
 	}
+	# $log->addLine("Will Convert these to DVDs: $#convertList\n\n\n");
+	# $output='';
+	# foreach(@convertList)
+	# {
+		# my @line=@{$_};
+		# $output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+		
+	# }
+	# $log->addLine($output);
+# @convertList=();	
 	
-	my $query = "
-	select id,marc from biblio.record_entry where 		
-	(
-	marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
-	)
-	AND	
-	id not in
-	(
-	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-	)
-	AND 
-	id in
-	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
-	";
-	$log->addLine($query);
-	updateJob("Processing","findInvalidDVDMARC  $query");
-	my @results = @{$dbHandler->query($query)};		
-	$log->addLine(($#results+1)." possible invalid video MARC");
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
-		
-		my @scorethis = ($id,$marc);
-		my @st = ([@scorethis]);			
-		updateScoreCache(\@st);
-		
-		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-		$dbHandler->updateWithParameters($query,\@values);			
-	}
+	# $subq = $queries{"non_dvd_bib_convert_to_dvd"};
+	# my $query = "	  
+	 # select record,
+	 # \$\$link\$\$, 
+ # winning_score,
+  # opac_icon,
+ # winning_score_score,winning_score_distance,second_place_score,
+ # circ_mods,
+ # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ # from seekdestroy.bib_score sbs where 
+ # record not in
+ # ($subq)
+ # and winning_score~$$video_score$$ 
+# and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$MARC with video phrases but incomplete marc$$)
+# and winning_score_score!=0
+# and winning_score_distance!=0
+# order by winning_score,winning_score_distance,electronic,second_place_score 
+# ";
+
+	# $log->addLine($query);
+	# my @results = @{$dbHandler->query($query)};
+	# my @convertList=@results;	
+	# $log->addLine("Will NOT Convert these (Need Humans): $#convertList\n\n\n");
+	# $output='';
+	# foreach(@convertList)
+	# {
+		# my @line=@{$_};
+		# $output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+	# }
+	# $log->addLine($output);
+# @convertList=();
+	
+	
+	
 }
 
 sub isScored
@@ -837,12 +1080,6 @@ sub updateBibCircs
 	my $query = "DELETE FROM seekdestroy.bib_item_circ_mods WHERE RECORD=$bibid";
 	$dbHandler->update($query);
 	
-	
-	$query = "CREATE TABLE seekdestroy.bib_item_circ_mods(
-		id serial,
-		record bigint,
-		circ_modifier text,
-		job  bigint NOT NULL,";
 	$query = "
 	select ac.circ_modifier,acn.record  from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
 	acn.id=ac.call_number and
@@ -2321,12 +2558,12 @@ sub determineScoreWithPhrases
 			my $subf = lc($_);
 			foreach(@searchPhrases)
 			{
-				#if the phrases are found in the 245h, they are worth 5 each
+				#if the phrases are found in the 245a, they are worth 5 each
 				my $phrase=lc($_);
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
-					#$log->addLine("$phrase + 5 points 245h");
+					#$log->addLine("$phrase + 5 points 245a");
 				}
 			}
 		}
