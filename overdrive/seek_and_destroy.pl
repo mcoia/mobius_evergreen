@@ -169,10 +169,11 @@ if(! -e $xmlconf)
 				#findPhysicalItemsOnElectronicBooks();
 				#findPhysicalItemsOnElectronicAudioBooks();
 				
-				tag902s();
+				#tag902s();
 				
 				#findInvalidAudioBookMARC();
 				#findInvalidDVDMARC();
+				findInvalidLargePrintMARC();
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
 				#findInvalid856TOCURL();
@@ -371,6 +372,11 @@ sub updateMARCSetElectronic
 	
 	my $xmlresult = convertMARCtoXML($marcob);
 	return $xmlresult;
+}
+
+sub setMARCForm
+{
+	
 }
 
 sub updateMARCSetCDAudioBook
@@ -574,6 +580,11 @@ sub updateMARC
 
 sub findInvalidAudioBookMARC
 {	
+
+	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidAudioBookMARC  $query");
+	$dbHandler->update($query);
 	foreach(@audioBookSearchPhrases)
 	{
 		my $phrase = lc$_;
@@ -670,7 +681,6 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;
-	my $kit=0;
 	if(!$dryrun)
 	{
 		foreach(@results)
@@ -692,6 +702,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	foreach(@convertList)
 	{
 		my @line=@{$_};
+		@line[20]='';
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		
 	}
@@ -761,76 +772,80 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 
 sub findInvalidDVDMARC
 {	
-	# foreach(@videoSearchPhrases)
-	# {
-		# my $phrase = lc$_;
-		# my $query = "
-				# select id,marc from biblio.record_entry where 		
-				# (
-					# marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
-				# )
-				# AND
-				# lower(marc) ~* \$\$$phrase\$\$
-				# AND
-				# id not in
-				# (
-				# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-				# )
-				# ";
-		# $log->addLine($query);
-		# updateJob("Processing","findInvalidDVDMARC  $query");
-		# my @results = @{$dbHandler->query($query)};		
-		# $log->addLine(($#results+1)." possible invalid video MARC");
-		# foreach(@results)
-		# {
-			# my $row = $_;
-			# my @row = @{$row};
-			# my $id = @row[0];
-			# my $marc = @row[1];
+	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidDVDMARC  $query");
+	$dbHandler->update($query);
+	foreach(@videoSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = "
+				select id,marc from biblio.record_entry where 		
+				(
+					marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
+				)
+				AND
+				lower(marc) ~* \$\$$phrase\$\$
+				AND
+				id not in
+				(
+				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+				)
+				";
+		$log->addLine($query);
+		updateJob("Processing","findInvalidDVDMARC  $query");
+		my @results = @{$dbHandler->query($query)};		
+		$log->addLine(($#results+1)." possible invalid video MARC");
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			my $marc = @row[1];
 
-			# my @scorethis = ($id,$marc);
-			# my @st = ([@scorethis]);			
-			# updateScoreCache(\@st);
+			my @scorethis = ($id,$marc);
+			my @st = ([@scorethis]);			
+			updateScoreCache(\@st);
 
-			# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-			# $dbHandler->updateWithParameters($query,\@values);			
-		# }
-	# }
+			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+			$dbHandler->updateWithParameters($query,\@values);			
+		}
+	}
 	
-	# my $query = "
-	# select id,marc from biblio.record_entry where 		
-	# (
-	# marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
-	# )
-	# AND	
-	# id not in
-	# (
-	# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-	# )
-	# AND 
-	# id in
-	# ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
-	# ";
-	# $log->addLine($query);
-	# updateJob("Processing","findInvalidDVDMARC  $query");
-	# my @results = @{$dbHandler->query($query)};		
-	# $log->addLine(($#results+1)." possible invalid video MARC");
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# my $marc = @row[1];
+	my $query = "
+	select id,marc from biblio.record_entry where 		
+	(
+	marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
+	";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidDVDMARC  $query");
+	my @results = @{$dbHandler->query($query)};		
+	$log->addLine(($#results+1)." possible invalid video MARC");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
 		
-		# my @scorethis = ($id,$marc);
-		# my @st = ([@scorethis]);			
-		# updateScoreCache(\@st);
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);			
+		updateScoreCache(\@st);
 		
-		# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-		# $dbHandler->updateWithParameters($query,\@values);			
-	# }
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);			
+	}
 	
 	
 	# Now that we have digested the possibilities - 
@@ -846,14 +861,13 @@ sub findInvalidDVDMARC
  circ_mods,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
  (select marc from biblio.record_entry where id=sbs.record)
- from seekdestroy.bib_score sbs where record in( $subq ) and record in(select id from biblio.record_entry where not deleted) and record=1099553
-order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods limit 1
+ from seekdestroy.bib_score sbs where record in( $subq )
+order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
 ";
 
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;
-	my $kit=0;
 	if(!$dryrun)
 	{
 		foreach(@results)
@@ -870,11 +884,146 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 			# my $opacicon = @row[3];
 		}
 	}
+	$log->addLine("Will Convert these to DVDs: $#convertList\n\n\n");
+	$output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		@line[20]='';
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+		
+	}
+	$log->addLine($output);
+@convertList=();	
+	
+	$subq = $queries{"non_dvd_bib_convert_to_dvd"};
+	my $query = "	  
+	 select record,
+	 \$\$link\$\$, 
+ winning_score,
+  opac_icon,
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ from seekdestroy.bib_score sbs where 
+ record not in
+ ($subq)
+ and winning_score~\$\$video_score\$\$ 
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$)
+and winning_score_score!=0
+and winning_score_distance!=0
+order by winning_score,winning_score_distance,electronic,second_place_score 
+";
+
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;	
+	$log->addLine("Will NOT Convert these (Need Humans): $#convertList\n\n\n");
+	$output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+	}
+	$log->addLine($output);
+@convertList=();
+	
+}
+
+
+sub findInvalidLargePrintMARC
+{	
+	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with large_print phrases but incomplete marc\$\$";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidLargePrintMARC  $query");
+	$dbHandler->update($query);
+	foreach(@largePrintBookSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = "
+				select id,marc from biblio.record_entry where 
+				(
+					marc !~ \$\$<leader>......[atd]\$\$
+				OR
+					(
+					marc !~ \$\$tag=\"008\">.......................[d]\$\$
+					and
+					marc !~ \$\$tag=\"006\">......[d]\$\$
+					)
+				OR
+					marc !~ \$\$<leader>.......[acdm]\$\$
+				)
+				AND
+				lower(marc) ~* \$\$$phrase\$\$
+				AND
+				id not in
+				(
+				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with large_print phrases but incomplete marc\$\$
+				)
+				";
+		$log->addLine($query);
+		updateJob("Processing","findInvalidLargePrintMARC  $query");
+		my @results = @{$dbHandler->query($query)};		
+		$log->addLine(($#results+1)." possible invalid large_print MARC");
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			my $marc = @row[1];
+
+			my @scorethis = ($id,$marc);
+			my @st = ([@scorethis]);			
+			updateScoreCache(\@st);
+
+			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			my @values = ($id,"MARC with large_print phrases but incomplete marc",$jobid);
+			$dbHandler->updateWithParameters($query,\@values);
+		}
+	}
+	
+	# Now that we have digested the possibilities - 
+	# Lets weed them out into bibs that we want to convert
+	# my $subq = $queries{"non_large_print_bib_convert_to_large_print"};
+	# my $output;
+	# my $query = "
+	# select record,
+ # \$\$link\$\$,
+ # winning_score,
+  # opac_icon \"opac icon\",
+ # winning_score_score,winning_score_distance,second_place_score,
+ # circ_mods,
+ # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
+ # (select marc from biblio.record_entry where id=sbs.record)
+ # from seekdestroy.bib_score sbs where record in( $subq )
+# order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
+# # ";
+
+	# $log->addLine($query);
+	# my @results = @{$dbHandler->query($query)};
+	# my @convertList=@results;
+	# if(!$dryrun)
+	# {
+		# foreach(@results)
+		# {
+			# my $row = $_;
+			# my @row = @{$row};
+			# my $id = @row[0];
+			# my $marc = @row[20];
+			# updateMARCSetDVD($id,$marc);		
+			# # my $highscore = @row[4];
+			# # my $highscoredistance = @row[5];
+			# # my $secondplace = @row[6];
+			# # my $circmods = @row[7];
+			# # my $opacicon = @row[3];
+		# }
+	# }
 	# $log->addLine("Will Convert these to DVDs: $#convertList\n\n\n");
 	# $output='';
 	# foreach(@convertList)
 	# {
 		# my @line=@{$_};
+		# @line[20]='';
 		# $output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		
 	# }
@@ -893,8 +1042,8 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
  # from seekdestroy.bib_score sbs where 
  # record not in
  # ($subq)
- # and winning_score~$$video_score$$ 
-# and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$MARC with video phrases but incomplete marc$$)
+ # and winning_score~\$\$video_score\$\$ 
+# and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with large_print phrases but incomplete marc\$\$)
 # and winning_score_score!=0
 # and winning_score_distance!=0
 # order by winning_score,winning_score_distance,electronic,second_place_score 
@@ -912,8 +1061,6 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	# }
 	# $log->addLine($output);
 # @convertList=();
-	
-	
 	
 }
 
@@ -1018,7 +1165,7 @@ sub updateScoreCache
 		$fingerprints{videoformat}
 		);		
 		$dbHandler->updateWithParameters($query,\@values);
-		updateBibCircs($bibid,$dbHandler);	
+		updateBibCircsScore($bibid,$dbHandler);	
 	}
 	foreach(@updateIDs)
 	{
@@ -1070,11 +1217,13 @@ sub updateScoreCache
 		$fingerprints{videoformat}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
-		updateBibCircs($bibid,$dbHandler);
+		updateBibCircsScore($bibid,$dbHandler);
+		updateBibCallLabelsScore($bibid,$dbHandler);
+		updateBibCopyLocationsScore($bibid,$dbHandler);
 	}
 }
 
-sub updateBibCircs
+sub updateBibCircsScore
 {	
 	my $bibid = @_[0];	
 	my $query = "DELETE FROM seekdestroy.bib_item_circ_mods WHERE RECORD=$bibid";
@@ -1120,6 +1269,86 @@ sub updateBibCircs
 	my @values = ($opacicons,$allcircs);
 	$dbHandler->updateWithParameters($query,\@values);
 	
+}
+
+sub updateBibCallLabelsScore
+{	
+	my $bibid = @_[0];	
+	my $query = "DELETE FROM seekdestroy.bib_item_call_labels WHERE RECORD=$bibid";
+	$dbHandler->update($query);
+	
+	$query = "
+	select 
+	(select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
+	from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
+	acn.id=ac.call_number and
+	bre.id=acn.record and
+	acn.record = $bibid and
+	not acn.deleted and
+	not bre.deleted and
+	not ac.deleted
+	group by (select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
+	order by record";
+	my $allcalls='';
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $calllabel = @row[0];
+		my $record = @row[1];
+		my $q="INSERT INTO seekdestroy.bib_item_call_labels(record,circ_modifier,different_circs,job)
+		values
+		(\$1,\$2,\$3,\$4)";
+		my @values = ($record,$calllabel,$#results+1,$jobid);
+		$allcalls.=$calllabel.',';
+		$dbHandler->updateWithParameters($q,\@values);
+	}
+	$allcalls=substr($allcalls,0,-1);
+	
+	$query = "UPDATE SEEKDESTROY.BIB_SCORE SET CALL_LABELS=\$1 WHERE RECORD=$bibid";
+	my @values = ($allcalls);
+	$dbHandler->updateWithParameters($query,\@values);
+}
+
+sub updateBibCopyLocationsScore
+{	
+	my $bibid = @_[0];	
+	my $query = "DELETE FROM seekdestroy.bib_item_call_labels WHERE RECORD=$bibid";
+	$dbHandler->update($query);
+	
+	$query = "
+	select 
+	(select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
+	from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
+	acn.id=ac.call_number and
+	bre.id=acn.record and
+	acn.record = $bibid and
+	not acn.deleted and
+	not bre.deleted and
+	not ac.deleted
+	group by (select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
+	order by record";
+	my $alllocs='';
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $location = @row[0];
+		my $record = @row[1];
+		my $q="INSERT INTO seekdestroy.bib_item_call_labels(record,circ_modifier,different_circs,job)
+		values
+		(\$1,\$2,\$3,\$4)";
+		my @values = ($record,$location,$#results+1,$jobid);
+		$alllocs.=$location.',';
+		$dbHandler->updateWithParameters($q,\@values);
+	}
+	$alllocs=substr($alllocs,0,-1);
+	
+	$query = "UPDATE SEEKDESTROY.BIB_SCORE SET CALL_LABELS=\$1 WHERE RECORD=$bibid";
+	my @values = ($alllocs);
+	$dbHandler->updateWithParameters($query,\@values);
 }
 
 sub findPhysicalItemsOnElectronicBooksUnDedupe
@@ -3190,6 +3419,8 @@ sub setupSchema
 		audioformat text,
 		videoformat text,
 		circ_mods text DEFAULT ''::text,
+		call_labels text DEFAULT ''::text,
+		copy_locations text DEFAULT ''::text,
 		opac_icon text DEFAULT ''::text,
 		eg_fingerprint text
 		)";		
@@ -3233,6 +3464,14 @@ sub setupSchema
 		different_circs bigint,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_item_circ_mods_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$query = "CREATE TABLE seekdestroy.bib_item_call_labels(
+		id serial,
+		record bigint,
+		call_label text,
+		different_call_label bigint,
+		job  bigint NOT NULL,
+		CONSTRAINT bib_item_call_labels_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.problem_bibs(
