@@ -161,6 +161,9 @@ if(! -e $xmlconf)
 			$jobid = createNewJob('processing');
 			if($jobid!=-1)
 			{
+				our $baseTemp = $conf{"tempdir"};
+				$baseTemp =~ s/\/$//;
+				$baseTemp.='/';
 				print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 				#findPhysicalItemsOnElectronicBooksUnDedupe();
 				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
@@ -170,13 +173,16 @@ if(! -e $xmlconf)
 				
 				#tag902s();
 				
-				#findInvalidAudioBookMARC();
+				findInvalidAudioBookMARC();
 				#findInvalidDVDMARC();
 				#findInvalidLargePrintMARC();
+				#findPossibleDups();
+				
+				# These functions are iffy at best. The results 
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
 				#findInvalid856TOCURL();
-				#findPossibleDups();
+				
 				#print "regular cache\n";
 				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
 				# and lower(marc) ~ \$\$abridge\$\$");
@@ -240,12 +246,12 @@ sub reportResults
 	my $copyMoveRecords='';
 	my $undedupeRecords='';
 	my $largePrintItemsOnNonLargePrintBibs='';
+	my $DVDItemsOnNonDVDBibs='';
+	my $AudiobookItemsOnNonAudiobookBibs='';
 	my $affectedlib_calls='';
 	my $affectedlib_copies='';
 	my @attachments=();
-	my $baseTemp = $conf{"tempdir"};
-	$baseTemp =~ s/\/$//;
-	$baseTemp.='/';
+	
 	#Affected Libs
 	my $query = "
 	select aou.name,count(*) from actor.org_unit aou,seekdestroy.call_number_move scnm, asset.call_number acn where 
@@ -444,6 +450,60 @@ sub reportResults
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Undeduplicated_Bibs.csv");
 		push(@attachments,$baseTemp."Undeduplicated_Bibs.csv");
 	}
+	
+	#Audiobook Items attached to non Audiobook bibs
+	$query =  $queries{"Audiobook_items_on_non_Audiobook_bibs"};
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line," ",11);  #BIB ID
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29); #Call Number
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],39); #Bib Format Icon
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],50); #Owning Library
+		$AudiobookItemsOnNonAudiobookBibs.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$AudiobookItemsOnNonAudiobookBibs = truncateOutput($AudiobookItemsOnNonAudiobookBibs,7000);
+		$AudiobookItemsOnNonAudiobookBibs="$count items look like they are Audiobook but they are attached to non Audiobook bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$AudiobookItemsOnNonAudiobookBibs\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Audiobook_items_on_non_Audiobook_bibs.csv");
+		push(@attachments,$baseTemp."Audiobook_items_on_non_Audiobook_bibs.csv");
+	}
+	
+	#DVD Items attached to non large print bibs
+	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line," ",11);  #BIB ID
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29); #Call Number
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],39); #Bib Format Icon
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],50); #Owning Library
+		$DVDItemsOnNonDVDBibs.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$DVDItemsOnNonDVDBibs = truncateOutput($DVDItemsOnNonDVDBibs,7000);
+		$DVDItemsOnNonDVDBibs="$count items look like they are DVD but they are attached to non DVD bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$DVDItemsOnNonDVDBibs\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
+		push(@attachments,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
+	}
 
 	#Large print Items attached to non large print bibs
 	$query =  $queries{"large_print_items_on_non_large_print_bibs"};
@@ -454,10 +514,11 @@ sub reportResults
 		my $row = $_;
 		my @row = @{$row};
 		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line," ",11);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[3],40);
+		$line = $mobUtil->insertDataIntoColumn($line," ",11);  #BIB ID
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29); #Call Number
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],39); #Bib Format Icon
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],50); #Owning Library
 		$largePrintItemsOnNonLargePrintBibs.="$line\r\n";
 		$count++;
 	}
@@ -471,35 +532,8 @@ sub reportResults
 		push(@attachments,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
 	}
 	
-	#DVD Items attached to non large print bibs
-	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line," ",11);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[3],40);
-		$largePrintItemsOnNonLargePrintBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$largePrintItemsOnNonLargePrintBibs = truncateOutput($largePrintItemsOnNonLargePrintBibs,7000);
-		$largePrintItemsOnNonLargePrintBibs="$count items look like they are large print but they are attached to non large print bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$largePrintItemsOnNonLargePrintBibs\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
-		push(@attachments,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
-	}
 	
-	
-	
-	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$affectedlib_calls.$affectedlib_copies.$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$largePrintItemsOnNonLargePrintBibs;
+	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$affectedlib_calls.$affectedlib_copies.$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$largePrintItemsOnNonLargePrintBibs;
 	#print $ret;
 	my @returns = ($ret,\@attachments);
 	return \@returns;
@@ -995,12 +1029,12 @@ sub findInvalidAudioBookMARC
 	my $subq = $queries{"non_audiobook_bib_convert_to_audiobook"};
 	my $output;
 	my $query = "
-	select record,
+	select (select deleted from biblio.record_entry where id= sbs.record),record,
  \$\$link\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
- circ_mods,
+ circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
  (select marc from biblio.record_entry where id=sbs.record)
  from seekdestroy.bib_score sbs where record in( $subq ) 
@@ -1017,7 +1051,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 			my $row = $_;
 			my @row = @{$row};
 			my $id = @row[0];
-			my $marc = @row[20];
+			my $marc = @row[23];
 			updateMARCSetCDAudioBook($id,$marc);		
 			# my $highscore = @row[4];
 			# my $highscoredistance = @row[5];
@@ -1182,12 +1216,12 @@ sub findInvalidDVDMARC
 	my $subq = $queries{"non_dvd_bib_convert_to_dvd"};
 	my $output;
 	my $query = "
-	select record,
+	select (select deleted from biblio.record_entry where id= sbs.record),record,
  \$\$link\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
- circ_mods,
+ circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
  (select marc from biblio.record_entry where id=sbs.record)
  from seekdestroy.bib_score sbs where record in( $subq )
@@ -1204,7 +1238,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 			my $row = $_;
 			my @row = @{$row};
 			my $id = @row[0];
-			my $marc = @row[20];
+			my $marc = @row[23];
 			updateMARCSetDVD($id,$marc);		
 			# my $highscore = @row[4];
 			# my $highscoredistance = @row[5];
@@ -2231,14 +2265,17 @@ sub findItemsCircedAsAudioBooksButAttachedNonAudioBib
 	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
 	# Find Bibs that are not Audiobooks and have physical items that are circed as audiobooks
 	$queries{'searchQuery'} = "
-	select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn where 
+	select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where 
 bre.marc !~ \$\$<leader>......i\$\$
 and
+acl.id=ac.location and
 bre.id=acn.record and
 acn.id=ac.call_number and
 not acn.deleted and
 not ac.deleted and
-ac.circ_modifier=\$\$AudioBooks\$\$
+ac.circ_modifier in (\$\$AudioBooks\$\$) and 
+lower(acl.name) ~ 'aud'
+
 group by bre.id,bre.marc
 limit 1000
 	";
@@ -2298,7 +2335,7 @@ bre.id=acn.record and
 acn.id=ac.call_number and
 not acn.deleted and
 not ac.deleted and
-ac.circ_modifier != \$\$AudioBooks\$\$
+ac.circ_modifier not in ( \$\$AudioBooks\$\$,\$\$CD\$\$ )
 group by bre.id,bre.marc
 limit 1000
 	";
