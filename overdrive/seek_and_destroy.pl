@@ -9,7 +9,7 @@ use Loghandler;
 use Mobiusutil;
 use DBhandler;
 use Data::Dumper;
-#use email;
+use email;
 use DateTime;
 use utf8;
 use Encode;
@@ -95,11 +95,11 @@ if(! -e $xmlconf)
 	our @musicSearchPhrases;
 	our @playawaySearchPhrases;
 	our %queries;
-	
+	our %conf;
   
  if($conf)
  {
-	my %conf = %{$conf};
+	%conf = %{$conf};
 	if($conf{"queryfile"})
 	{
 		my $queries = $mobUtil->readQueryFile($conf{"queryfile"});
@@ -141,7 +141,7 @@ if(! -e $xmlconf)
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		print "Executing job  tail the log for information (".$conf{"logfile"}.")\nDryrun = $dryrun\n";		
-		my @reqs = ("logfile"); 
+		my @reqs = ("logfile","tempdir","playawaysearchphrases","musicsearchphrases","largeprintbooksearchphrases","videosearchphrases","microfilmsearchphrases","microfichesearchphrases","audiobooksearchphrases","electronicsearchphrases"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -162,7 +162,6 @@ if(! -e $xmlconf)
 			if($jobid!=-1)
 			{
 				print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
-		
 				#findPhysicalItemsOnElectronicBooksUnDedupe();
 				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
 				#findInvalidElectronicMARC();
@@ -173,7 +172,7 @@ if(! -e $xmlconf)
 				
 				#findInvalidAudioBookMARC();
 				#findInvalidDVDMARC();
-				findInvalidLargePrintMARC();
+				#findInvalidLargePrintMARC();
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
 				#findInvalid856TOCURL();
@@ -194,25 +193,345 @@ if(! -e $xmlconf)
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 				#updateScoreCache();
 			}
+			updateJob("Executing reports and email","");
+		
+			$jobid=2;
+			my $afterProcess = DateTime->now(time_zone => "local");
+			my $difference = $afterProcess - $dt;
+			my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
+			my $duration =  $format->format_duration($difference);
+			my @tolist = ($conf{"alwaysemail"});
+			if(length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
+			{
+				my $email = new email($conf{"fromemail"},\@tolist,$valid,1,\%conf);
+				my @reports = @{reportResults()};
+				my @attachments = @{@reports[1]};
+				my $reports = @reports[0];
+				$email->sendWithAttachments("Evergreen Utility - Catalog Audit Job # $jobid","Duration: $duration\r\n\r\n$reports\r\n\r\n-Evergreen Perl Squad-",\@attachments);
+				foreach(@attachments)
+				{
+					unlink $_ or warn "Could not remove $_\n";
+				}
+				
+			}
+			elsif(length($errorMessage)>0)
+			{
+				my @tolist = ($conf{"alwaysemail"});
+				my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
+				$email->send("Evergreen Utility - Catalog Audit Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
+			}
 			updateJob("Completed","");
 		}
-		
-		my $afterProcess = DateTime->now(time_zone => "local");
-		my $difference = $afterProcess - $dt;
-		my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
-		my $duration =  $format->format_duration($difference);
-		my $fileList;
-		my $successTitleList;
-		my $successUpdateTitleList;
-		my $failedTitleList;
-
-		
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
 	}
 	else
 	{
 		print "Config file does not define 'logfile'\n";		
 	}
+}
+
+sub reportResults
+{
+	my $newRecordCount='';
+	my $updatedRecordCount='';
+	my $mergedRecords='';
+	my $itemsAssignedRecords='';
+	my $itemsFailedAssignedRecords='';
+	my $copyMoveRecords='';
+	my $undedupeRecords='';
+	my $largePrintItemsOnNonLargePrintBibs='';
+	my $affectedlib_calls='';
+	my $affectedlib_copies='';
+	my @attachments=();
+	my $baseTemp = $conf{"tempdir"};
+	$baseTemp =~ s/\/$//;
+	$baseTemp.='/';
+	#Affected Libs
+	my $query = "
+	select aou.name,count(*) from actor.org_unit aou,seekdestroy.call_number_move scnm, asset.call_number acn where 
+	scnm.job=$jobid and
+	acn.id=scnm.call_number and
+	aou.id=acn.owning_lib and
+	scnm.tobib is not null
+	group by aou.name
+	order by count(*) desc";
+	my @results = @{$dbHandler->query($query)};	
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$count++;
+		my $line = @row[1];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[0],8);
+		$affectedlib_calls.="$line\r\n";
+	}
+	if($count>0)
+	{
+		$affectedlib_calls="Summary libraries with moved call numbers (details below)\r\n$affectedlib_calls\r\n\r\n";
+	}
+	my $query = "
+	select aou.name,count(*) from actor.org_unit aou,seekdestroy.copy_move scm, asset.call_number acn where 
+	scm.job=$jobid and
+	acn.id=scm.tocall and
+	aou.id=acn.owning_lib
+	group by aou.name
+	order by count(*) desc";
+	my @results = @{$dbHandler->query($query)};
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$count++;
+		my $line = @row[1];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[0],8);
+		$affectedlib_copies.="$line\r\n";
+	}
+	if($count>0)
+	{
+		$affectedlib_copies="Summary libraries with moved copies (details below)\r\n$affectedlib_copies\r\n\r\n";
+	}
+	#bib_marc_update table report non new bibs
+	$query = "select extra,count(*) from seekdestroy.bib_marc_update where job=$jobid and new_record is not true group by extra";
+	@results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$updatedRecordCount.=@row[1]." records were updated for this reason: ".@row[0]."\r\n";
+	}
+	#bib_marc_update table report new bibs
+	my $query = "select extra,count(*) from seekdestroy.bib_marc_update where job=$jobid and new_record is true group by extra";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};		
+		$newRecordCount.=@row[1]." records were created for this reason: ".@row[0]."\r\n";
+	}
+	
+	#bib_merge table report
+	$query = "select leadbib,subbib from seekdestroy.bib_merge where job=$jobid";
+	@results = @{$dbHandler->query($query)};	
+	my $count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
+		$mergedRecords.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{	
+		$mergedRecords = truncateOutput($mergedRecords,7000);
+		$mergedRecords="$count records were merged - The left number is the winner\r\n".$mergedRecords;
+		$mergedRecords."\r\n\r\n\r\n";
+		my @header = ("Winning Bib","Deleted/Merged Bib");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Merged_bibs.csv");
+		push(@attachments,$baseTemp."Merged_bibs.csv");
+	}
+	
+	
+	#call_number_move table report
+	$query = "select tobib,frombib,(select label from asset.call_number where id=a.call_number) from seekdestroy.call_number_move a where job=$jobid
+	and frombib not in(select oldleadbib from seekdestroy.undedupe where job=$jobid) and tobib is not null";
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],27);
+		$itemsAssignedRecords.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{	
+		$itemsAssignedRecords = truncateOutput($itemsAssignedRecords,7000);
+		$itemsAssignedRecords="$count call numbers were moved\r\ndestination bib, source bib, call number\r\n".$itemsAssignedRecords."\r\n\r\n\r\n";
+		my @header = ("Destination Bib","Source Bib","Call Number");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Moved_call_numbers.csv");
+		push(@attachments,$baseTemp."Moved_call_numbers.csv");
+	}
+	
+	#call_number_move FAILED table report
+	$query = "select frombib,
+	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number)),
+	(select label from asset.call_number where id=a.call_number) from seekdestroy.call_number_move a where job=$jobid
+	and frombib not in(select oldleadbib from seekdestroy.undedupe where job=$jobid) and tobib is null
+	order by (select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number))";
+	@results = @{$dbHandler->query($query)};
+	$count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],34);
+		$itemsFailedAssignedRecords.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$itemsFailedAssignedRecords = truncateOutput($itemsFailedAssignedRecords,7000);
+		$itemsFailedAssignedRecords="$count call numbers FAILED to be moved\r\nBib ID, Owning Lib, Call number\r\n".$itemsFailedAssignedRecords."\r\n\r\n\r\n";
+		my @header = ("Source Bib","Call Number Owning Library","Call Number");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Failed_call_number_moves.csv");
+		push(@attachments,$baseTemp."Failed_call_number_moves.csv");
+	}
+	
+	#copy_move table report
+	$query = "select (select barcode from asset.copy where id=a.copy),
+	(select record from asset.call_number where id=a.fromcall),
+	(select record from asset.call_number where id=a.tocall),
+	(select label from asset.call_number where id=a.tocall) from seekdestroy.copy_move a where job=$jobid";
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],25);
+		$line = $mobUtil->insertDataIntoColumn($line,"<",37);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],39);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],50);
+		$copyMoveRecords.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{	
+		$copyMoveRecords = truncateOutput($copyMoveRecords,7000);
+		$copyMoveRecords="$count items were moved\r\nbarcode, destination bib, source bib, call number\r\n".$copyMoveRecords."\r\n\r\n\r\n";
+		my @header = ("Barcode","Destination Bib","Source Bib","Call Number");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Copy_moves.csv");
+		push(@attachments,$baseTemp."Copy_moves.csv");
+	}
+	
+	#undedupe table report
+	$query = "select undeletedbib,oldleadbib,(select label from asset.call_number where id=a.moved_call_number) from seekdestroy.undedupe a where job=$jobid";
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],25);
+		$undedupeRecords.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$undedupeRecords = truncateOutput($undedupeRecords,7000);
+		$undedupeRecords="$count records had physical items and were moved onto a previously deduped bib.\r\nundeleted destination bib, source bib, call number\r\n$undedupeRecords\r\n\r\n\r\n";
+		my @header = ("Undeleted Bib","Old Leading Bib","Call Number");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Undeduplicated_Bibs.csv");
+		push(@attachments,$baseTemp."Undeduplicated_Bibs.csv");
+	}
+
+	#Large print Items attached to non large print bibs
+	$query =  $queries{"large_print_items_on_non_large_print_bibs"};
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line," ",11);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],40);
+		$largePrintItemsOnNonLargePrintBibs.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$largePrintItemsOnNonLargePrintBibs = truncateOutput($largePrintItemsOnNonLargePrintBibs,7000);
+		$largePrintItemsOnNonLargePrintBibs="$count items look like they are large print but they are attached to non large print bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$largePrintItemsOnNonLargePrintBibs\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
+		push(@attachments,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
+	}
+	
+	#DVD Items attached to non large print bibs
+	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line," ",11);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],40);
+		$largePrintItemsOnNonLargePrintBibs.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$largePrintItemsOnNonLargePrintBibs = truncateOutput($largePrintItemsOnNonLargePrintBibs,7000);
+		$largePrintItemsOnNonLargePrintBibs="$count items look like they are large print but they are attached to non large print bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$largePrintItemsOnNonLargePrintBibs\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
+		push(@attachments,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
+	}
+	
+	
+	
+	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$affectedlib_calls.$affectedlib_copies.$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$largePrintItemsOnNonLargePrintBibs;
+	#print $ret;
+	my @returns = ($ret,\@attachments);
+	return \@returns;
+}
+
+sub createCSVFileFrom2DArray
+{
+	my @results = @{@_[0]};
+	my $fileName = @_[1];
+	my $fileWriter = new Loghandler($fileName);
+	$fileWriter->deleteFile();
+	my $output = "";
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $csvLine = $mobUtil->makeCommaFromArray(\@row,);
+		$output.=$csvLine."\n";
+	}
+	$fileWriter->addLine($output);
+	return $output;
+}
+
+sub truncateOutput
+{
+	my $ret = @_[0];
+	my $length = @_[1];
+	if(length($ret)>$length)
+	{
+		$ret = substr($ret,0,$length)."\r\nTRUNCATED FOR LENGTH\r\n\r\n";
+	}
+	return $ret;
 }
 
 sub tag902s
@@ -340,35 +659,12 @@ sub updateMARCSetElectronic
 {	
 	my $bibid = @_[0];
 	my $marc = @_[1];
+	$marc = setMARCForm($marc,'s');
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
 	$marcob = MARC::Record->new_from_xml($marcob);
 	my $marcr = populate_marc($marcob);	
 	my %marcr = %{normalize_marc($marcr)};    
-	my $replacement;
-	if($marcr{tag008})
-	{
-		my $z08 = $marcob->field('008');
-		$marcob->delete_field($z08);
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},'s',24);	
-		$z08->update($replacement);
-		$marcob->insert_fields_ordered($z08);
-		
-	}
-	elsif($marcr{tag006})
-	{
-		my $z06 = $marcob->field('006');
-		$marcob->delete_fields($z06);		
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},'s',7);
-		$z06->update($replacement);
-		$marcob->insert_fields_ordered($z06);		
-	}
-	else
-	{
-		$replacement = $mobUtil->insertDataIntoColumn('','s',24);
-		my $field = MARC::Field->new( '008', $replacement );
-		$marcob->insert_fields_ordered($field);
-	}
 	
 	my $xmlresult = convertMARCtoXML($marcob);
 	return $xmlresult;
@@ -376,39 +672,61 @@ sub updateMARCSetElectronic
 
 sub setMARCForm
 {
-	
-}
-
-sub updateMARCSetCDAudioBook
-{	
-	my $bibid = @_[0];
-	my $marc = @_[1];
+	my $marc = @_[0];
+	my $char = @_[1];
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
 	$marcob = MARC::Record->new_from_xml($marcob);
 	my $marcr = populate_marc($marcob);	
 	my %marcr = %{normalize_marc($marcr)};    
 	my $replacement;
+	my $altered=0;
 	if($marcr{tag008})
 	{
 		my $z08 = $marcob->field('008');
 		$marcob->delete_field($z08);
 		#print "$marcr{tag008}\n";
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},' ',24);
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},$char,24);
 		#print "$replacement\n";
 		$z08->update($replacement);
-		$marcob->insert_fields_ordered($z08);		
+		$marcob->insert_fields_ordered($z08);
+		$altered=1;
 	}
 	elsif($marcr{tag006})
 	{
 		my $z06 = $marcob->field('006');
 		$marcob->delete_fields($z06);
 		#print "$marcr{tag006}\n";
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},' ',7);
+		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},$char,7);
 		#print "$replacement\n";
 		$z06->update($replacement);
-		$marcob->insert_fields_ordered($z06);		
+		$marcob->insert_fields_ordered($z06);
+		$altered=1;
 	}
+	if(!$altered && $char ne ' ')
+	{
+		$replacement=$mobUtil->insertDataIntoColumn("",$char,24);
+		$replacement=$mobUtil->insertDataIntoColumn($replacement,' ',39);
+		my $z08 = MARC::Field->new( '008', $replacement );
+		#print "inserted new 008\n".$z08->data()."\n";
+		$marcob->insert_fields_ordered($z08);
+	}
+	
+	my $xmlresult = convertMARCtoXML($marcob);
+	return $xmlresult;
+}
+
+sub updateMARCSetCDAudioBook
+{	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	$marc = setMARCForm($marc,' ');
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
 	my $altered=0;
 	foreach(@{$marcr{tag007}})
 	{		
@@ -448,32 +766,13 @@ sub updateMARCSetDVD
 	my $bibid = @_[0];
 	print "updating marc for $bibid\n";
 	my $marc = @_[1];
+	$marc = setMARCForm($marc,' ');
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
 	$marcob = MARC::Record->new_from_xml($marcob);
 	my $marcr = populate_marc($marcob);	
 	my %marcr = %{normalize_marc($marcr)};    
 	my $replacement;
-	if($marcr{tag008})
-	{
-		my $z08 = $marcob->field('008');
-		$marcob->delete_field($z08);
-		#print "$marcr{tag008}\n";
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag008},' ',24);		
-		#print "$replacement\n";
-		$z08->update($replacement);
-		$marcob->insert_fields_ordered($z08);		
-	}
-	elsif($marcr{tag006})
-	{
-		my $z06 = $marcob->field('006');
-		$marcob->delete_fields($z06);
-		#print "$marcr{tag006}\n";
-		$replacement=$mobUtil->insertDataIntoColumn($marcr{tag006},' ',7);
-		#print "$replacement\n";
-		$z06->update($replacement);
-		$marcob->insert_fields_ordered($z06);		
-	}
 	my $altered=0;
 	foreach(@{$marcr{tag007}})
 	{		
@@ -506,6 +805,36 @@ sub updateMARCSetDVD
 	$xmlresult = fingerprintScriptMARC($xmlresult,'D V D');
 	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
 	updateMARC($xmlresult,$bibid,'false','Correcting for DVD in the leader/007 rem 008_23');
+}
+
+sub updateMARCSetLargePrint
+{	
+	my $bibid = @_[0];
+	print "updating marc for $bibid\n";
+	my $marc = @_[1];
+	$marc = setMARCForm($marc,'d');
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+		}
+		elsif(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+		}
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = fingerprintScriptMARC($xmlresult,'L a r g e P r i n t');
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'a');
+	updateMARC($xmlresult,$bibid,'false','Correcting for Large Print in the leader/007 rem 008_23');
 }
 
 sub fingerprintScriptMARC
@@ -981,86 +1310,86 @@ sub findInvalidLargePrintMARC
 			$dbHandler->updateWithParameters($query,\@values);
 		}
 	}
+			
 	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert
-	# my $subq = $queries{"non_large_print_bib_convert_to_large_print"};
-	# my $output;
-	# my $query = "
-	# select record,
- # \$\$link\$\$,
- # winning_score,
-  # opac_icon \"opac icon\",
- # winning_score_score,winning_score_distance,second_place_score,
- # circ_mods,
- # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
- # (select marc from biblio.record_entry where id=sbs.record)
- # from seekdestroy.bib_score sbs where record in( $subq )
-# order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods
-# # ";
+	my $subq = $queries{"non_large_print_bib_convert_to_large_print"};
+	my $output;
+	my $query = "select	
+	(select deleted from biblio.record_entry where id= sbs.record),record,
+ \$\$link\$\$,
+ winning_score,
+  opac_icon \"opac icon\",
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,call_labels,copy_locations,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
+ (select marc from biblio.record_entry where id=sbs.record)
+  from seekdestroy.bib_score sbs where record in( $subq )
+  order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
+";
 
-	# $log->addLine($query);
-	# my @results = @{$dbHandler->query($query)};
-	# my @convertList=@results;
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;
 	# if(!$dryrun)
 	# {
 		# foreach(@results)
 		# {
 			# my $row = $_;
 			# my @row = @{$row};
-			# my $id = @row[0];
-			# my $marc = @row[20];
-			# updateMARCSetDVD($id,$marc);		
-			# # my $highscore = @row[4];
-			# # my $highscoredistance = @row[5];
-			# # my $secondplace = @row[6];
-			# # my $circmods = @row[7];
-			# # my $opacicon = @row[3];
+			# my $id = @row[1];
+			# my $marc = @row[23];
+			# updateMARCSetLargePrint($id,$marc);		
+			# my $highscore = @row[4];
+			# my $highscoredistance = @row[5];
+			# my $secondplace = @row[6];
+			# my $circmods = @row[7];
+			# my $opacicon = @row[3];
 		# }
 	# }
-	# $log->addLine("Will Convert these to DVDs: $#convertList\n\n\n");
-	# $output='';
-	# foreach(@convertList)
-	# {
-		# my @line=@{$_};
-		# @line[20]='';
-		# $output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+	 $log->addLine("Will Convert these to Large Print: $#convertList\n\n\n");
+	 $output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		@line[23]='';
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		
-	# }
-	# $log->addLine($output);
-# @convertList=();	
+	}
+	$log->addLine($output);
+ @convertList=();	
 	
-	# $subq = $queries{"non_dvd_bib_convert_to_dvd"};
-	# my $query = "	  
-	 # select record,
-	 # \$\$link\$\$, 
- # winning_score,
-  # opac_icon,
- # winning_score_score,winning_score_distance,second_place_score,
- # circ_mods,
- # score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
- # from seekdestroy.bib_score sbs where 
- # record not in
- # ($subq)
- # and winning_score~\$\$video_score\$\$ 
-# and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with large_print phrases but incomplete marc\$\$)
-# and winning_score_score!=0
-# and winning_score_distance!=0
-# order by winning_score,winning_score_distance,electronic,second_place_score 
-# ";
+	my $subq = $queries{"non_large_print_bib_convert_to_large_print"};
+	my $query = "select	  
+	(select deleted from biblio.record_entry where id= sbs.record),record,
+ \$\$link\$\$,
+ winning_score,
+  opac_icon \"opac icon\",
+ winning_score_score,winning_score_distance,second_place_score,
+ circ_mods,call_labels,copy_locations,
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ from seekdestroy.bib_score sbs where 
+ record not in
+ ($subq)
+ and winning_score ~ \$\$largeprint_score\$\$
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with large_print phrases but incomplete marc\$\$)
+and winning_score_score!=0
+order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
+";
 
-	# $log->addLine($query);
-	# my @results = @{$dbHandler->query($query)};
-	# my @convertList=@results;	
-	# $log->addLine("Will NOT Convert these (Need Humans): $#convertList\n\n\n");
-	# $output='';
-	# foreach(@convertList)
-	# {
-		# my @line=@{$_};
-		# $output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
-	# }
-	# $log->addLine($output);
-# @convertList=();
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my @convertList=@results;	
+	$log->addLine("Will NOT Convert these (Need Humans): $#convertList\n\n\n");
+	$output='';
+	foreach(@convertList)
+	{
+		my @line=@{$_};
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+	}
+	$log->addLine($output);
+@convertList=();
 	
 }
 
@@ -1100,8 +1429,9 @@ sub updateScoreCache
 	foreach(@newIDs)
 	{
 		my @thisone = @{$_};
-		my $bibid = @thisone[0];
+		my $bibid = @thisone[0];		
 		my $marc = @thisone[1];
+		#$log->addLine("bibid = $bibid");
 		#print "bibid = $bibid";
 		#print "marc = $marc";
 		my $query = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD = $bibid";
@@ -1165,7 +1495,9 @@ sub updateScoreCache
 		$fingerprints{videoformat}
 		);		
 		$dbHandler->updateWithParameters($query,\@values);
-		updateBibCircsScore($bibid,$dbHandler);	
+		updateBibCircsScore($bibid,$dbHandler);
+		updateBibCallLabelsScore($bibid);
+		updateBibCopyLocationsScore($bibid);		
 	}
 	foreach(@updateIDs)
 	{
@@ -1217,9 +1549,9 @@ sub updateScoreCache
 		$fingerprints{videoformat}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
-		updateBibCircsScore($bibid,$dbHandler);
-		updateBibCallLabelsScore($bibid,$dbHandler);
-		updateBibCopyLocationsScore($bibid,$dbHandler);
+		updateBibCircsScore($bibid);
+		updateBibCallLabelsScore($bibid);
+		updateBibCopyLocationsScore($bibid);
 	}
 }
 
@@ -1297,7 +1629,7 @@ sub updateBibCallLabelsScore
 		my @row = @{$row};
 		my $calllabel = @row[0];
 		my $record = @row[1];
-		my $q="INSERT INTO seekdestroy.bib_item_call_labels(record,circ_modifier,different_circs,job)
+		my $q="INSERT INTO seekdestroy.bib_item_call_labels(record,call_label,different_call_labels,job)
 		values
 		(\$1,\$2,\$3,\$4)";
 		my @values = ($record,$calllabel,$#results+1,$jobid);
@@ -1314,20 +1646,21 @@ sub updateBibCallLabelsScore
 sub updateBibCopyLocationsScore
 {	
 	my $bibid = @_[0];	
-	my $query = "DELETE FROM seekdestroy.bib_item_call_labels WHERE RECORD=$bibid";
+	my $query = "DELETE FROM seekdestroy.bib_item_locations WHERE RECORD=$bibid";
 	$dbHandler->update($query);
 	
 	$query = "
 	select 
-	(select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
-	from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
+	acl.name,acn.record
+	from asset.copy ac,asset.call_number acn,biblio.record_entry bre,asset.copy_location acl where
+	acl.id=ac.location and
 	acn.id=ac.call_number and
 	bre.id=acn.record and
 	acn.record = $bibid and
 	not acn.deleted and
 	not bre.deleted and
 	not ac.deleted
-	group by (select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
+	group by acl.name,acn.record
 	order by record";
 	my $alllocs='';
 	my @results = @{$dbHandler->query($query)};
@@ -1337,7 +1670,7 @@ sub updateBibCopyLocationsScore
 		my @row = @{$row};
 		my $location = @row[0];
 		my $record = @row[1];
-		my $q="INSERT INTO seekdestroy.bib_item_call_labels(record,circ_modifier,different_circs,job)
+		my $q="INSERT INTO seekdestroy.bib_item_locations(record,location,different_locations,job)
 		values
 		(\$1,\$2,\$3,\$4)";
 		my @values = ($record,$location,$#results+1,$jobid);
@@ -1346,7 +1679,7 @@ sub updateBibCopyLocationsScore
 	}
 	$alllocs=substr($alllocs,0,-1);
 	
-	$query = "UPDATE SEEKDESTROY.BIB_SCORE SET CALL_LABELS=\$1 WHERE RECORD=$bibid";
+	$query = "UPDATE SEEKDESTROY.BIB_SCORE SET COPY_LOCATIONS=\$1 WHERE RECORD=$bibid";
 	my @values = ($alllocs);
 	$dbHandler->updateWithParameters($query,\@values);
 }
@@ -1419,7 +1752,7 @@ sub addBibMatch
 	my @takeActionWithTheseMatchingMethods = @{$queries{'takeActionWithTheseMatchingMethods'}};	
 	updateJob("Processing","addBibMatch  $searchQuery");
 	my @results = @{$dbHandler->query($searchQuery)};
-	$log->addLine(($#results+1)." Search Query results");
+	#$log->addLine(($#results+1)." Search Query results");
 	foreach(@results)
 	{
 		my $matchedSomethingThisRound=0;
@@ -2024,6 +2357,10 @@ sub updateScoreWithQuery
 
 sub findPossibleDups
 {
+
+#
+# Gather up some potential candidates based on EG Fingerprints
+#
 	my $query="
 		select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
 		(
@@ -2171,12 +2508,12 @@ sub recordAssetCopyMove
 		print "There were asset.copies on $oldbib even after attempting to put them on a deduped bib\n";
 		$log->addLine("\t$oldbib\tContained physical Items");
 		$query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,FROMBIB,EXTRA,SUCCESS,JOB)
-		VALUES(\$1,\$2,\$3,\$4,\$5)";	
+		VALUES(\$1,\$2,\$3,\$4,\$5)";
 		my @values = ($callnum,$oldbib,"FAILED",'false',$jobid);
-		$log->addLine($query);				
+		$log->addLine($query);
 		updateJob("Processing","recordAssetCopyMove  $query");
-		$dbHandler->updateWithParameters($query,\@values);		
-	}	
+		$dbHandler->updateWithParameters($query,\@values);
+	}
 }
 
 sub moveAssetCopyToPreviouslyDedupedBib
@@ -2334,6 +2671,10 @@ sub recordCallNumberMove
 	my $matchReason = @_[3];	
 	
 	#print "recordCallNumberMove from: $record\n";
+	if($mobUtil->trim(length($destrecord))<1)
+	{
+		$log->addLine("tobib is null - \$callnumber=$callnumber, FROMBIB=$record, \$matchReason=$matchReason");
+	}
 	my $query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,FROMBIB,TOBIB,EXTRA,JOB) VALUES(\$1,\$2,\$3,\$4,\$5)";	
 	my @values = ($callnumber,$record,$destrecord,$matchReason,$jobid);
 	$log->addLine($query);
@@ -2418,7 +2759,11 @@ sub createCallNumberOnBib
 	{
 		my $row = $_;
 		my @row = @{$row};
-		$query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,TOBIB,JOB) VALUES(\$1,\$2,\$3)";	
+		if($mobUtil->trim(length($bibid))<1)
+		{
+			$log->addLine("bibid is null - \$callnumber=".@row[0]." createCallNumberOnBib OWNING_LIB=$owning_lib LABEL=$call_label");
+		}
+		$query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,TOBIB,JOB) VALUES(\$1,\$2,\$3)";
 		@values = (@row[0],$bibid,$jobid);
 		$log->addLine($query);
 		$dbHandler->updateWithParameters($query,\@values);
@@ -2444,7 +2789,7 @@ sub getAllScores
 	my %allscores = ();
 	$allscores{'electricScore'}=determineElectricScore($marc);
 	$allscores{'audioBookScore'}=determineAudioBookScore($marc);
-	$allscores{'largeprint_score'}=determineScoreWithPhrases($marc,\@largePrintBookSearchPhrases);
+	$allscores{'largeprint_score'}=determineLargePrintScore($marc);
 	$allscores{'video_score'}=determineScoreWithPhrases($marc,\@videoSearchPhrases);
 	$allscores{'microfilm_score'}=determineScoreWithPhrases($marc,\@microfilmSearchPhrases);
 	$allscores{'microfiche_score'}=determineScoreWithPhrases($marc,\@microficheSearchPhrases);
@@ -2749,6 +3094,108 @@ sub determinePlayawayScore
 		}
 	}
 	
+	return $score;
+}
+
+sub determineLargePrintScore
+{
+	my $marc = @_[0];
+	my @searchPhrases = @largePrintBookSearchPhrases;
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = lc($marc->as_formatted());
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	#$log->addLine(lc$textmarc);
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@searchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				#ignore the centerpoint/center point search phrase, those need to only match in the 260,262
+				if($phrase =~ m/center/g)
+				{}
+				elsif($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+		my @subs = $field->subfield('a');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@searchPhrases)
+			{
+				#if the phrases are found in the 245a, they are worth 5 each
+				my $phrase=lc($_);
+				#ignore the centerpoint/center point search phrase, those need to only match in the 260,264
+				if($phrase =~ m/center/g)
+				{}
+				elsif($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245a");
+				}
+			}
+		}
+	}
+	foreach(@searchPhrases)
+	{
+		my $phrase = lc$_;
+		#ignore the centerpoint/center point search phrase, those need to only match in the 260,264
+		if($phrase =~ m/center/g)
+		{}
+		elsif($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	my @two60 = $marc->field('260');
+	my @two64 = $marc->field('264');
+	my @both = (@two60,@two64);
+	foreach(@two60)
+	{
+		my $field = $_;		
+		my @subs = $field->subfields();
+		my @matches=(0,0);
+		foreach(@subs)
+		{
+			my @s = @{$_};
+			foreach(@s)
+			{				
+				my $subf = lc($_);
+				#$log->addLine("Checking $subf");
+				if($subf =~ m/centerpoint/g)
+				{
+					if(@matches[0]==0)
+					{
+						$score++;
+						@matches[0]=1;
+						#$log->addLine("centerpoint + 1 points");
+					}
+				}
+				if($subf =~ m/center point/g)
+				{
+					if(@matches[1]==0)
+					{
+						$score++;
+						@matches[1]=1;
+						#$log->addLine("center point + 1 points");
+					}
+				}
+			}
+		}
+	}
 	return $score;
 }
 
@@ -3469,9 +3916,17 @@ sub setupSchema
 		id serial,
 		record bigint,
 		call_label text,
-		different_call_label bigint,
+		different_call_labels bigint,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_item_call_labels_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$query = "CREATE TABLE seekdestroy.bib_item_locations(
+		id serial,
+		record bigint,
+		location text,
+		different_locations bigint,
+		job  bigint NOT NULL,
+		CONSTRAINT bib_item_locations_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.problem_bibs(

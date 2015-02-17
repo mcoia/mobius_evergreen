@@ -17,6 +17,7 @@
 package email;
 
  use Email::MIME;
+ use Email::Stuffer;
  use Data::Dumper;
  use Mobiusutil;
  
@@ -56,7 +57,6 @@ sub new {
 	bless $self, $class;
     return $self;
 }
-
 
 sub send  	#subject, body
 {   
@@ -118,5 +118,59 @@ sub send  	#subject, body
 		sendmail($message);
 	 }
 	
+}
+
+sub sendWithAttachments  	#subject, body, @attachments
+{   
+	my $self = @_[0];
+	my $subject = @_[1];
+	my $body = @_[2];
+	my @attachments = @{@_[3]};
+	my $log = $self->{'log'};
+	my $fromEmail = $self->{fromEmailAddress};
+	my @additionalEmails = @{$self->{emailRecipientArray}};
+	my @toEmails = ();
+	my @success = @{$self->{successEmailList}};
+	my @error = @{$self->{errorEmailList}};
+
+	
+	if($self->{'notifyError'})
+	{
+		for my $r (0.. $#error)
+		{
+			push(@toEmails, @error[$r]);
+		}
+	}
+
+	if($self->{'notifySuccess'})
+	{
+		for my $r (0.. $#success)
+		{
+			push(@toEmails, @success[$r]);
+		}
+		
+	}
+	for my $r (0.. $#additionalEmails)
+	{
+
+		push(@toEmails, @additionalEmails[$r]);
+	}
+	my %alreadyEmailed;
+	
+#print Dumper(@toEmails);
+	foreach(@toEmails)
+	{
+		if(!$alreadyEmailed{$_})
+		{
+			$alreadyEmailed{$_}=1;
+			my $message = new Email::Stuffer;
+			$message->to($_)->from($fromEmail)->text_body("$body\n")->subject($subject);
+			foreach(@attachments)
+			{
+				$message->attach_file($_);
+			}
+			$message->send;
+		}
+	}
 }
 1;

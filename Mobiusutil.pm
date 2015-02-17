@@ -50,7 +50,7 @@ package Mobiusutil;
  use MARC::File::USMARC;
  use MARC::Charset 'marc8_to_utf8';
  #use ZOOM; 
- #use Net::FTP;
+ use Net::FTP;
  use Loghandler;
  use Data::Dumper;
  use DateTime;
@@ -226,7 +226,7 @@ sub padLeft  #line, width, fill char
     my $ftp = Net::FTP->new($hostname, Debug => 0)
     or die $log->addLogLine("Cannot connect to ".$hostname);
     $ftp->login($login,$pass)
-    or die $log->addLogLine("Cannot login ", $ftp->message);
+    or die $log->addLogLine("Cannot login ".$ftp->message);
     $ftp->cwd($remotedir)
     or die $log->addLogLine("Cannot change working directory ", $ftp->message);
 	foreach my $file (@files)
@@ -388,7 +388,7 @@ sub makeCommaFromArray
 	my $ret = "";
 	for my $i (0..$#array)
 	{
-		$ret.=@array[$i].$delimter;
+		$ret.="\"".@array[$i]."\"".$delimter;
 	}
 	$ret = substr($ret,0,length($ret)-(length($delimter)));
 	return $ret;
