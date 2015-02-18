@@ -1,0 +1,24 @@
+logfile = /mnt/evergreen/tmp/test/seekanddestroy.log
+electronicsearchphrases = electronic resource,ebook,eaudiobook,overdrive,download,ebrary,electronic reproduction,ebscohost,netlibrary
+audiobooksearchphrases = audiobook,audio book,compact dis,sound dis,hachette audio,books on tape,audiodisc,Random House Audio,Talking books,Recorded Books
+microfichesearchphrases = microfiche
+largeprintbooksearchphrases = Large type books,Large print,lg print,SightSaving,lg. print,lg prt.,lg. prt.,Thorndike Press,centerpoint,center point
+microfilmsearchphrases = microfilm
+videosearchphrases = dvd,video recording,video format,videorecording,videodisc,interview with the producer,original TV promo,Special features,screenplay
+musicsearchphrases = music,sound record,soundrecord,sound dis,Compact dis,song,Piano,Jazz,Saxophone,Symphony,anthology,Orchestra,vocals
+playawaysearchphrases = playaway,play away,headphones,head phones,earphones,ear phones,player,findaway
+audio_book_score_when_audiobooks_dont_belong = 6
+electronic_score_when_bib_is_considered_electronic = 6
+queryfile=/path/to/query_file_sample.sql
+
+tempdir = /mnt/evergreen/tmp
+erroremaillist = mcoia@mobiusconsortium.org
+successemaillist = mcoia@lists.mobiusconsortium.org
+
+#provide domain name for reports
+domainname = mig.missourievergreen.org
+
+# only 1 email address for alwaysemail
+alwaysemail = mcoia@mobiusconsortium.org
+fromemail = no-reply-mcoia@mobiusconsortium.org
+

@@ -1303,9 +1303,9 @@ sub mergeMARC856
 
 
 	while ((my $internal, my $mvalue ) = each(%urls))
-		{	
-			$marc->insert_grouped_field( $mvalue );
-		}
+	{	
+		$marc->insert_grouped_field( $mvalue );
+	}
 	return $marc;
 }
 

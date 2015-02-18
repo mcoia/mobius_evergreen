@@ -94,8 +94,11 @@ if(! -e $xmlconf)
 	our @largePrintBookSearchPhrases;
 	our @musicSearchPhrases;
 	our @playawaySearchPhrases;
+	our @seekdestroyReportFiles =();
 	our %queries;
 	our %conf;
+	our $baseTemp;
+	our $domainname;
   
  if($conf)
  {
@@ -141,7 +144,7 @@ if(! -e $xmlconf)
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		print "Executing job  tail the log for information (".$conf{"logfile"}.")\nDryrun = $dryrun\n";		
-		my @reqs = ("logfile","tempdir","playawaysearchphrases","musicsearchphrases","largeprintbooksearchphrases","videosearchphrases","microfilmsearchphrases","microfichesearchphrases","audiobooksearchphrases","electronicsearchphrases"); 
+		my @reqs = ("logfile","tempdir","domainname","playawaysearchphrases","musicsearchphrases","largeprintbooksearchphrases","videosearchphrases","microfilmsearchphrases","microfichesearchphrases","audiobooksearchphrases","electronicsearchphrases"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -161,9 +164,14 @@ if(! -e $xmlconf)
 			$jobid = createNewJob('processing');
 			if($jobid!=-1)
 			{
-				our $baseTemp = $conf{"tempdir"};
+				$baseTemp = $conf{"tempdir"};
+				$domainname = lc($conf{"domainname"});
 				$baseTemp =~ s/\/$//;
 				$baseTemp.='/';
+				$domainname =~ s/\/$//;
+				$domainname =~ s/^http:\/\///;
+				$domainname.='/';
+				$domainname = 'http://'.$domainname;
 				print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 				#findPhysicalItemsOnElectronicBooksUnDedupe();
 				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();
@@ -173,8 +181,8 @@ if(! -e $xmlconf)
 				
 				#tag902s();
 				
-				findInvalidAudioBookMARC();
-				#findInvalidDVDMARC();
+				#findInvalidAudioBookMARC();
+				findInvalidDVDMARC();
 				#findInvalidLargePrintMARC();
 				#findPossibleDups();
 				
@@ -201,7 +209,7 @@ if(! -e $xmlconf)
 			}
 			updateJob("Executing reports and email","");
 		
-			$jobid=2;
+			#$jobid=2;
 			my $afterProcess = DateTime->now(time_zone => "local");
 			my $difference = $afterProcess - $dt;
 			my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
@@ -211,7 +219,7 @@ if(! -e $xmlconf)
 			{
 				my $email = new email($conf{"fromemail"},\@tolist,$valid,1,\%conf);
 				my @reports = @{reportResults()};
-				my @attachments = @{@reports[1]};
+				my @attachments = (@{@reports[1]}, @seekdestroyReportFiles);
 				my $reports = @reports[0];
 				$email->sendWithAttachments("Evergreen Utility - Catalog Audit Job # $jobid","Duration: $duration\r\n\r\n$reports\r\n\r\n-Evergreen Perl Squad-",\@attachments);
 				foreach(@attachments)
@@ -478,7 +486,7 @@ sub reportResults
 		push(@attachments,$baseTemp."Audiobook_items_on_non_Audiobook_bibs.csv");
 	}
 	
-	#DVD Items attached to non large print bibs
+	#DVD Items attached to non DVD bibs
 	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
 	@results = @{$dbHandler->query($query)};	
 	$count=0;	
@@ -1030,7 +1038,7 @@ sub findInvalidAudioBookMARC
 	my $output;
 	my $query = "
 	select (select deleted from biblio.record_entry where id= sbs.record),record,
- \$\$link\$\$,
+ \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
@@ -1044,6 +1052,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;
+	my $toCSV = "";
 	if(!$dryrun)
 	{
 		foreach(@results)
@@ -1052,7 +1061,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 			my @row = @{$row};
 			my $id = @row[0];
 			my $marc = @row[23];
-			updateMARCSetCDAudioBook($id,$marc);		
+			updateMARCSetCDAudioBook($id,$marc);
 			# my $highscore = @row[4];
 			# my $highscoredistance = @row[5];
 			# my $secondplace = @row[6];
@@ -1065,26 +1074,31 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	foreach(@convertList)
 	{
 		my @line=@{$_};
-		@line[20]='';
+		@line[23]='';
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
-		
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
 	}
+	my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	my $csv = new Loghandler($baseTemp."Converted_Audiobook_bibs.csv");
+	$csv->addLine($header."\n".$toCSV);
+	push(@seekdestroyReportFiles,$baseTemp."Converted_Audiobook_bibs.csv");
 	$log->addLine($output);
 
 # ########## Possible E-Audio	
+	my $toCSV = "";	
 	@convertList=();
 	$subq = $queries{"non_audiobook_bib_possible_eaudiobook"};
 	my $query = "
-			  select record,
-			 \$\$link\$\$,
+			  select (select deleted from biblio.record_entry where id= sbs.record),record,
+			 \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
 			 winning_score,
 			  opac_icon,
 			 winning_score_score,winning_score_distance,second_place_score,
-			 circ_mods,
+			 circ_mods,call_labels,copy_locations,
 			 score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
 			 from seekdestroy.bib_score sbs where 
 			record in($subq)
-			order by winning_score_score
+			order by winning_score,winning_score_distance,electronic,second_place_score,circ_mods 
 			";
 
 	$log->addLine($query);
@@ -1095,19 +1109,27 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	foreach(@convertList)
 	{
 		my @line=@{$_};
-		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";		
-	}
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
+	}	
+	my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	my $csv = new Loghandler($baseTemp."Need_Humans_Audiobook_bibs_possible_eaudio.csv");
+	$csv->addLine($header."\n".$toCSV);
+	push(@seekdestroyReportFiles,$baseTemp."Need_Humans_Audiobook_bibs_possible_eaudio.csv");
 	$log->addLine($output);
-@convertList=();	
+	@convertList=();
 	
+# ########## Audiobooks needs humans	
+	my $toCSV = "";	
+	@convertList=();
 	$subq = $queries{"non_audiobook_bib_convert_to_audiobook"};
 	my $query = "	  
-	 select record,
-	 \$\$link\$\$, 
+	 select (select deleted from biblio.record_entry where id= sbs.record),record,
+	 \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$, 
  winning_score,
   opac_icon,
  winning_score_score,winning_score_distance,second_place_score,
- circ_mods,
+ circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
  from seekdestroy.bib_score sbs where 
 winning_score=\$\$audioBookScore\$\$ 
@@ -1122,15 +1144,20 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;	
-	$log->addLine("Will NOT Convert these: $#convertList\n\n\n");
+	$log->addLine("HUMANS NEEDED Will NOT Convert these: $#convertList\n\n\n");
 	$output='';
 	foreach(@convertList)
 	{
 		my @line=@{$_};
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
 	}
+	my $csv = new Loghandler($baseTemp."Need_Humans_Audiobook_bibs.csv");
+	my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	$csv->addLine($header."\n".$toCSV);
+	push(@seekdestroyReportFiles,$baseTemp."Need_Humans_Audiobook_bibs.csv");
 	$log->addLine($output);
-@convertList=();
+	@convertList=();
 }
 
 sub findInvalidDVDMARC
@@ -1138,77 +1165,77 @@ sub findInvalidDVDMARC
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$";
 	$log->addLine($query);
 	updateJob("Processing","findInvalidDVDMARC  $query");
-	$dbHandler->update($query);
-	foreach(@videoSearchPhrases)
-	{
-		my $phrase = lc$_;
-		my $query = "
-				select id,marc from biblio.record_entry where 		
-				(
-					marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
-				)
-				AND
-				lower(marc) ~* \$\$$phrase\$\$
-				AND
-				id not in
-				(
-				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-				)
-				";
-		$log->addLine($query);
-		updateJob("Processing","findInvalidDVDMARC  $query");
-		my @results = @{$dbHandler->query($query)};		
-		$log->addLine(($#results+1)." possible invalid video MARC");
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			my $id = @row[0];
-			my $marc = @row[1];
+	#$dbHandler->update($query);
+	# foreach(@videoSearchPhrases)
+	# {
+		# my $phrase = lc$_;
+		# my $query = "
+				# select id,marc from biblio.record_entry where 		
+				# (
+					# marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
+				# )
+				# AND
+				# lower(marc) ~* \$\$$phrase\$\$
+				# AND
+				# id not in
+				# (
+				# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+				# )
+				# ";
+		# $log->addLine($query);
+		# updateJob("Processing","findInvalidDVDMARC  $query");
+		# my @results = @{$dbHandler->query($query)};		
+		# $log->addLine(($#results+1)." possible invalid video MARC");
+		# foreach(@results)
+		# {
+			# my $row = $_;
+			# my @row = @{$row};
+			# my $id = @row[0];
+			# my $marc = @row[1];
 
-			my @scorethis = ($id,$marc);
-			my @st = ([@scorethis]);			
-			updateScoreCache(\@st);
+			# my @scorethis = ($id,$marc);
+			# my @st = ([@scorethis]);			
+			# updateScoreCache(\@st);
 
-			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-			$dbHandler->updateWithParameters($query,\@values);			
-		}
-	}
+			# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+			# $dbHandler->updateWithParameters($query,\@values);			
+		# }
+	# }
 	
-	my $query = "
-	select id,marc from biblio.record_entry where 		
-	(
-	marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
-	)
-	AND	
-	id not in
-	(
-	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-	)
-	AND 
-	id in
-	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
-	";
-	$log->addLine($query);
-	updateJob("Processing","findInvalidDVDMARC  $query");
-	my @results = @{$dbHandler->query($query)};		
-	$log->addLine(($#results+1)." possible invalid video MARC");
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
+	# my $query = "
+	# select id,marc from biblio.record_entry where 		
+	# (
+	# marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
+	# )
+	# AND	
+	# id not in
+	# (
+	# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+	# )
+	# AND 
+	# id in
+	# ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
+	# ";
+	# $log->addLine($query);
+	# updateJob("Processing","findInvalidDVDMARC  $query");
+	# my @results = @{$dbHandler->query($query)};		
+	# $log->addLine(($#results+1)." possible invalid video MARC");
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# my $marc = @row[1];
 		
-		my @scorethis = ($id,$marc);
-		my @st = ([@scorethis]);			
-		updateScoreCache(\@st);
+		# my @scorethis = ($id,$marc);
+		# my @st = ([@scorethis]);			
+		# updateScoreCache(\@st);
 		
-		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-		$dbHandler->updateWithParameters($query,\@values);			
-	}
+		# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+		# $dbHandler->updateWithParameters($query,\@values);			
+	# }
 	
 	
 	# Now that we have digested the possibilities - 
@@ -1217,7 +1244,7 @@ sub findInvalidDVDMARC
 	my $output;
 	my $query = "
 	select (select deleted from biblio.record_entry where id= sbs.record),record,
- \$\$link\$\$,
+ \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
@@ -1231,6 +1258,7 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;
+	my $toCSV = "";
 	if(!$dryrun)
 	{
 		foreach(@results)
@@ -1252,17 +1280,25 @@ order by winning_score,winning_score_distance,electronic,second_place_score,circ
 	foreach(@convertList)
 	{
 		my @line=@{$_};
-		@line[20]='';
+		@line[23]='';
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
-		
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
+	}	
+	my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	if(length($toCSV)>0)
+	{
+		my $csv = new Loghandler($baseTemp."Converted_DVD_bibs.csv");
+		$csv->addLine($header."\n".$toCSV);
+		push(@seekdestroyReportFiles,$baseTemp."Converted_DVD_bibs.csv");
 	}
 	$log->addLine($output);
-@convertList=();	
+@convertList=();
 	
+	my $toCSV = "";
 	$subq = $queries{"non_dvd_bib_convert_to_dvd"};
 	my $query = "	  
 	 select record,
-	 \$\$link\$\$, 
+	 \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$, 
  winning_score,
   opac_icon,
  winning_score_score,winning_score_distance,second_place_score,
@@ -1287,6 +1323,14 @@ order by winning_score,winning_score_distance,electronic,second_place_score
 	{
 		my @line=@{$_};
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
+	}
+	if(length($toCSV)>0)
+	{
+		my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+		my $csv = new Loghandler($baseTemp."Need_Humans_DVD_bibs.csv");
+		$csv->addLine($header."\n".$toCSV);
+		push(@seekdestroyReportFiles,$baseTemp."Need_Humans_DVD_bibs.csv");
 	}
 	$log->addLine($output);
 @convertList=();
@@ -1352,7 +1396,7 @@ sub findInvalidLargePrintMARC
 	my $output;
 	my $query = "select	
 	(select deleted from biblio.record_entry where id= sbs.record),record,
- \$\$link\$\$,
+ \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
@@ -1397,7 +1441,7 @@ sub findInvalidLargePrintMARC
 	my $subq = $queries{"non_large_print_bib_convert_to_large_print"};
 	my $query = "select	  
 	(select deleted from biblio.record_entry where id= sbs.record),record,
- \$\$link\$\$,
+ \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
@@ -2265,19 +2309,32 @@ sub findItemsCircedAsAudioBooksButAttachedNonAudioBib
 	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
 	# Find Bibs that are not Audiobooks and have physical items that are circed as audiobooks
 	$queries{'searchQuery'} = "
-	select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where 
-bre.marc !~ \$\$<leader>......i\$\$
-and
+select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where 
+bre.marc !~ \$\$<leader>......i\$\$ and
 acl.id=ac.location and
 bre.id=acn.record and
 acn.id=ac.call_number and
 not acn.deleted and
 not ac.deleted and
-ac.circ_modifier in (\$\$AudioBooks\$\$) and 
-lower(acl.name) ~ 'aud'
-
+not bre.deleted and
+(
+	lower(acn.label) ~* \$\$cass\$\$ or
+	lower(acn.label) ~* \$\$aud\$\$ or
+	lower(acn.label) ~* \$\$disc\$\$ or
+	lower(acn.label) ~* \$\$disk\$\$
+)
+and
+(
+	lower(acl.name) ~* \$\$cas\$\$ or
+	lower(acl.name) ~* \$\$aud\$\$ or
+	lower(acl.name) ~* \$\$disc\$\$ or
+	lower(acl.name) ~* \$\$disk\$\$ 
+)
+and
+ac.circ_modifier in ( \$\$AudioBooks\$\$,\$\$CD\$\$ ) and
+(SELECT STRING_AGG(VALUE,\$\$ \$\$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=\$\$icon_format\$\$ AND ID=BRE.ID GROUP BY ID) !~ 'music' and
+(SELECT STRING_AGG(VALUE,\$\$ \$\$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=\$\$icon_format\$\$ AND ID=BRE.ID GROUP BY ID) !~ 'kit'
 group by bre.id,bre.marc
-limit 1000
 	";
 	if($oldbib)
 	{
@@ -3477,66 +3534,6 @@ sub getsubfield
 	#print "got $ret\n";
 	return $ret;
 	
-}
-
-sub readyMARCForInsertIntoME
-{
-	my $marc = @_[0];	
-	my $lbyte6 = substr($marc->leader(),6,1);
-	
-	my $two45 = $marc->field('245');
-	my @e856s = $marc->field('856');
-	
-	if($two45)
-	{
-		my $value = "item";
-		# if($lbyte6 eq 'm' || $lbyte6 eq 'i')
-		# {	
-			$value = "eBook";
-			if($lbyte6 eq 'i')
-			{
-				$value = "eAudioBook";
-			}
-			if($two45->subfield('h'))
-			{
-				$two45->update( 'h' => "[Overdrive downloadable $value] /" );
-			}
-			else
-			{			
-				$two45->add_subfields('h' => "[Overdrive downloadable $value] /");
-			}
-		# }
-		if(@e856s)
-		{
-			foreach(@e856s)
-			{
-				my $thisfield = $_;
-				my $ind2 = $thisfield->indicator(2);
-				if($ind2 eq '0') #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
-				{	
-					my @sub3 = $thisfield->subfield( '3' );
-					my $ignore=0;
-					foreach(@sub3)
-					{
-						if(lc($_) eq 'excerpt')
-						{
-							$ignore=1;
-						}
-						if(lc($_) eq 'image')
-						{
-							$ignore=1;
-						}
-					}
-					if(!$ignore)
-					{
-						$thisfield->delete_subfield(code => 'z');					
-						$thisfield->add_subfields('z'=> "Click for access to the downloadable $value via Overdrive");
-					}
-				}
-			}
-		}			
-	}
-	return $marc;
 }
 
 sub mergeMARC856
