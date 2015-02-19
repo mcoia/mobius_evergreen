@@ -182,13 +182,13 @@ if(! -e $xmlconf)
 				#tag902s();
 				
 				#findInvalidAudioBookMARC();
-				findInvalidDVDMARC();
+				#findInvalidDVDMARC();
 				#findInvalidLargePrintMARC();
-				#findPossibleDups();
+				findPossibleDups();
 				
-				# These functions are iffy at best. The results 
-				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(0);
-				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);				
+				
+				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
+				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 				#findInvalid856TOCURL();
 				
 				#print "regular cache\n";
@@ -255,6 +255,7 @@ sub reportResults
 	my $undedupeRecords='';
 	my $largePrintItemsOnNonLargePrintBibs='';
 	my $DVDItemsOnNonDVDBibs='';
+	my $nonDVDItemsOnDVDBibs='';
 	my $AudiobookItemsOnNonAudiobookBibs='';
 	my $affectedlib_calls='';
 	my $affectedlib_copies='';
@@ -459,8 +460,8 @@ sub reportResults
 		push(@attachments,$baseTemp."Undeduplicated_Bibs.csv");
 	}
 	
-	#Audiobook Items attached to non Audiobook bibs
-	$query =  $queries{"Audiobook_items_on_non_Audiobook_bibs"};
+	#Audiobook Items attached to non Audiobook bibs and visa versa
+	$query =  $queries{"questionable_audiobook_bib_to_item"};
 	@results = @{$dbHandler->query($query)};	
 	$count=0;	
 	foreach(@results)
@@ -479,11 +480,11 @@ sub reportResults
 	if($count>0)
 	{
 		$AudiobookItemsOnNonAudiobookBibs = truncateOutput($AudiobookItemsOnNonAudiobookBibs,7000);
-		$AudiobookItemsOnNonAudiobookBibs="$count items look like they are Audiobook but they are attached to non Audiobook bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$AudiobookItemsOnNonAudiobookBibs\r\n\r\n\r\n";
+		$AudiobookItemsOnNonAudiobookBibs="$count Audiobook items/bibs are mismatched.\r\nBib ID, Barcode, Call Number, Library\r\nAudiobookItemsOnNonAudiobookBibs\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","Library");
 		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Audiobook_items_on_non_Audiobook_bibs.csv");
-		push(@attachments,$baseTemp."Audiobook_items_on_non_Audiobook_bibs.csv");
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_audiobook_bib_to_item.csv");
+		push(@attachments,$baseTemp."questionable_audiobook_bib_to_item.csv");
 	}
 	
 	#DVD Items attached to non DVD bibs
@@ -513,6 +514,35 @@ sub reportResults
 		push(@attachments,$baseTemp."DVD_items_on_non_DVD_bibs.csv");
 	}
 
+	
+	#Non DVD Items attached to DVD bibs
+	$query =  $queries{"non_DVD_items_on_DVD_bibs"};
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0];
+		$line = $mobUtil->insertDataIntoColumn($line," ",11);  #BIB ID
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29); #Call Number
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],39); #Bib Format Icon
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],50); #Owning Library
+		$nonDVDItemsOnDVDBibs.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$nonDVDItemsOnDVDBibs = truncateOutput($nonDVDItemsOnDVDBibs,7000);
+		$nonDVDItemsOnDVDBibs="$count items look like they are DVD but they are attached to non DVD bibs.\r\nBib ID, Barcode, Call Number, Library\r\n$nonDVDItemsOnDVDBibs\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."non_DVD_items_on_DVD_bibs.csv");
+		push(@attachments,$baseTemp."non_DVD_items_on_DVD_bibs.csv");
+	}
+	
+	
 	#Large print Items attached to non large print bibs
 	$query =  $queries{"large_print_items_on_non_large_print_bibs"};
 	@results = @{$dbHandler->query($query)};	
@@ -571,7 +601,7 @@ sub truncateOutput
 	my $length = @_[1];
 	if(length($ret)>$length)
 	{
-		$ret = substr($ret,0,$length)."\r\nTRUNCATED FOR LENGTH\r\n\r\n";
+		$ret = substr($ret,0,$length)."\nTRUNCATED FOR LENGTH\n\n";
 	}
 	return $ret;
 }
@@ -1165,77 +1195,77 @@ sub findInvalidDVDMARC
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$";
 	$log->addLine($query);
 	updateJob("Processing","findInvalidDVDMARC  $query");
-	#$dbHandler->update($query);
-	# foreach(@videoSearchPhrases)
-	# {
-		# my $phrase = lc$_;
-		# my $query = "
-				# select id,marc from biblio.record_entry where 		
-				# (
-					# marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
-				# )
-				# AND
-				# lower(marc) ~* \$\$$phrase\$\$
-				# AND
-				# id not in
-				# (
-				# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-				# )
-				# ";
-		# $log->addLine($query);
-		# updateJob("Processing","findInvalidDVDMARC  $query");
-		# my @results = @{$dbHandler->query($query)};		
-		# $log->addLine(($#results+1)." possible invalid video MARC");
-		# foreach(@results)
-		# {
-			# my $row = $_;
-			# my @row = @{$row};
-			# my $id = @row[0];
-			# my $marc = @row[1];
+	$dbHandler->update($query);
+	foreach(@videoSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = "
+				select id,marc from biblio.record_entry where 		
+				(
+					marc !~ \$\$tag=\"007\">v...[vbs]\$\$				
+				)
+				AND
+				lower(marc) ~* \$\$$phrase\$\$
+				AND
+				id not in
+				(
+				select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+				)
+				";
+		$log->addLine($query);
+		updateJob("Processing","findInvalidDVDMARC  $query");
+		my @results = @{$dbHandler->query($query)};		
+		$log->addLine(($#results+1)." possible invalid video MARC");
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			my $marc = @row[1];
 
-			# my @scorethis = ($id,$marc);
-			# my @st = ([@scorethis]);			
-			# updateScoreCache(\@st);
+			my @scorethis = ($id,$marc);
+			my @st = ([@scorethis]);			
+			updateScoreCache(\@st);
 
-			# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-			# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-			# $dbHandler->updateWithParameters($query,\@values);			
-		# }
-	# }
+			$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+			my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+			$dbHandler->updateWithParameters($query,\@values);			
+		}
+	}
 	
-	# my $query = "
-	# select id,marc from biblio.record_entry where 		
-	# (
-	# marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
-	# )
-	# AND	
-	# id not in
-	# (
-	# select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
-	# )
-	# AND 
-	# id in
-	# ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
-	# ";
-	# $log->addLine($query);
-	# updateJob("Processing","findInvalidDVDMARC  $query");
-	# my @results = @{$dbHandler->query($query)};		
-	# $log->addLine(($#results+1)." possible invalid video MARC");
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# my $marc = @row[1];
+	my $query = "
+	select id,marc from biblio.record_entry where 		
+	(
+	marc !~ \$\$tag=\"007\">v...[vbs]\$\$	
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with video phrases but incomplete marc\$\$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in(\$\$DVD\$\$,\$\$Videos\$\$,\$\$Movie\$\$)))
+	";
+	$log->addLine($query);
+	updateJob("Processing","findInvalidDVDMARC  $query");
+	my @results = @{$dbHandler->query($query)};		
+	$log->addLine(($#results+1)." possible invalid video MARC");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
 		
-		# my @scorethis = ($id,$marc);
-		# my @st = ([@scorethis]);			
-		# updateScoreCache(\@st);
+		my @scorethis = ($id,$marc);
+		my @st = ([@scorethis]);			
+		updateScoreCache(\@st);
 		
-		# $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-		# my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
-		# $dbHandler->updateWithParameters($query,\@values);			
-	# }
+		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
+		my @values = ($id,"MARC with video phrases but incomplete marc",$jobid);
+		$dbHandler->updateWithParameters($query,\@values);			
+	}
 	
 	
 	# Now that we have digested the possibilities - 
@@ -2130,7 +2160,10 @@ sub moveCopies
 				updateJob("Processing","moveCopies  $query");
 				$log->addLine($query);
 				$log->addLine("Moving $copyBarcode from $oldcall $oldbib to $destCallNumber $destBib" );
-				#$dbHandler->update($query);
+				if(!$dryrun)
+				{
+					$dbHandler->update($query);
+				}
 			}
 			else
 			{
@@ -2301,44 +2334,17 @@ sub findItemsCircedAsAudioBooksButAttachedNonAudioBib
 {
 	my $oldbib = @_[0];
 	my $query;
-	my %queries=();
-	$queries{'action'} = 'movesomecopies';
-	$queries{'ifaudioscorebelow'} = $audio_book_score_when_audiobooks_dont_belong;
-	$queries{'problem'} = "Non-audiobook Bib with items that circulate as 'AudioBooks'";
+	my %sendqueries=();
+	$sendqueries{'action'} = 'movesomecopies';
+	$sendqueries{'ifaudioscorebelow'} = $audio_book_score_when_audiobooks_dont_belong;
+	$sendqueries{'problem'} = "Non-audiobook Bib with items that circulate as 'AudioBooks'";
 	my @okmatchingreasons=("AudioBooks attached to non AudioBook Bib exact","AudioBooks attached to non AudioBook Bib exact minus date1");
-	$queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
+	$sendqueries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
 	# Find Bibs that are not Audiobooks and have physical items that are circed as audiobooks
-	$queries{'searchQuery'} = "
-select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where 
-bre.marc !~ \$\$<leader>......i\$\$ and
-acl.id=ac.location and
-bre.id=acn.record and
-acn.id=ac.call_number and
-not acn.deleted and
-not ac.deleted and
-not bre.deleted and
-(
-	lower(acn.label) ~* \$\$cass\$\$ or
-	lower(acn.label) ~* \$\$aud\$\$ or
-	lower(acn.label) ~* \$\$disc\$\$ or
-	lower(acn.label) ~* \$\$disk\$\$
-)
-and
-(
-	lower(acl.name) ~* \$\$cas\$\$ or
-	lower(acl.name) ~* \$\$aud\$\$ or
-	lower(acl.name) ~* \$\$disc\$\$ or
-	lower(acl.name) ~* \$\$disk\$\$ 
-)
-and
-ac.circ_modifier in ( \$\$AudioBooks\$\$,\$\$CD\$\$ ) and
-(SELECT STRING_AGG(VALUE,\$\$ \$\$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=\$\$icon_format\$\$ AND ID=BRE.ID GROUP BY ID) !~ 'music' and
-(SELECT STRING_AGG(VALUE,\$\$ \$\$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=\$\$icon_format\$\$ AND ID=BRE.ID GROUP BY ID) !~ 'kit'
-group by bre.id,bre.marc
-	";
+	$sendqueries{'searchQuery'} = $queries{"findItemsCircedAsAudioBooksButAttachedNonAudioBib"};
 	if($oldbib)
 	{
-		$queries{'searchQuery'} = "select id,marc from biblio.record_entry where id=$oldbib";
+		$sendqueries{'searchQuery'} = "select id,marc from biblio.record_entry where id=$oldbib";
 	}
 	my @matchQueries = 
 	(
@@ -2367,8 +2373,8 @@ group by bre.id,bre.marc
 				
 	);
 	
-	$queries{'matchQueries'} = \@matchQueries;
-	my $success = addBibMatch(\%queries);
+	$sendqueries{'matchQueries'} = \@matchQueries;
+	my $success = addBibMatch(\%sendqueries);
 	return $success;
 }
 
@@ -2511,15 +2517,19 @@ updateJob("Processing","findPossibleDups  looping results");
 	my $query="
 			select record,sd_fingerprint,score from seekdestroy.bib_score sbs2 where sd_fingerprint in(
 		select sd_fingerprint from(
-		select sd_fingerprint,count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5  group by sd_fingerprint having count(*) > 1) as a 
+		select sd_fingerprint,count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
+		and record not in(select id from biblio.record_entry where deleted)
+		group by sd_fingerprint having count(*) > 1) as a 
 		)
-		order by sd_fingerprint,score desc
+		and record not in(select id from biblio.record_entry where deleted)
+		order by sd_fingerprint,score desc, record
 		";
 		$log->addLine($query);
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
 	my $current_fp ='';
 	my $master_record=-2;
+	my %mergeMap;
 	foreach(@results)
 	{
 		my $row = $_;
@@ -2532,6 +2542,7 @@ updateJob("Processing","findPossibleDups  $query");
 		{
 			$current_fp=$fingerprint;
 			$master_record = $record
+			$mergeMap{$master_record}=();
 		}
 		else
 		{
@@ -2540,8 +2551,10 @@ updateJob("Processing","findPossibleDups  $query");
 			VALUES(\$1,\$2,\$3,\$4,\$5)";
 			my @values = ($master_record,$record,"Duplicate SD Fingerprint",$hold,$jobid);
 			$dbHandler->updateWithParameters($q,\@values);
+			push ($mergeMap{$master_record},$record);
 		}
 	}
+	$log->addLine(Dumper(\%mergeMap);
 }
 
 sub findHoldsOnBib
@@ -2805,9 +2818,12 @@ sub moveCallNumber
 		$query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destcall WHERE CALL_NUMBER=$callnumberid";
 		updateJob("Processing","moveCallNumber  $query");
 		$log->addLine("Moving copies from $callnumberid call number to $destcall");
-		$dbHandler->update($query);
+		if(!$dryrun)
+		{
+			$dbHandler->update($query);
+		}
 		$finalCallNumber=$destcall;
-	}	
+	}
 	
 	if(!$moveCopies)
 	{	
@@ -2815,10 +2831,13 @@ sub moveCallNumber
 		recordCallNumberMove($callnumberid,$frombib,$destbib,$matchReason);		
 		#print "done with recordCallNumberMove\n";
 		$query="UPDATE ASSET.CALL_NUMBER SET RECORD=$destbib WHERE ID=$callnumberid";
-		#print "$query\n";
+		$log->addLine($query);
 		updateJob("Processing","moveCallNumber  $query");
-		$log->addLine("Moving all of the call numbers from record $callnumberid to =$destbib");
-		$dbHandler->update($query);		
+		$log->addLine("Moving call number $callnumberid from record $frombib to $destbib");
+		if(!$dryrun)
+		{
+			$dbHandler->update($query);
+		}
 	}
 	return $finalCallNumber;
 
@@ -2845,7 +2864,10 @@ sub createCallNumberOnBib
 	$log->addLine($query);
 	$log->addLine("$creator,$editor,$owning_lib,$call_label,1,$bibid");
 	my @values = ($creator,$editor,$owning_lib,$call_label,1,$bibid);
-	$dbHandler->updateWithParameters($query,\@values);
+	if(!$dryrun)
+	{	
+		$dbHandler->updateWithParameters($query,\@values);
+	}
 	print "Creating new call number: $creator,$editor,$owning_lib,$call_label,1,$bibid \n";
 	$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$$call_label\$\$ AND RECORD=$bibid AND OWNING_LIB=$owning_lib";
 	my @results = @{$dbHandler->query($query)};	
@@ -2874,7 +2896,10 @@ sub moveHolds
 	$log->addLine($query);
 	updateJob("Processing","moveHolds  $query");
 	#print $query."\n";
-	$dbHandler->update($query);
+	if(!$dryrun)
+	{
+		$dbHandler->update($query);
+	}
 }
 
 sub getAllScores
