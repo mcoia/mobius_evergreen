@@ -9,20 +9,6 @@
 
 
 #
-# Find MARC that has 856 indicator2=0 and is not cataloged as electronic
-#
-invalid_ebook_marc~~select id from biblio.record_entry where 
-id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND  
-marc ~ $$<leader>......[at]$$
-and
-marc !~ $$tag="008">.......................[oqs]$$
-and
-marc !~ $$tag="006">......[oqs]$$
-and
-marc !~ $$<leader>.......p$$;
-
-
-#
 # Find Electronic MARC with physical Items attached
 #
 electronic_book_with_physical_items_attached~~select id from biblio.record_entry where not deleted and lower(marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$
@@ -46,7 +32,6 @@ and
 );
 
 
-
 #
 # Find Electronic Audiobook MARC with physical Items attached
 #
@@ -67,7 +52,42 @@ and
 );
 
 
-
+# 
+# Electronic Bibs convert automatically
+#
+non_electronic_bib_convert_to_electronic~~
+select record
+ from seekdestroy.bib_score sbs where 
+ winning_score=$$electricScore$$ 
+ and
+ opac_icon !=$$eaudio$$
+ and
+ opac_icon !=$$ebook$$
+ and
+ opac_icon !=$$evideo$$
+ and
+ winning_score_score>6;
+ 
+# 
+# Electronic Need Humans
+#
+non_electronic_bib_not_convert_to_electronic~~
+select record
+ from seekdestroy.bib_score sbs where 
+ winning_score~$$electricScore$$ 
+ and
+ winning_score_score<7
+ and
+ winning_score_score>1
+ and
+ opac_icon !=$$eaudio$$
+ and
+ opac_icon !=$$evideo$$
+ and
+ opac_icon !=$$ebook$$
+;
+ 
+ 
 #	non_audiobook_bib_convert_to_audiobook
 #----------------------------------------------
 # This query should result in all of the bib records that you want to convert to Audio books
@@ -149,19 +169,87 @@ and not
 	winning_score_score=1	
 );
 
-non_audiobook_bib_possible_eaudiobook~~select record
- from seekdestroy.bib_score sbs where 
-electronic>0 
-and
-not
+#
+# Audiobook NEEDS HUMANS 
+#
+non_audiobook_bib_not_convert_to_audiobook~~select record from seekdestroy.bib_score sbs where record not in
 (
-opac_icon ~ $$eaudio$$
-or
-opac_icon ~ $$ebook$$
+select record
+ from seekdestroy.bib_score sbs where 
+#Find only Audiobook winners 
+ winning_score=$$audioBookScore$$ 
+ and 
+#Be sure that they do not score as electric at all
+electronic=0   
+ and 
+ (
+# Take away those that scored only 1 better than the second place score
+	not (winning_score_score>1 and winning_score_distance<2) 
+	or
+	(
+# Or if they did score only 1 better than second place, its ok if they have these qualities
+		second_place_score in ($$music_score$$,$$video_score$$)
+		and
+		(circ_mods ~*$$AudioBooks$$ or circ_mods ~*$$CD$$ )
+	)
+	or
+	(
+		opac_icon is null
+		and
+		second_place_score is null
+		and
+		LOWER(circ_mods) ~*$$new$$
+	)
+	or
+	(
+		opac_icon =$$phonospoken$$
+		and
+		(second_place_score is null or second_place_score=$$$$)
+		and
+		(circ_mods ~$$^Books$$ or circ_mods ~*$$,Books$$)
+	)
+	
+ )
+and circ_mods !~* $$Refere$$
+and record not in
+(
+	select record from seekdestroy.bib_score where 
+	circ_mods =$$Books$$
+	and
+	opac_icon = $$book$$
 )
-and
-winning_score=$$electricScore$$;
-
+and record not in
+(
+	select record from seekdestroy.bib_score where 	
+	opac_icon = $$kit$$
+)
+and not
+(	
+	(
+	circ_mods !~*$$CD$$
+	and
+	circ_mods !~*$$AudioBooks$$
+	and
+	circ_mods !~*$$Media$$
+	and
+	circ_mods !~*$$Kit$$
+	and
+	circ_mods !~*$$Music$$
+	)	
+	and
+	(
+	opac_icon is null 
+	and
+	circ_mods is null 
+	)
+	and
+	winning_score_score=1	
+)
+)
+and winning_score ~ $$largeprint_score$$
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+and winning_score_score!=0
+;
 
 #
 # Find items that are problably audio related but not attached to audio related bibs
@@ -257,7 +345,7 @@ non_dvd_bib_convert_to_dvd~~select record
  winning_score~$$video_score$$ 
  and 
 electronic=0
-and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$MARC with video phrases but incomplete marc$$)
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
  and 
  (
 	not (winning_score_score>1 and winning_score_distance<2) 
@@ -307,23 +395,265 @@ and winning_score_distance>0
 and record not in ( select record from seekdestroy.bib_score sbs where opac_icon~$$score$$ and second_place_score~$$music_score$$);
 
 
+non_dvd_bib_not_convert_to_dvd~~select record from seekdestroy.bib_score where record not in
+(
+select record
+ from seekdestroy.bib_score sbs where 
+
+ winning_score~$$video_score$$ 
+ and 
+electronic=0
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+ and 
+ (
+	not (winning_score_score>1 and winning_score_distance<2) 
+ )
+and record not in
+(
+	select record from seekdestroy.bib_score where 	
+	opac_icon = $$kit$$
+)
+
+and record not in
+(
+	select record from seekdestroy.bib_score sbs where 
+	(
+	 circ_mods~$$Equipment$$ or
+	 circ_mods~$$Media$$ or
+	 circ_mods~$$Software$$
+	 ) and winning_score_score=1	 
+	 and
+	 opac_icon~$$software$$
+)
+and not
+(	 
+	 circ_mods~$$Magazines$$	 
+	 and
+	 opac_icon~$$serial$$
+	and winning_score_score=1
+)
+and record not in
+(	 
+select record from seekdestroy.bib_score sbs where (opac_icon=$$book$$ or opac_icon~$$serial$$) and not (circ_mods~$$EduVid$$ or circ_mods~$$DVD$$ or circ_mods~$$Videos$$) and winning_score_score=1
+)
+and record not in
+(	 
+	select record from seekdestroy.bib_score sbs where 
+	(circ_mods~$$Reference$$ or circ_mods~$$NewBooks$$ or circ_mods~$$NewBooks$$ or circ_mods~$$Biography$$ or circ_mods~$$BookClub$$ or circ_mods~$$PBKBooks$$ or circ_mods~$$Noncirculating$$ or circ_mods~$$Books$$)
+	 and not
+	 (circ_mods~$$EduVid$$ or circ_mods~$$DVD$$ or circ_mods~$$Videos$$)
+	 and
+	 (opac_icon~$$book$$ or length(btrim(opac_icon)) is null)
+)
+and record not in (select record from seekdestroy.bib_score sbs where circ_mods ~$$Books$$ and opac_icon=$$book$$)
+and not circ_mods~$$Kit$$
+and not winning_score~$$audioBookScore$$
+and winning_score_score!=0
+and winning_score_distance>0
+and record not in ( select record from seekdestroy.bib_score sbs where opac_icon~$$score$$ and second_place_score~$$music_score$$)
+)
+and winning_score~$$video_score$$ 
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+and winning_score_score!=0
+and winning_score_distance!=0
+;
+
+
 #
 # Large Print Bibs convert automatically
 #
 non_large_print_bib_convert_to_large_print~~
 select record
- from seekdestroy.bib_score sbs where record in( select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$MARC with large_print phrases but incomplete marc$$ )
+ from seekdestroy.bib_score sbs where record in( select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$ )
  and winning_score ~ $$largeprint_score$$
  and record not in ( select record from seekdestroy.bib_score  where opac_icon=$$serial$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score  where (lower(call_labels)~$$aud$$ or lower(call_labels)~$$cd$$) and lower(copy_locations)~$$audio$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$AudioBooks$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$ and lower(copy_locations)!~$$$$ and lower(call_labels)!~$$$$ and winning_score_score=1)
- and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ );
+ and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
+ limit 1;
+ 
+#
+# Large Print NEEDS HUMANS
+#
+non_large_print_bib_not_convert_to_large_print~~
+select record
+ from seekdestroy.bib_score
+ where record not in(
+select record
+ from seekdestroy.bib_score sbs where record in( select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$ )
+ and winning_score ~ $$largeprint_score$$
+ and record not in ( select record from seekdestroy.bib_score  where opac_icon=$$serial$$ and winning_score_score=1)
+ and record not in ( select record from seekdestroy.bib_score  where (lower(call_labels)~$$aud$$ or lower(call_labels)~$$cd$$) and lower(copy_locations)~$$audio$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$AudioBooks$$ and winning_score_score=1)
+ and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$ and lower(copy_locations)!~$$$$ and lower(call_labels)!~$$$$ and winning_score_score=1)
+ and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
+ )
+ and winning_score ~ $$largeprint_score$$
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+and winning_score_score!=0
+ ;
  
  
+# Program Queries - Format search phrase
+##########################################################
+
+
+
+#
+# Electronic Bibs search phrases
+#
+
+electronic_search_phrase~~select id,marc from biblio.record_entry where 	
+	marc !~ $$tag="008">.......................[oqs]$$
+	and
+	marc !~ $$tag="006">......[oqs]$$
+	and
+	marc !~ $$<leader>.......p$$
+	AND
+	lower(marc) ~* $$$phrase$$
+	and
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	);
+
+#
+# Additional Electronic search - Find MARC that has 856 indicator2=0 and is not cataloged as electronic
+#
+
+electronic_additional_search~~select id from biblio.record_entry where 
+	id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND  
+	marc ~ $$<leader>......[at]$$
+	and
+	marc !~ $$tag="008">.......................[oqs]$$
+	and
+	marc !~ $$tag="006">......[oqs]$$
+	and
+	marc !~ $$<leader>.......p$$
+	and
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	);
+
+
+
+#
+# Audiobook Bibs search phrases
+#
+
+audiobook_search_phrase~~select id,marc from biblio.record_entry where 		
+	(
+	marc !~ $$tag="007">s..[fl]$$
+	OR
+	marc !~ $$<leader>......[i]$$
+	)
+	AND
+	lower(marc) ~* $$$phrase$$
+	AND
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	);
+
+audiobook_additional_search~~select id,marc from biblio.record_entry where 		
+	(
+	marc !~ $$tag="007">s..[fl]$$
+	OR
+	marc !~ $$<leader>......[i]$$
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$AudioBooks$$))
+	;
+
+	
+#
+# DVD/video search phrases
+#
+
+dvd_search_phrase~~select id,marc from biblio.record_entry where 		
+	(
+		marc !~ $$tag="007">v...[vbs]$$				
+	)
+	AND
+	lower(marc) ~* $$$phrase$$
+	AND
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	);
+	
+dvd_additional_search~~select id,marc from biblio.record_entry where 		
+	(
+	marc !~ $$tag="007">v...[vbs]$$	
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in($$DVD$$,$$Videos$$,$$Movie$$)))
+	;
+ 
+ 
+ 
+#
+# Large Print search phrases
+#
+
+largeprint_search_phrase~~select id,marc from biblio.record_entry where 
+	(
+		marc !~ $$<leader>......[atd]$$
+	OR
+		(
+		marc !~ $$tag="008">.......................[d]$$
+		and
+		marc !~ $$tag="006">......[d]$$
+		)
+	OR
+		marc !~ $$<leader>.......[acdm]$$
+	)
+	AND
+	lower(marc) ~* $$$phrase$$
+	AND
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	);
+	
+
 ############################################################################################# 
 #REPORT QUERIES 
 #
+
+
+#
+# Possible Eaudiobooks
+#
+
+non_audiobook_bib_possible_eaudiobook~~select record
+ from seekdestroy.bib_score sbs where 
+electronic>0 
+and
+not
+(
+opac_icon ~ $$eaudio$$
+or
+opac_icon ~ $$ebook$$
+)
+and
+winning_score=$$electricScore$$;
+
+
 #
 # Find items that show signs of being large print but are attached to non large print bibs
 #

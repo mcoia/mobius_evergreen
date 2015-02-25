@@ -56,17 +56,17 @@ use Unicode::Normalize;
 # 32115 rows
 
 my $configFile = @ARGV[0];
+
 my $xmlconf = "/openils/conf/opensrf.xml";
 our $dryrun=0;
 
-if(@ARGV[1] && @ARGV[1] eq 'dryrun')
+
+if(!@ARGV[1])
 {
-	$dryrun=1;
+	print "Please specify 'daily' or 'weekly'\n";
+	exit;
 }
-if(@ARGV[2])
-{
-	$xmlconf = @ARGV[2];
-}
+our $frequency = @ARGV[1];
 
 if(! -e $xmlconf)
 {
@@ -99,6 +99,9 @@ if(! -e $xmlconf)
 	our %conf;
 	our $baseTemp;
 	our $domainname;
+	our $fromDate='';
+	our $fromDateObject='';
+	our $toDate='';
   
  if($conf)
  {
@@ -137,13 +140,31 @@ if(! -e $xmlconf)
 	if ($conf{"logfile"})
 	{
 		my $dt = DateTime->now(time_zone => "local"); 
-		my $fdate = $dt->ymd; 
+		my $fdate = $dt->ymd;
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
+		my $subtractDays = 2;
+		if($frequency eq 'weekly')
+		{
+			$subtractDays = 9; # The dates are whole days. When using greater than, you want to compare to the day before.
+		}
+		$fromDate = DateTime->now(time_zone => "local");  
+		my $reportFromDate = DateTime->now(time_zone => "local");
+		my $reportToDate = DateTime->now(time_zone => "local");
+		$fromDate = $fromDate->subtract(days=>$subtractDays);
+		$fromDateObject = $fromDate;
+		$fromDate = $fromDate->ymd;
+		$reportFromDate = $reportFromDate->subtract(days=>$subtractDays);
+		$reportFromDate = $reportFromDate->add(days=>1);
+		$reportFromDate = $reportFromDate->mdy;
+		$toDate =  DateTime->now(time_zone => "local");
+		$toDate = $toDate->ymd;
+		$reportToDate = $reportToDate->add(days=>-1);
+		$reportToDate = $reportToDate->mdy;
 		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		print "Executing job  tail the log for information (".$conf{"logfile"}.")\nDryrun = $dryrun\n";		
+		print "Executing job  tail the log for information (".$conf{"logfile"}.")\n";
 		my @reqs = ("logfile","tempdir","domainname","playawaysearchphrases","musicsearchphrases","largeprintbooksearchphrases","videosearchphrases","microfilmsearchphrases","microfichesearchphrases","audiobooksearchphrases","electronicsearchphrases"); 
 		my $valid = 1;
 		my $errorMessage="";
@@ -160,57 +181,19 @@ if(! -e $xmlconf)
 		{	
 			my %dbconf = %{getDBconnects($xmlconf)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
-			setupSchema($dbHandler);			
-			$jobid = createNewJob('processing');
-			if($jobid!=-1)
-			{
-				$baseTemp = $conf{"tempdir"};
-				$domainname = lc($conf{"domainname"});
-				$baseTemp =~ s/\/$//;
-				$baseTemp.='/';
-				$domainname =~ s/\/$//;
-				$domainname =~ s/^http:\/\///;
-				$domainname.='/';
-				$domainname = 'http://'.$domainname;
-				print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
-				#tag902s();
-				
-				findInvalidElectronicMARC();
-				findInvalidAudioBookMARC();
-				findInvalidDVDMARC();
-				findInvalidLargePrintMARC();
-				
-				#findPhysicalItemsOnElectronicBooksUnDedupe();
-				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
-				#findPhysicalItemsOnElectronicBooks();
-				#findPhysicalItemsOnElectronicAudioBooks();
-				
-				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
-				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
-				#findInvalid856TOCURL();
-				#findPossibleDups();
-				
-				
-				#print "regular cache\n";
-				# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
-				# and lower(marc) ~ \$\$abridge\$\$");
-				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
-				
-				 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-				 # (select record from 
-				 # SEEKDESTROY.bib_score where score_time>\$\$2014-12-10\$\$::date)");
-				
-				 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
-				 # (select record from 
-				 # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
-				
-				#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
-				#updateScoreCache();
-			}
-			updateJob("Executing reports and email","");
-		
-			#$jobid=2;
+			$baseTemp = $conf{"tempdir"};
+			$domainname = lc($conf{"domainname"});
+			$baseTemp =~ s/\/$//;
+			$baseTemp.='/';
+			$domainname =~ s/\/$//;
+			$domainname =~ s/^http:\/\///;
+			$domainname.='/';
+			$domainname = 'http://'.$domainname;
 			
+			my $afterProcess = DateTime->now(time_zone => "local");
+			my $difference = $afterProcess - $dt;
+			my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
+			my $duration =  $format->format_duration($difference);
 			my @tolist = ($conf{"alwaysemail"});
 			if(length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
 			{
@@ -218,11 +201,8 @@ if(! -e $xmlconf)
 				my @reports = @{reportResults()};
 				my @attachments = (@{@reports[1]}, @seekdestroyReportFiles);
 				my $reports = @reports[0];
-				my $afterProcess = DateTime->now(time_zone => "local");
-				my $difference = $afterProcess - $dt;
-				my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
-				my $duration =  $format->format_duration($difference);
-				$email->sendWithAttachments("Evergreen Utility - Catalog Audit Job # $jobid","Duration: $duration\r\n\r\n$reports\r\n\r\n-Evergreen Perl Squad-",\@attachments);
+				$frequency = uc$frequency;
+				$email->sendWithAttachments("Catalog fix progress - $frequency $reportFromDate to $reportToDate","$reports\r\n\r\n-Evergreen Perl Squad-",\@attachments);
 				foreach(@attachments)
 				{
 					unlink $_ or warn "Could not remove $_\n";
@@ -247,55 +227,92 @@ if(! -e $xmlconf)
 
 sub reportResults
 {
-	my $newRecordCount='';
-	my $updatedRecordCount='';
-	my $mergedRecords='';
-	my $itemsAssignedRecords='';
-	my $itemsFailedAssignedRecords='';
-	my $copyMoveRecords='';
-	my $undedupeRecords='';
-	my $largePrintItemsOnNonLargePrintBibs='';
-	my $DVDItemsOnNonDVDBibs='';
-	my $nonDVDItemsOnDVDBibs='';
-	my $AudiobookItemsOnNonAudiobookBibs='';
-	my $AudiobooksPossbileEAudiobooks='';
-	my $affectedlib_calls='';
-	my $affectedlib_copies='';
+	my $nine02s='';
+	my $catedits='';
+	my $cateditsDailyBreakdown='';
 	my @attachments=();
 	
-	#Affected Libs
+	
 	my $query = "
-	select aou.name,count(*) from actor.org_unit aou,seekdestroy.call_number_move scnm, asset.call_number acn where 
-	scnm.job=$jobid and
-	acn.id=scnm.call_number and
-	aou.id=acn.owning_lib and
-	scnm.tobib is not null
-	group by aou.name
-	order by count(*) desc";
-	updateJob("Processing","reportResults $query");
+	select split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1),
+split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"b\">\$\$,2),\$\$<\$\$,1),
+split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"c\">\$\$,2),\$\$<\$\$,1),
+split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"d\">\$\$,2),\$\$<\$\$,1),count(*)
+from biblio.record_entry bre where bre.marc ~ \$\$<datafield tag=\"902\"\$\$
+and
+lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1))~'mz7a'
+and
+lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"b\">\$\$,2),\$\$<\$\$,1))::date > '$fromDate'::date
+and
+lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"b\">\$\$,2),\$\$<\$\$,1))::date < '$toDate'::date
+group by split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1),
+split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"b\">\$\$,2),\$\$<\$\$,1),
+split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"c\">\$\$,2),\$\$<\$\$,1),
+split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"d\">\$\$,2),\$\$<\$\$,1)
+order by lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"b\">\$\$,2),\$\$<\$\$,1))::date";
+$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};	
 	my $count=0;
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
-		$count++;
-		my $line = @row[1];		
-		$line = $mobUtil->insertDataIntoColumn($line,@row[0],8);
-		$affectedlib_calls.="$line\r\n";
+		my $line = @row[0];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],9);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],23);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],38);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],58);
+		$nine02s.="$line\r\n";
+		$count+=@row[4];
 	}
 	if($count>0)
 	{
-		$affectedlib_calls="Summary libraries with moved call numbers (details below)\r\n$affectedlib_calls\r\n\r\n";
+		my $headerForEmail = "902a";
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"902b",9);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"902c",23);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"902d",38);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"# of occurrences",58);
+		$nine02s = $headerForEmail."\r\n$nine02s";
+		$nine02s="Summary 902\r\nTotal: $count\r\n$nine02s\r\n\r\n";
+		$nine02s = truncateOutput($nine02s,7000);
+		my @header = ("902a","902b","902c","902d","# of occurrences");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."902_summary.csv");
+		push(@attachments,$baseTemp."902_summary.csv");
 	}
+	
+	
+	$fromDateObject = $fromDateObject->add(days=>1);
+	$fromDate =$fromDateObject->ymd;
 	my $query = "
-	select aou.name,count(*) from actor.org_unit aou,seekdestroy.copy_move scm, asset.call_number acn where 
-	scm.job=$jobid and
-	acn.id=scm.tocall and
-	aou.id=acn.owning_lib
-	group by aou.name
-	order by count(*) desc";
-	updateJob("Processing","reportResults $query");
+	select to_char(edit_date, 'Day'),count(*)
+	from biblio.record_entry where edit_date > '$fromDate'::date and edit_date < '$toDate'::date and editor=242420
+	group by to_char(edit_date, 'Day') order by count";
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$count+=@row[1];
+		my $line = @row[0];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],11);
+		$cateditsDailyBreakdown.="$line\r\n";
+	}
+	if($count>0)
+	{
+		$cateditsDailyBreakdown="Daily Breakdown: edited by contractcat\r\nDay Of The Week, Count\r\n$cateditsDailyBreakdown\r\n\r\n";
+		$cateditsDailyBreakdown = truncateOutput($cateditsDailyBreakdown,8000);
+	}
+	
+	
+	my $query = "
+	select id,
+\$\$$domainname"."eg/opac/record/\$\$||id||\$\$?expand=marchtml\$\$,to_char(edit_date, 'MM/DD/YY HH12:MI AM')
+	from biblio.record_entry where edit_date > '$fromDate'::date and edit_date < '$toDate'::date and editor=242420
+	order by edit_date";
+	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my $count=0;
 	foreach(@results)
@@ -303,323 +320,23 @@ sub reportResults
 		my $row = $_;
 		my @row = @{$row};
 		$count++;
-		my $line = @row[1];		
-		$line = $mobUtil->insertDataIntoColumn($line,@row[0],8);
-		$affectedlib_copies.="$line\r\n";
+		my $line = @row[0];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],11);
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],80);
+		$catedits.="$line\r\n";
 	}
 	if($count>0)
 	{
-		$affectedlib_copies="Summary libraries with moved copies (details below)\r\n$affectedlib_copies\r\n\r\n";
-	}
-	#bib_marc_update table report non new bibs
-	$query = "select extra,count(*) from seekdestroy.bib_marc_update where job=$jobid and new_record is not true group by extra";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		$updatedRecordCount.=@row[1]." records were updated for this reason: ".@row[0]."\r\n";
-	}
-	#bib_marc_update table report new bibs
-	my $query = "select extra,count(*) from seekdestroy.bib_marc_update where job=$jobid and new_record is true group by extra";
-	updateJob("Processing","reportResults $query");
-	my @results = @{$dbHandler->query($query)};	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};		
-		$newRecordCount.=@row[1]." records were created for this reason: ".@row[0]."\r\n";
-	}
-	
-	#bib_merge table report
-	$query = "select leadbib,subbib from seekdestroy.bib_merge where job=$jobid";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	my $count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
-		$mergedRecords.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{	
-		$mergedRecords = truncateOutput($mergedRecords,7000);
-		$mergedRecords="$count records were merged - The left number is the winner\r\n".$mergedRecords;
-		$mergedRecords."\r\n\r\n\r\n";
-		my @header = ("Winning Bib","Deleted/Merged Bib");
+		$catedits="$count Records edited by contractcat\r\n$catedits\r\n\r\n";
+		$catedits = truncateOutput($catedits,8000);
+		my @header = ("BIB ID","OPAC LINK","Edit Date");
 		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Merged_bibs.csv");
-		push(@attachments,$baseTemp."Merged_bibs.csv");
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Bibs_touched_by_contractcat.csv");
+		push(@attachments,$baseTemp."Bibs_touched_by_contractcat.csv");
 	}
 	
 	
-	#call_number_move table report
-	$query = "select tobib,frombib,(select label from asset.call_number where id=a.call_number) from seekdestroy.call_number_move a where job=$jobid
-	and frombib not in(select oldleadbib from seekdestroy.undedupe where job=$jobid) and tobib is not null";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);		
-		$line = $mobUtil->insertDataIntoColumn($line,@row[2],27);
-		$itemsAssignedRecords.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{	
-		$itemsAssignedRecords = truncateOutput($itemsAssignedRecords,7000);
-		$itemsAssignedRecords="$count call numbers were moved\r\ndestination bib, source bib, call number\r\n".$itemsAssignedRecords."\r\n\r\n\r\n";
-		my @header = ("Destination Bib","Source Bib","Call Number");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Moved_call_numbers.csv");
-		push(@attachments,$baseTemp."Moved_call_numbers.csv");
-	}
-	
-	#call_number_move FAILED table report
-	$query = "select frombib,
-	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number)),
-	(select label from asset.call_number where id=a.call_number) from seekdestroy.call_number_move a where job=$jobid
-	and frombib not in(select oldleadbib from seekdestroy.undedupe where job=$jobid) and tobib is null
-	order by (select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number))";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	$count=0;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[2],34);
-		$itemsFailedAssignedRecords.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$itemsFailedAssignedRecords = truncateOutput($itemsFailedAssignedRecords,7000);
-		$itemsFailedAssignedRecords="$count call numbers FAILED to be moved\r\nBib ID, Owning Lib, Call number\r\n".$itemsFailedAssignedRecords."\r\n\r\n\r\n";
-		my @header = ("Source Bib","Call Number Owning Library","Call Number");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Failed_call_number_moves.csv");
-		push(@attachments,$baseTemp."Failed_call_number_moves.csv");
-	}
-	
-	#copy_move table report
-	$query = "select (select barcode from asset.copy where id=a.copy),
-	(select record from asset.call_number where id=a.fromcall),
-	(select record from asset.call_number where id=a.tocall),
-	(select label from asset.call_number where id=a.tocall) from seekdestroy.copy_move a where job=$jobid";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line,@row[2],25);
-		$line = $mobUtil->insertDataIntoColumn($line,"<",37);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],39);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[3],50);
-		$copyMoveRecords.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{	
-		$copyMoveRecords = truncateOutput($copyMoveRecords,7000);
-		$copyMoveRecords="$count items were moved\r\nbarcode, destination bib, source bib, call number\r\n".$copyMoveRecords."\r\n\r\n\r\n";
-		my @header = ("Barcode","Destination Bib","Source Bib","Call Number");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Copy_moves.csv");
-		push(@attachments,$baseTemp."Copy_moves.csv");
-	}
-	
-	#undedupe table report
-	$query = "select undeletedbib,oldleadbib,(select label from asset.call_number where id=a.moved_call_number) from seekdestroy.undedupe a where job=$jobid";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[2],25);
-		$undedupeRecords.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$undedupeRecords = truncateOutput($undedupeRecords,7000);
-		$undedupeRecords="$count records had physical items and were moved onto a previously deduped bib.\r\nundeleted destination bib, source bib, call number\r\n$undedupeRecords\r\n\r\n\r\n";
-		my @header = ("Undeleted Bib","Old Leading Bib","Call Number");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Undeduplicated_Bibs.csv");
-		push(@attachments,$baseTemp."Undeduplicated_Bibs.csv");
-	}
-	
-	my $headerForEmail ="Bib ID";
-	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Barcode",12); #Item Barcode
-	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Call Number",29); #Call Number
-	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Circ Mod",49); #Bib Format Icon
-	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Owning Library",70); #Owning Library
-	#Audiobook Items attached to non Audiobook bibs and visa versa
-	$query =  $queries{"questionable_audiobook_bib_to_item"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$AudiobookItemsOnNonAudiobookBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$AudiobookItemsOnNonAudiobookBibs = $headerForEmail."\r\n".$AudiobookItemsOnNonAudiobookBibs;
-		$AudiobookItemsOnNonAudiobookBibs = truncateOutput($AudiobookItemsOnNonAudiobookBibs,7000);
-		$AudiobookItemsOnNonAudiobookBibs="$count Audiobook items/bibs are mismatched.\r\n$AudiobookItemsOnNonAudiobookBibs\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_audiobook_bib_to_item.csv");
-		push(@attachments,$baseTemp."questionable_audiobook_bib_to_item.csv");
-	}
-	
-	#Audiobook Possible E-Audiobooks
-	$query =  $queries{"non_audiobook_bib_possible_eaudiobook"};
-	$query = "select	
-	(select deleted from biblio.record_entry where id= sbs.record),record,
- \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
- winning_score,
-  opac_icon \"opac icon\",
- winning_score_score,winning_score_distance,second_place_score,
- circ_mods,call_labels,copy_locations,
- score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
-  from seekdestroy.bib_score sbs where record in( $query )
-  order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
-  ";
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=$#results+1;
-	if($count>0)
-	{	
-		$AudiobooksPossbileEAudiobooks="$count Possible E-Audiobooks\r\n\r\n";
-		my @header = ("Deleted","BIB ID","OPAC Link","Winning_score","OPAC ICON","Winning Score",
-		"Winning Score Distance","Second Place Score","Circ Modifiers","Call Numbers","Locations",
-		"Record Quality","record_type","audioformat","videoformat","electronic","audiobook_score",
-		"music_score","playaway_score","largeprint_score","video_score","microfilm_score","microfiche_score");		
-		my @outputs = ([@header], @results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Need_Humans_Audiobook_bibs_possible_eaudio.csv");
-		push(@attachments,$baseTemp."Need_Humans_Audiobook_bibs_possible_eaudio.csv");
-	}
-	
-	#DVD Items attached to non DVD bibs
-	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$DVDItemsOnNonDVDBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$DVDItemsOnNonDVDBibs = $headerForEmail."\r\n".$DVDItemsOnNonDVDBibs;
-		$DVDItemsOnNonDVDBibs = truncateOutput($DVDItemsOnNonDVDBibs,7000);
-		$DVDItemsOnNonDVDBibs="$count items look like they are Video but they are attached to non Video bibs.\r\n$DVDItemsOnNonDVDBibs\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Video_items_on_non_Video_bibs.csv");
-		push(@attachments,$baseTemp."Video_items_on_non_Video_bibs.csv");
-	}
-
-	
-	#Non DVD Items attached to DVD bibs
-	$query =  $queries{"non_DVD_items_on_DVD_bibs"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$nonDVDItemsOnDVDBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$nonDVDItemsOnDVDBibs = $headerForEmail."\r\n".$nonDVDItemsOnDVDBibs;
-		$nonDVDItemsOnDVDBibs = truncateOutput($nonDVDItemsOnDVDBibs,7000);
-		$nonDVDItemsOnDVDBibs="$count items look like they are Video but they are attached to non Video bibs.\r\n$nonDVDItemsOnDVDBibs\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."non_Video_items_on_Video_bibs.csv");
-		push(@attachments,$baseTemp."non_Video_items_on_Video_bibs.csv");
-	}
-	
-	
-	#Large print Items attached to non large print bibs
-	$query =  $queries{"large_print_items_on_non_large_print_bibs"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$largePrintItemsOnNonLargePrintBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$largePrintItemsOnNonLargePrintBibs = $headerForEmail."\r\n".$largePrintItemsOnNonLargePrintBibs;
-		$largePrintItemsOnNonLargePrintBibs = truncateOutput($largePrintItemsOnNonLargePrintBibs,7000);
-		$largePrintItemsOnNonLargePrintBibs="$count items look like they are large print but they are attached to non large print bibs.\r\n$largePrintItemsOnNonLargePrintBibs\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
-		push(@attachments,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
-	}
-	
-	
-	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$affectedlib_calls.$affectedlib_copies.$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$largePrintItemsOnNonLargePrintBibs;
+	my $ret=$nine02s."\r\n\r\n".$cateditsDailyBreakdown.$catedits."\r\n\r\nPlease see attached spreadsheets for full details";
 	#print $ret;
 	my @returns = ($ret,\@attachments);
 	return \@returns;
@@ -1056,6 +773,7 @@ sub findInvalidDVDMARC
 	);
 }
 
+
 sub findInvalidLargePrintMARC
 {	
 	$log->addLogLine("Starting findInvalidLargePrintMARC.....");
@@ -1078,6 +796,7 @@ sub findInvalidLargePrintMARC
 	);
 }
 
+
 sub findInvalidMARC
 {	
 	my $typeName = @_[0];
@@ -1094,24 +813,24 @@ sub findInvalidMARC
 	$log->addLine($query);
 	updateJob("Processing","findInvalidMARC  $query");
 	#$dbHandler->update($query);
-	# foreach(@marcSearchPhrases)
-	# {
-		# my $phrase = lc$_;
-		# my $query = $phraseQuery;
-		# $query =~ s/\$phrase/$phrase/g;
-		# $query =~ s/\$problemphrase/$problemPhrase/g;
-		# $log->addLine($query);
-		# updateJob("Processing","findInvalidMARC  $query");
-		# updateProblemBibs($query,$problemPhrase,$typeName);
-	# }
-	# foreach(@additionalSearchQueries)
-	# {
-		# my $query = $_;				
-		# $query =~ s/\$problemphrase/$problemPhrase/g;
-		# $log->addLine($query);
-		# updateJob("Processing","findInvalidMARC  $query");
-		# updateProblemBibs($query,$problemPhrase,$typeName);
-	# }
+	foreach(@marcSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = $phraseQuery;
+		$query =~ s/\$phrase/$phrase/g;
+		$query =~ s/\$problemphrase/$problemPhrase/g;
+		$log->addLine($query);
+		updateJob("Processing","findInvalidMARC  $query");
+		updateProblemBibs($query,$problemPhrase,$typeName);
+	}
+	foreach(@additionalSearchQueries)
+	{
+		my $query = $_;				
+		$query =~ s/\$problemphrase/$problemPhrase/g;
+		$log->addLine($query);
+		updateJob("Processing","findInvalidMARC  $query");
+		updateProblemBibs($query,$problemPhrase,$typeName);
+	}
 	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert	
@@ -1152,7 +871,6 @@ sub findInvalidMARC
 	if(length($toCSV)>0)
 	{
 		my $csv = new Loghandler($baseTemp."Converted_".$typeName."_bibs.csv");
-		$csv->truncFile("");
 		$csv->addLine($header."\n".$toCSV);
 		push(@seekdestroyReportFiles,$baseTemp."Converted_".$typeName."_bibs.csv");
 	}
@@ -1167,7 +885,8 @@ sub findInvalidMARC
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
  circ_mods,call_labels,copy_locations,
- score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
+ score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
+ (select marc from biblio.record_entry where id=sbs.record)
   from seekdestroy.bib_score sbs where record in( $subQueryNotConvert )
   order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
@@ -1188,7 +907,6 @@ sub findInvalidMARC
 	if(length($toCSV)>0)
 	{
 		my $csv = new Loghandler($baseTemp."Need_Humans_".$typeName."_bibs.csv");
-		$csv->truncFile("");
 		$csv->addLine($header."\n".$toCSV);
 		push(@seekdestroyReportFiles,$baseTemp."Need_Humans_".$typeName."_bibs.csv");
 	}
@@ -3761,7 +3479,6 @@ sub updateJob
 {
 	my $status = @_[0];
 	my $action = @_[1];
-	$log->addLine($action);
 	my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
 	my $results = $dbHandler->update($query);
 	return $results;
