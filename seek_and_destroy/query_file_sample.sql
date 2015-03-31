@@ -466,12 +466,21 @@ non_large_print_bib_convert_to_large_print~~
 select record
  from seekdestroy.bib_score sbs where record in( select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$ )
  and winning_score ~ $$largeprint_score$$
+ and winning_score_score!=0
  and record not in ( select record from seekdestroy.bib_score  where opac_icon=$$serial$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score  where (lower(call_labels)~$$aud$$ or lower(call_labels)~$$cd$$) and lower(copy_locations)~$$audio$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$AudioBooks$$ and winning_score_score=1)
- and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$ and lower(copy_locations)!~$$$$ and lower(call_labels)!~$$$$ and winning_score_score=1)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Magazines$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Media$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$CD$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Noncirculating$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Reference$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Video$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VHS$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Movie$$)
+ and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$  and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
- limit 1;
+ ;
  
 #
 # Large Print NEEDS HUMANS
@@ -486,7 +495,15 @@ select record
  and record not in ( select record from seekdestroy.bib_score  where opac_icon=$$serial$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score  where (lower(call_labels)~$$aud$$ or lower(call_labels)~$$cd$$) and lower(copy_locations)~$$audio$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$AudioBooks$$ and winning_score_score=1)
- and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$ and lower(copy_locations)!~$$$$ and lower(call_labels)!~$$$$ and winning_score_score=1)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Magazines$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Media$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$CD$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Noncirculating$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Reference$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Video$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VHS$$)
+ and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Movie$$)
+ and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$  and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
  )
  and winning_score ~ $$largeprint_score$$
@@ -522,7 +539,7 @@ electronic_search_phrase~~select id,marc from biblio.record_entry where
 # Additional Electronic search - Find MARC that has 856 indicator2=0 and is not cataloged as electronic
 #
 
-electronic_additional_search~~select id from biblio.record_entry where 
+electronic_additional_search~~select id,marc from biblio.record_entry where 
 	id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND  
 	marc ~ $$<leader>......[at]$$
 	and

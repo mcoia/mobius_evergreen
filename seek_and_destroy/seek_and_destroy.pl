@@ -175,20 +175,21 @@ if(! -e $xmlconf)
 				print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 				#tag902s();
 				
-				findInvalidElectronicMARC();
-				findInvalidAudioBookMARC();
-				findInvalidDVDMARC();
-				findInvalidLargePrintMARC();
+				# findInvalidElectronicMARC();
+				# findInvalidAudioBookMARC();
+				# findInvalidDVDMARC();
+				# findInvalidLargePrintMARC();
+				# findInvalidMusicMARC();
 				
-				#findPhysicalItemsOnElectronicBooksUnDedupe();
-				#findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
-				#findPhysicalItemsOnElectronicBooks();
-				#findPhysicalItemsOnElectronicAudioBooks();
+				# findPhysicalItemsOnElectronicBooksUnDedupe();
+				# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
+				# findPhysicalItemsOnElectronicBooks();
+				# findPhysicalItemsOnElectronicAudioBooks();
 				
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 				#findInvalid856TOCURL();
-				#findPossibleDups();
+				findPossibleDups();
 				
 				
 				#print "regular cache\n";
@@ -255,6 +256,7 @@ sub reportResults
 	my $copyMoveRecords='';
 	my $undedupeRecords='';
 	my $largePrintItemsOnNonLargePrintBibs='';
+	my $nonLargePrintItemsOnLargePrintBibs=''
 	my $DVDItemsOnNonDVDBibs='';
 	my $nonDVDItemsOnDVDBibs='';
 	my $AudiobookItemsOnNonAudiobookBibs='';
@@ -474,7 +476,7 @@ sub reportResults
 	my $headerForEmail ="Bib ID";
 	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Barcode",12); #Item Barcode
 	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Call Number",29); #Call Number
-	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Circ Mod",49); #Bib Format Icon
+	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," OPAC Icon",49); #Bib Format Icon
 	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Owning Library",70); #Owning Library
 	#Audiobook Items attached to non Audiobook bibs and visa versa
 	$query =  $queries{"questionable_audiobook_bib_to_item"};
@@ -619,7 +621,36 @@ sub reportResults
 	}
 	
 	
-	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$affectedlib_calls.$affectedlib_copies.$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$largePrintItemsOnNonLargePrintBibs;
+	#non Large print Items attached to large print bibs
+	$query =  $queries{"non_large_print_items_on_large_print_bibs"};
+	updateJob("Processing","reportResults $query");
+	@results = @{$dbHandler->query($query)};	
+	$count=0;	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line=@row[0]; #BIB ID
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
+		$nonLargePrintItemsOnLargePrintBibs.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		$nonLargePrintItemsOnLargePrintBibs = $headerForEmail."\r\n".$nonLargePrintItemsOnLargePrintBibs;
+		$nonLargePrintItemsOnLargePrintBibs = truncateOutput($nonLargePrintItemsOnLargePrintBibs,7000);
+		$nonLargePrintItemsOnLargePrintBibs="$count items do not look like large print but they are attached to large print bibs.\r\n$nonLargePrintItemsOnLargePrintBibs\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Non_large_print_items_on_large_print_bibs.csv");
+		push(@attachments,$baseTemp."Non_large_print_items_on_large_print_bibs.csv");
+	}
+	
+	
+	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$affectedlib_calls.$affectedlib_copies.$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
 	#print $ret;
 	my @returns = ($ret,\@attachments);
 	return \@returns;
@@ -795,7 +826,21 @@ sub updateMARCSetElectronic
 	$marcob = MARC::Record->new_from_xml($marcob);
 	my $marcr = populate_marc($marcob);	
 	my %marcr = %{normalize_marc($marcr)};
-	my $xmlresult = convertMARCtoXML($marcob);	
+	# we have to remove the 007s because they conflict for playaway.
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+		}
+		elsif(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+		}
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
 	$xmlresult = fingerprintScriptMARC($xmlresult,'E l e c t r o n i c');
 	updateMARC($xmlresult,$bibid,'false','Correcting for Electronic in the 008/006');
 }
@@ -847,8 +892,7 @@ sub updateMARCSetCDAudioBook
 
 sub updateMARCSetDVD
 {	
-	my $bibid = @_[0];
-	print "updating marc for $bibid\n";
+	my $bibid = @_[0];	
 	my $marc = @_[1];
 	$marc = setMARCForm($marc,' ');
 	my $marcob = $marc;
@@ -893,9 +937,8 @@ sub updateMARCSetDVD
 
 sub updateMARCSetLargePrint
 {	
-	my $bibid = @_[0];
-	print "updating marc for $bibid\n";
-	my $marc = @_[1];
+	my $bibid = @_[0];	
+	my $marc = @_[1];	
 	$marc = setMARCForm($marc,'d');
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
@@ -917,7 +960,7 @@ sub updateMARCSetLargePrint
 	}
 	my $xmlresult = convertMARCtoXML($marcob);
 	$xmlresult = fingerprintScriptMARC($xmlresult,'L a r g e P r i n t');
-	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'a');
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'a');	
 	updateMARC($xmlresult,$bibid,'false','Correcting for Large Print in the leader/007 rem 008_23');
 }
 
@@ -1078,6 +1121,28 @@ sub findInvalidLargePrintMARC
 	);
 }
 
+sub findInvalidMusicMARC
+{	
+	$log->addLogLine("Starting findInvalidMusicMARC.....");
+	my $typeName = "music";
+	my $problemPhrase = "MARC with music phrases but incomplete marc";
+	my $phraseQuery = $queries{"music_search_phrase"};
+	my @additionalSearchQueries = ($queries{"music_additional_search"});
+	my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
+	my $subQueryNotConvert =  $queries{"non_music_bib_not_convert_to_music"};
+	my $convertFunction = "updateMARCSetMusic(\$id,\$marc);";	
+	findInvalidMARC(
+	$typeName,
+	$problemPhrase,
+	$phraseQuery,
+	\@additionalSearchQueries,
+	$subQueryConvert,
+	$subQueryNotConvert,
+	$convertFunction,
+	\@musicSearchPhrases
+	);
+}
+
 sub findInvalidMARC
 {	
 	my $typeName = @_[0];
@@ -1090,28 +1155,25 @@ sub findInvalidMARC
 	my @marcSearchPhrases = @{@_[7]};
 	
 	
-	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
-	$log->addLine($query);
+	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";	
 	updateJob("Processing","findInvalidMARC  $query");
 	#$dbHandler->update($query);
-	# foreach(@marcSearchPhrases)
-	# {
-		# my $phrase = lc$_;
-		# my $query = $phraseQuery;
-		# $query =~ s/\$phrase/$phrase/g;
-		# $query =~ s/\$problemphrase/$problemPhrase/g;
-		# $log->addLine($query);
-		# updateJob("Processing","findInvalidMARC  $query");
-		# updateProblemBibs($query,$problemPhrase,$typeName);
-	# }
-	# foreach(@additionalSearchQueries)
-	# {
-		# my $query = $_;				
-		# $query =~ s/\$problemphrase/$problemPhrase/g;
-		# $log->addLine($query);
-		# updateJob("Processing","findInvalidMARC  $query");
-		# updateProblemBibs($query,$problemPhrase,$typeName);
-	# }
+	foreach(@marcSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = $phraseQuery;
+		$query =~ s/\$phrase/$phrase/g;
+		$query =~ s/\$problemphrase/$problemPhrase/g;
+		updateJob("Processing","findInvalidMARC  $query");
+		updateProblemBibs($query,$problemPhrase,$typeName);
+	}
+	foreach(@additionalSearchQueries)
+	{
+		my $query = $_;				
+		$query =~ s/\$problemphrase/$problemPhrase/g;
+		updateJob("Processing","findInvalidMARC  $query");
+		updateProblemBibs($query,$problemPhrase,$typeName);
+	}
 	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert	
@@ -1129,8 +1191,8 @@ sub findInvalidMARC
   from seekdestroy.bib_score sbs where record in( $subQueryConvert )
   order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
-
-	$log->addLine($query);
+	$query =~ s/\$problemphrase/$problemPhrase/g;
+	updateJob("Processing","findInvalidMARC  $query");
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;	
 	foreach(@results)
@@ -1171,8 +1233,8 @@ sub findInvalidMARC
   from seekdestroy.bib_score sbs where record in( $subQueryNotConvert )
   order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
-
-	$log->addLine($query);
+	$query =~ s/\$problemphrase/$problemPhrase/g;
+	updateJob("Processing","findInvalidMARC  $query");
 	my @results = @{$dbHandler->query($query)};
 	my @convertList=@results;	
 	$log->addLine("Will NOT Convert these (Need Humans): $#convertList\n\n\n");
@@ -1846,7 +1908,7 @@ sub moveCopiesOntoHighestScoringBibCandidate
 		$log->addLine($query);				
 		$log->addLine("$oldbib,\"FAILED - $matchReason\",'false',$jobid");
 		updateJob("Processing","moveCopiesOntoHighestScoringBibCandidate  $query");
-		$dbHandler->updateWithParameters($query,\@values);		
+		$dbHandler->updateWithParameters($query,\@values);
 	}
 	return 0;
 }
@@ -2230,7 +2292,7 @@ updateJob("Processing","findPossibleDups  looping results");
 
 	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
 	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
-	updateJob("Processing","findPossibleDups deleting old cache bib_match   $query");
+	updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
 	print $dbHandler->update($q);	
 	updateJob("Processing","findPossibleDups updating scorecache selectivly");
 	updateScoreCache(\@st);
@@ -2246,12 +2308,11 @@ updateJob("Processing","findPossibleDups  looping results");
 		--and record not in(select id from biblio.record_entry where deleted)
 		order by sd_fingerprint,score desc, record
 		";
-		$log->addLine($query);
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
 	my $current_fp ='';
 	my $master_record=-2;
-	my %mergeMap;
+	my %mergeMap = ();
 	foreach(@results)
 	{
 		my $row = $_;
@@ -2262,9 +2323,11 @@ updateJob("Processing","findPossibleDups  $query");
 		
 		if($current_fp ne $fingerprint)
 		{
+			my $outs ="$current_fp != $fingerprint Changing master record from $master_record";
 			$current_fp=$fingerprint;
 			$master_record = $record;
-			$mergeMap{$master_record}=();
+			$outs.=" to $master_record";
+			$log->addLine($outs);
 		}
 		else
 		{
@@ -2273,7 +2336,18 @@ updateJob("Processing","findPossibleDups  $query");
 			VALUES(\$1,\$2,\$3,\$4,\$5)";
 			my @values = ($master_record,$record,"Duplicate SD Fingerprint",$hold,$jobid);
 			$dbHandler->updateWithParameters($q,\@values);
-			push ($mergeMap{$master_record},$record);
+			print "Attempting to push into $master_record\n";
+			my @temp = ($record);
+			if(!$mergeMap{$master_record})
+			{
+				$mergeMap{$master_record} = \@temp;
+			}
+			else
+			{
+				my @al = @{$mergeMap{$master_record}};
+				push(@al,$record);
+				$mergeMap{$master_record} = \@al;
+			}
 		}
 	}
 	$log->addLine(Dumper(\%mergeMap));
@@ -2302,6 +2376,7 @@ sub recordAssetCopyMove
 {
 	my $oldbib = @_[0];		
 	my $query = "select distinct call_number from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$)";
+	updateJob("Processing","recordAssetCopyMove  $query");
 	my @cids;
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
@@ -2450,7 +2525,10 @@ updateJob("Processing","undeleteBIB  $query");
 			$tcn_value=substr($tcn_value,0,-1);
 			#finally, undelete the bib making it available for the asset.call_number
 			$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$bib";
-			$dbHandler->update($query);
+			if(!$dryrun)
+			{
+				$dbHandler->update($query);
+			}
 		}
 	}
 }
@@ -2631,7 +2709,7 @@ sub getAllScores
 	$allscores{'electricScore'}=determineElectricScore($marc);
 	$allscores{'audioBookScore'}=determineAudioBookScore($marc);
 	$allscores{'largeprint_score'}=determineLargePrintScore($marc);
-	$allscores{'video_score'}=determineScoreWithPhrases($marc,\@videoSearchPhrases);
+	$allscores{'video_score'}=determineVideoScore($marc);
 	$allscores{'microfilm_score'}=determineScoreWithPhrases($marc,\@microfilmSearchPhrases);
 	$allscores{'microfiche_score'}=determineScoreWithPhrases($marc,\@microficheSearchPhrases);
 	$allscores{'music_score'}=determineMusicScore($marc);
@@ -2784,7 +2862,7 @@ sub determineMusicScore
 		}
 	}
 	
-	# if the 505 contains a bunch of $t's then it's defiantly a music bib
+	# The 505 contains track listing
 	my @five05 = $marc->field('505');
 	my $tcount;
 	foreach(@five05)
@@ -2793,14 +2871,12 @@ sub determineMusicScore
 		my @subfieldts = $field->subfield('t');
 		foreach(@subfieldts)
 		{
-			$tcount++;
+			$score++;
 		}
 		
 	}
-	#tip the score to music if those subfield t's are found (these are track listings)
-	$score=100 unless $tcount<4;
 	
-	my @nonmusicphrases = ('non music', 'non-music', 'abridge');
+	my @nonmusicphrases = ('non music', 'non-music', 'abridge', 'talking books', 'recorded books');
 	# Make the score 0 if non musical shows up
 	my @tags = $marc->fields();
 	my $found=0;
@@ -3036,6 +3112,77 @@ sub determineLargePrintScore
 				}
 			}
 		}
+	}
+	return $score;
+}
+
+sub determineVideoScore
+{
+	my $marc = @_[0];	
+	my @searchPhrases = @videoSearchPhrases;
+	my @two45 = $marc->field('245');
+	#$log->addLine(getsubfield($marc,'245','a'));
+	$marc->delete_fields(@two45);
+	my $textmarc = lc($marc->as_formatted());
+	$marc->insert_fields_ordered(@two45);
+	my $score=0;
+	#$log->addLine(lc$textmarc);
+	foreach(@two45)
+	{
+		my $field = $_;		
+		my @subs = $field->subfield('h');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@searchPhrases)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245h");
+				}
+			}
+		}
+		my @subs = $field->subfield('a');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			foreach(@searchPhrases)
+			{
+				#if the phrases are found in the 245a, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					#$log->addLine("$phrase + 5 points 245a");
+				}
+			}
+		}
+	}
+	foreach(@searchPhrases)
+	{
+		my $phrase = lc$_;
+		#$log->addLine("$phrase");		
+		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+		}
+	}
+	# The 505 contains track listing
+	my @five05 = $marc->field('505');
+	my $tcount;
+	foreach(@five05)
+	{
+		my $field = $_;
+		my @subfieldts = $field->subfield('t');
+		foreach(@subfieldts)
+		{
+			$score++;
+		}
+		
 	}
 	return $score;
 }
