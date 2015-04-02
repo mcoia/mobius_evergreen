@@ -223,7 +223,7 @@ sub padLeft  #line, width, fill char
 	my $log = @_[6];
 	
 	$log->addLogLine("**********FTP starting -> $hostname with $login and $pass -> $remotedir");
-    my $ftp = Net::FTP->new($hostname, Debug => 0)
+    my $ftp = Net::FTP->new($hostname, Debug => 0, Passive=> 1)
     or die $log->addLogLine("Cannot connect to ".$hostname);
     $ftp->login($login,$pass)
     or die $log->addLogLine("Cannot login ".$ftp->message);

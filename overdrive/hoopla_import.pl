@@ -25,8 +25,7 @@ use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
 use Digest::SHA1;
-use Net::FTP::Recursive;
-
+use File::stat;
 
  my $configFile = @ARGV[0];
  if(!$configFile)
@@ -39,6 +38,8 @@ use Net::FTP::Recursive;
  my $conf = $mobUtil->readConfFile($configFile);
  
  our $jobid=-1;
+ our $log;
+ our $archivefolder;
  
  if($conf)
  {
@@ -49,8 +50,8 @@ use Net::FTP::Recursive;
 		my $fdate = $dt->ymd; 
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
-		my $log = new Loghandler($conf->{"logfile"});
-		#$log->truncFile("");
+		$log = new Loghandler($conf->{"logfile"});
+		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		my @reqs = ("server","login","password","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
 		my $valid = 1;
@@ -64,22 +65,26 @@ use Net::FTP::Recursive;
 				$valid = 0;
 			}
 		}
-		my $archivefolder = $conf{"archivefolder"};
+		$archivefolder = $conf{"archivefolder"};
 		if(!(-d $archivefolder))
 		{
 			$valid = 0;
 			print "Sorry, the archive folder does not exist: $archivefolder\n";
 			$errorMessage = "Sorry, the archive folder does not exist: $archivefolder";
 		}
-		
+		#remove trailing slash
+		$archivefolder =~ s/\/$//;
 		my $finalImport = 0;
 		my @info;
+		my @infoRemoval;
 		my $count=0;
+		my $countremoval=0;
 		my @files;
 		my $dbHandler;
 		if($valid)
 		{	
 			my @marcOutputRecords;
+			my @marcOutputRecordsRemove;
 			my @shortnames = split(/,/,$conf{"participants"});
 			for my $y(0.. $#shortnames)
 			{				
@@ -87,33 +92,48 @@ use Net::FTP::Recursive;
 			}			
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
 			setupSchema($dbHandler);
+			
 			# @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc records/hoopla/")};
-			getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log);
+			
 			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
 			
 			if(@files[$#files]!=-1)
 			{
 			#print Dumper(@files);
 				my $cnt = 0;
+				my @removalFiles = ();
 				for my $b(0..$#files)
 				{
-					if(1)#$cnt<100004)
+					my $thisfilename = lc($files[$b]);
+					
+					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
+					my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
+					if(!$thisfilename =~m/remove/g)
 					{
-						$log->addLogLine("Parsing: ".$files[$b]);
-						my $file = MARC::File::USMARC->in($files[$b]);
 						while ( my $marc = $file->next() ) 
 						{	
 							$marc = add9($marc,\@shortnames);
 							push(@marcOutputRecords,$marc);
 						}
-						$file->close();
-						undef $file;
 						$cnt++;
 					}
+					else
+					{
+						while ( my $marc = $file->next() ) 
+						{	
+							push(@marcOutputRecordsRemove,$marc);
+						}
+						push (@removalFiles,$thisfilename);
+					}
+					$file->close();
+					undef $file;
 				}
 				my $outputFile = $mobUtil->chooseNewFileName($conf{"tempspace"},"temp","mrc");
+				my $outputFileRemoval = $mobUtil->chooseNewFileName($conf{"tempspace"},"tempremoval","mrc");
 				my $marcout = new Loghandler($outputFile);
 				$marcout->deleteFile();
+				my $marcoutRemoval = new Loghandler($outputFileRemoval);
+				$marcoutRemoval->deleteFile();
 				
 				my $output;
 				#my $output = getListOfMARC($log,$dbHandler,\@marcOutputRecords);
@@ -127,39 +147,54 @@ use Net::FTP::Recursive;
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
 				$marcout->addLineRaw($output);
 				
+				$output='';
+				foreach(@marcOutputRecordsRemove)
+				{
+					my $marc = $_;
+					$output.=$marc->as_usmarc();
+					$countremoval++;
+				}
+				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
+				$marcoutRemoval->addLineRaw($output);
+				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
 				{
 					$log->addLogLine("Could not establish a connection to the database");
 					$log->addLogLine("Deleting $outputFile");
 					$marcout->deleteFile();
+					$marcoutRemoval->deleteFile();
 					deleteFiles(\@files);
 					$valid = 0;
 					$errorMessage = "Could not establish a connection to the database";
 				}
 				if($valid)
-				{					
-					my $bib_sourceid = getbibsource($dbHandler);
-					$jobid = createNewJob($dbHandler,'processing');
-					if($jobid!=-1)
+				{
+					if(($count+$countremoval) > 0)
 					{
-						#print "Bib source id: $bib_sourceid\n";
-						@info = @{importMARCintoEvergreen($outputFile,$log,$dbHandler,$mobUtil,$bib_sourceid)};
-					#	@info = @{importMARCintoEvergreen('/mnt/evergreen/tmp/temp10.mrc',$log,$dbHandler,$mobUtil,$bib_sourceid)};
-						$finalImport = 1;
-						$log->addLine(Dumper(\@info));
-					}
-					else
-					{
-						$errorMessage = "Could not create a new job number in the schema - delete the downloaded files and restart.";
-						$log->addLogLine("Could not create a new job number in the schema - delete the downloaded files and restart.");
-						foreach(@files)
+						my $bib_sourceid = getbibsource($dbHandler);
+						$jobid = createNewJob($dbHandler,'processing');
+						if($jobid!=-1)
 						{
-							$log->addLogLine($_);
+							#print "Bib source id: $bib_sourceid\n";
+							@info = @{importMARCintoEvergreen($outputFile,$log,$dbHandler,$mobUtil,$bib_sourceid)};
+							$finalImport = 1;
+							$log->addLine(Dumper(\@info));
+							@infoRemoval = @{removeBibsEvergreen($outputFileRemoval,$log,$dbHandler,$mobUtil,$bib_sourceid)};
+						}
+						else
+						{
+							$errorMessage = "Could not create a new job number in the schema - delete the downloaded files and restart.";
+							$log->addLogLine("Could not create a new job number in the schema - delete the downloaded files and restart.");
+							foreach(@files)
+							{
+								$log->addLogLine($_);
+							}
 						}
 					}
 				}
 				$marcout->deleteFile();
+				$marcoutRemoval->deleteFile();
 				updateJob($dbHandler,"Completed","");
 			}
 			else
@@ -168,31 +203,42 @@ use Net::FTP::Recursive;
 				$errorMessage = "There were some errors during the getmarc function, we are stopping execution. Any partially downloaded files are deleted.";				
 			}
 		}
-		my @worked = @{@info[0]};
-		my @notworked = @{@info[1]};
-		my @updated = @{@info[2]};
-		my $workedCount = $#worked+1;
-		my $notWorkedCount = $#notworked+1;
-		my $updatedCount = $#updated+1;
-		my $fileCount = $#files;
-		$fileCount++;
-		my $afterProcess = DateTime->now(time_zone => "local");
-		my $difference = $afterProcess - $dt;
-		my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
-		my $duration =  $format->format_duration($difference);
-		my $fileList;
-		my $successTitleList;
-		my $successUpdateTitleList;
-		my $failedTitleList;
-		foreach(@files)
-		{
-			my $temp = $_;
-			$temp = substr($temp,rindex($temp, '/')+1);
-			$fileList.="$temp ";
-		}
-		
 		if($finalImport)
-		{	
+		{
+			my @worked = @{@info[0]};
+			my @notworked = @{@info[1]};
+			my @updated = @{@info[2]};
+			
+			my @workedRemoval = @{@infoRemoval[0]};		
+			my @notworkedRemoval = @{@infoRemoval[1]};
+			
+			my $workedCount = $#worked+1;
+			my $notWorkedCount = $#notworked+1;
+			my $updatedCount = $#updated+1;
+			
+			my $workedCountRemoval = $#workedRemoval+1;
+			my $notWorkedCountRemoval = $#notworkedRemoval+1;
+			
+			
+			my $fileCount = $#files+1;
+			my $afterProcess = DateTime->now(time_zone => "local");
+			my $difference = $afterProcess - $dt;
+			my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
+			my $duration =  $format->format_duration($difference);
+			my $fileList;
+			my $successTitleList;
+			my $successUpdateTitleList;
+			my $failedTitleList;
+			my $successTitleListRemoval;
+			my $failedTitleListRemoval;
+			foreach(@files)
+			{
+				my $temp = $_;
+				$temp = substr($temp,rindex($temp, '/')+1);
+				$fileList.="$temp ";
+			}
+			
+				
 			my $csvlines;
 			foreach(@worked)
 			{
@@ -200,7 +246,7 @@ use Net::FTP::Recursive;
 				my $bibid = @both[0];
 				my $title = @both[1];
 				$successTitleList.=$bibid." ".$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Insert\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Insert\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -210,7 +256,7 @@ use Net::FTP::Recursive;
 			{
 				my $title = $_;
 				$failedTitleList.=$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Insert\",\"\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Insert\",\"\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -222,7 +268,34 @@ use Net::FTP::Recursive;
 				my $bibid = @both[0];
 				my $title = @both[1];
 				$successUpdateTitleList.=$bibid." ".$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Update\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Update\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				$csvline=~s/\n//g;
+				$csvline=~s/\r//g;
+				$csvline=~s/\r\n//g;
+				$csvlines.="$csvline\n";
+			}
+			
+			foreach(@workedRemoval)
+			{
+				my @both = @{$_};
+				my $bibid = @both[0];
+				my $title = @both[1];
+				$successTitleListRemoval.=$bibid." ".$title."\r\n";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Remove\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				$csvline=~s/\n//g;
+				$csvline=~s/\r//g;
+				$csvline=~s/\r\n//g;
+				$csvlines.="$csvline\n";
+			}
+			
+			foreach(@notworkedRemoval)
+			{
+				my @both = @{$_};
+				my $bibid = @both[0];
+				my $cid = @both[1];
+				my $title = @both[2];
+				$failedTitleListRemoval.=$bibid." ".$title." $cid\r\n";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Remove\",\"$bibid $cid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -235,35 +308,39 @@ use Net::FTP::Recursive;
 				$csv->addLine($csvlines);
 				undef $csv;
 			}
-		}
-		if($count>0)
-		{
-			if(length($successUpdateTitleList)>5000)
+			if(length($errorMessage)>0)
 			{
-				$successUpdateTitleList = substr($successUpdateTitleList,0,5000)."\r\nTRUNCATED FOR LENGTH";
+				my @tolist = ($conf{"alwaysemail"});
+				my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
+				$fileList=~s/\s/\r\n/g;
+				$email->send("Evergreen Utility - Hoopla Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
+				
 			}
-			if(length($failedTitleList)>5000)
+			else
 			{
-				$failedTitleList = substr($failedTitleList,0,5000)."\r\nTRUNCATED FOR LENGTH";
+				$successUpdateTitleList = truncateOutput($successUpdateTitleList,5000);
+				$failedTitleList = truncateOutput($failedTitleList,5000);
+				$successTitleListRemoval = truncateOutput($successTitleListRemoval,5000);
+				$failedTitleListRemoval = truncateOutput($failedTitleListRemoval,5000);
+				
+				my $totalSuccess=1;
+				if($notWorkedCount>0)
+				{
+					$totalSuccess=0;
+				}
+				my @tolist = ($conf{"alwaysemail"});
+				my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
+				my $reports = gatherOutputReport($log,$dbHandler);
+				$fileList=~s/\s/\r\n/g;
+				$email->send("Evergreen Utility - Hoopla Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n$count adds and $countremoval removals from $fileCount file(s)\r\n Duration: $duration
+	\r\n\r\nFiles:\r\n$fileList
+	Unsuccessful Removals:
+	$failedTitleListRemoval
+	These could have failed because there are copies attached which are listed above.
+	Successful Removals:
+	$successTitleListRemoval
+	$reports\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-Evergreen Perl Squad-");
 			}
-			my $totalSuccess=1;
-			if($notWorkedCount>0)
-			{
-				$totalSuccess=0;
-			}
-			my @tolist = ($conf{"alwaysemail"});
-			my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
-			my $reports = gatherOutputReport($log,$dbHandler);
-			$fileList=~s/\s/\r\n/g;
-			$email->send("Evergreen Utility - Hoopla Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n$count Record(s) from $fileCount file(s)\r\n Duration: $duration\r\n\r\n$reports\r\n\r\nFiles:\r\n$fileList\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-Evergreen Perl Squad-");
-		}
-		elsif(length($errorMessage)>0)
-		{
-			my @tolist = ($conf{"alwaysemail"});
-			my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
-			$fileList=~s/\s/\r\n/g;
-			$email->send("Evergreen Utility - Hoopla Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
-			
 		}
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
 	}
@@ -271,6 +348,17 @@ use Net::FTP::Recursive;
 	{
 		print "Config file does not define 'logfile'\n";		
 	}
+}
+
+sub truncateOutput
+{
+	my $ret = @_[0];
+	my $length = @_[1];
+	if(length($ret)>$length)
+	{
+		$ret = substr($ret,0,$length)."\nTRUNCATED FOR LENGTH\n\n";
+	}
+	return $ret;
 }
 
 sub gatherOutputReport
@@ -313,11 +401,8 @@ sub gatherOutputReport
 		$count++;
 	}
 	if($count>0)
-	{	
-		if(length($mergedRecords)>5000)
-		{
-			$mergedRecords = substr($mergedRecords,0,5000)."\r\nTRUNCATED FOR LENGTH";
-		}
+	{
+		$mergedRecords = truncateOutput($mergedRecords,5000);
 		$mergedRecords="$count records were merged - The left number is the winner\r\n".$mergedRecords;
 		$mergedRecords."\r\n\r\n\r\n";
 	}
@@ -336,10 +421,7 @@ sub gatherOutputReport
 	}
 	if($count>0)
 	{	
-		if(length($itemsAssignedRecords)>5000)
-		{
-			$itemsAssignedRecords = substr($itemsAssignedRecords,0,5000)."\r\nTRUNCATED FOR LENGTH";
-		}
+		$itemsAssignedRecords = truncateOutput($itemsAssignedRecords,5000);
 		$itemsAssignedRecords="$count Records had physical items assigned - The left number is where the items were moved\r\n".$itemsAssignedRecords;
 		$itemsAssignedRecords."\r\n\r\n\r\n";
 	}
@@ -357,10 +439,7 @@ sub gatherOutputReport
 	}
 	if($count>0)
 	{	
-		if(length($undedupeRecords)>5000)
-		{
-			$undedupeRecords = substr($undedupeRecords,0,5000)."\r\nTRUNCATED FOR LENGTH";
-		}
+		$undedupeRecords = truncateOutput($undedupeRecords,5000);
 		$undedupeRecords="$count records had physical items and were moved onto a previously deduped bib - The left number is the undeleted deduped bib\r\n
 		The right is the molib2go bib that had it's items moved onto the undeduped bib.\r\n
 		We have included the call number as well\r\n".$undedupeRecords;
@@ -411,7 +490,7 @@ sub deleteFiles
 	my @files = @{@_[1]};
 	foreach(@files)
 	{
-		my $t = new Loghandler($_);
+		my $t = new Loghandler("$archivefolder/$_");
 		$log->addLogLine("Deleting $_");
 		$t->deleteFile();
 	}
@@ -428,22 +507,86 @@ sub getmarc
 	my $password = @_[2];	
 	my $yearstoscrape = @_[3];
 	my $archivefolder = @_[4];
-	my @currentFiles = ();
-	my @currentFiles @{dirtrav(\@currentFiles,$archivefolder)};
+	my @ret = ();
 	
-	$log->addLogLine("**********FTP starting -> $hostname with $login and $pass");
-	my $ftp = Net::FTP::Recursive->new($server, Debug => 0)
-	or die $log->addLogLine("Cannot connect to ".$hostname);
-    $ftp->login($login,$password) 
+	$log->addLogLine("**********FTP starting -> $server with $login and $password");
+	
+	my $ftp = Net::FTP->new($server, Debug => 0, Passive=> 1)
+	or die $log->addLogLine("Cannot connect to ".$server);
+    $ftp->login($login,$password)
 	or die $log->addLogLine("Cannot login ".$ftp->message);
-    my @stuff = $ftp->rget( ParseSub => \&yoursub );
-    $ftp->quit;
+	$ftp->cwd('/');
+    my @remotefiles = $ftp->ls();
+	foreach(@remotefiles)
+	{
+		my $filename = $_;
+		my $download = decideToDownload($filename);
+		
+		if($download)
+		{
+			if(-e "$archivefolder/$filename")
+			{
+				my $size = stat("$archivefolder/$filename")->size; #[7];
+				my $rsize = $ftp->size($filename);
+				print "Local: $size\n";
+				print "remot: $rsize\n";
+				if($size ne $rsize)
+				{
+					$log->addLine("$archivefolder/$filename differes in size remote $filename");
+					unlink("$archivefolder/$filename");
+				}
+				else
+				{
+					$log->addLine("skipping $filename");
+					$download=0;
+				}
+			}
+			else
+			{
+				$log->addLine("NEW $filename");
+			}
+			if($download)
+			{
+				my $worked = $ftp->get($filename,"$archivefolder/$filename");
+				if($worked)
+				{
+					push (@ret, "$filename");
+				}
+			}
+		}
+	}
+    $ftp->quit
 	or die $log->addLogLine("Unable to close FTP connection");
 	$log->addLogLine("**********FTP session closed ***************");
-	
-	$log->addLine(Dumper(\@stuff));
-	exit;
+	$log->addLine(Dumper(\@ret));
+	return \@ret;
 }
+
+sub decideToDownload
+{
+	my $filename = @_[0];
+	$filename = lc($filename);
+	my $download = 0;
+	if(!$filename =~ m/\.mrc/g)
+	{
+		return 0;
+	}
+	if($filename =~ m/remove/g)
+	{
+		$download = 1;
+	}
+	if($filename =~ m/add/g)
+	{
+		$download = 1;
+	}
+	if($filename =~ m/polaris/g)
+	{
+		
+		$download = 0;
+	}
+	return $download;
+}
+
 
 sub add9
 {
@@ -658,6 +801,45 @@ sub getsubfield
 	return $ret;	
 }
 
+sub removeBibsEvergreen
+{
+	my @ret;
+	my @notworked;
+	my @updated;
+	my $inputFile = @_[0];
+	my $log = @_[1];
+	my $dbHandler = @_[2];
+	my $mobUtil = @_[3];
+	my $bibsourceid = @_[4];
+	my $file = MARC::File::USMARC->in( $inputFile );
+	my $r =0;		
+	my $removed = 0;
+	my $query;	
+	print "Working on removeBibsEvergreen\n";
+	updateJob($dbHandler,"Processing","removeBibsEvergreen");
+	while ( my $marc = $file->next() ) 
+	{
+		my $title = getsubfield($marc,'245','a');
+		my $sha1 = calcSHA1($marc);
+		my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);			
+		if($bibid!=-1) #already exists
+		{	
+			@ret = @{attemptRemoveBibs($bibid, $dbHandler, $title, \@notworked, \@updated, $log)};
+			@updated = @{@ret[0]};
+			@notworked = @{@ret[1]};
+			$removed+=$#updated+1;
+		}
+		else
+		{
+			my @copy = ($bibid,$title,"No matching bib in ME");
+			push( @notworked, [@copy] );
+		}
+	}
+	push(@ret, (\@notworked, \@updated));
+	return \@ret;
+}
+	
+
 sub importMARCintoEvergreen
 {
 	my @ret;
@@ -693,7 +875,7 @@ updateJob($dbHandler,"Processing","updating 245h and 856z");
 			
 			if($bibid!=-1) #already exists so update the marc
 			{
-				my @ret = @{chooseWinnerAndDeleteRest($bibid, $dbHandler, $sha1, $marc, $bibsourceid, $title, \@notworked, \@updated, $log)};
+				@ret = @{chooseWinnerAndDeleteRest($bibid, $dbHandler, $sha1, $marc, $bibsourceid, $title, \@notworked, \@updated, $log)};
 				@updated = @{@ret[0]};
 				@notworked = @{@ret[1]};
 				$overlay+=$#updated+1;
@@ -734,6 +916,56 @@ updateJob($dbHandler,"Processing","updating 245h and 856z");
 	#print Dumper(@ret);
 	return \@ret;
 	
+}
+
+sub attemptRemoveBibs
+{
+#@{attemptRemoveBibs($bibid, $dbHandler, $title, \@notworked, \@updated, $log)};
+	my @list = @{@_[0]};
+	my $dbHandler = @_[1];
+	my $title = @_[2];
+	my @notworked = @{@_[3]};
+	my @updated = @{@_[4]};
+	my $log = @_[5];
+	my $matchnum = $#list+1;
+	
+	foreach(@list)
+	{
+		my @attrs = @{$_};	
+		my $id = @attrs[0];
+		my $score = @attrs[2];
+		my $marcxml = @attrs[3];
+		my $query = "SELECT ID,BARCODE FROM ASSET.COPY WHERE CALL_NUMBER IN
+		(SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$id) AND NOT DELETED";
+		$log->addLine($query);
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{
+			my @row = @{$_};
+			my $cid = @row[0];
+			my $cbarcode = @row[1];
+			my @copy = ($id,$cid,$cbarcode);
+			push(@notworked, [@copy]);
+		}
+		if($#results == -1)
+		{
+			removeOldCallNumberURI($id,$dbHandler);
+			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET DELETED=\$\$t\$\$ WHERE ID = \$1";
+			$log->addLine($query);
+			my @values = ($id);
+			my $res = $dbHandler->updateWithParameters($query,\@values);
+			if($res)
+			{
+				my @temp = ($id, $title);
+				push @updated, [@temp];
+			}
+			else
+			{
+				my @copy = ($id,$title,"Error during delete");
+				push (@notworked, [@copy]);
+			}
+		}
+	}
 }
 
 
