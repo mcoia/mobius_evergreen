@@ -246,7 +246,7 @@ and not
 	winning_score_score=1	
 )
 )
-and winning_score ~ $$largeprint_score$$
+and winning_score ~ $$audioBookScore$$
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 and winning_score_score!=0
 ;
@@ -290,6 +290,7 @@ ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cd$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdaudiobook$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdmusic$$ and
+(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$playaway$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$kit$$
 )
 OR
@@ -479,7 +480,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VHS$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$Movie$$)
  and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$  and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score=1)
- and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
+ and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ ) 
  ;
  
 #
@@ -510,6 +511,64 @@ select record
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 and winning_score_score!=0
  ;
+ 
+ 
+ 
+#
+# Music Bibs convert automatically
+#
+non_music_bib_convert_to_music~~
+select record
+ from seekdestroy.bib_score
+ where
+ record in (select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$phono$$)
+ and record not in ( select record from seekdestroy.bib_score where circ_mods~$$AudioBooks$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$kit$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$audiobook$$)
+ and record not in ( select record from seekdestroy.bib_score where winning_score_score>10 and second_place_score~$$video_score$$)
+ and record not in ( select record from seekdestroy.bib_score where (lower(circ_mods)~$$videos$$ or lower(circ_mods)~$$vhs$$) and winning_score_score=1 )
+ and record not in ( select record from seekdestroy.bib_score where lower(call_labels)!~$$music$$ and lower(call_labels)!~$$ cd$$ and lower(call_labels)!~$$^cd$$ and lower(call_labels)!~$$audio$$ and lower(copy_locations)!~$$music$$ and lower(copy_locations)!~$$ cd$$ and lower(copy_locations)!~$$^cd$$ and lower(copy_locations)!~$$audio$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score<5)
+ and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
+ and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$noncirculating$$ )
+ and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
+ and winning_score = $$music_score$$
+ and winning_score_score!=0 
+ ;
+ 
+#
+# Music NEEDS HUMANS
+#
+non_music_bib_not_convert_to_music~~
+select record
+ from seekdestroy.bib_score
+ where record not in(
+ select record
+ from seekdestroy.bib_score
+ where
+ record in (select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+
+ and record not in ( select record from seekdestroy.bib_score where winning_score_score>10 and second_place_score~$$video_score$$)
+ and record not in ( select record from seekdestroy.bib_score where (lower(circ_mods)~$$videos$$ or lower(circ_mods)~$$vhs$$) and winning_score_score=1 )
+ and record not in ( select record from seekdestroy.bib_score where lower(call_labels)!~$$music$$ and lower(call_labels)!~$$ cd$$ and lower(call_labels)!~$$^cd$$ and lower(call_labels)!~$$audio$$ and lower(copy_locations)!~$$music$$ and lower(copy_locations)!~$$ cd$$ and lower(copy_locations)!~$$^cd$$ and lower(copy_locations)!~$$audio$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score<5)
+ and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
+ and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$noncirculating$$ )
+ and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
+ and winning_score = $$music_score$$
+ and winning_score_score!=0 
+ )
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$phono$$)
+ and record not in ( select record from seekdestroy.bib_score where circ_mods~$$AudioBooks$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$kit$$)
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$audiobook$$)
+ and winning_score = $$music_score$$
+and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+and winning_score_score>4
+;
  
  
 # Program Queries - Format search phrase
@@ -647,6 +706,53 @@ largeprint_search_phrase~~select id,marc from biblio.record_entry where
 	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
 	);
 	
+	
+#
+# Music search phrases
+#
+
+music_search_phrase~~select id,marc from biblio.record_entry where 		
+	(
+	marc !~ $$tag="007">s..[lf]$$
+	OR
+	marc !~ $$<leader>......[j]$$
+	)
+	AND
+	lower(marc) ~* $$$phrase$$
+	AND
+	lower(marc) !~* $$non music$$
+	AND
+	lower(marc) !~* $$non-music$$	
+	AND
+	lower(marc) !~* $$talking books$$
+	AND
+	lower(marc) !~* $$recorded books$$
+	AND
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	);
+	
+	
+music_additional_search~~select id,marc from biblio.record_entry where 		
+	(
+	marc !~ $$tag="007">s..[lf]$$
+	OR
+	marc !~ $$<leader>......[j]$$
+	)
+	AND	
+	id not in
+	(
+	select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
+	)
+	AND 
+	id in
+	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$Music$$)
+		union
+	  select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$CD$$)
+	)
+	;
+
 
 ############################################################################################# 
 #REPORT QUERIES 
@@ -748,7 +854,7 @@ BRE.ID IN
 	(
 	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
 	) AS A
-	WHERE A."FORMAT"!~$$dvd$$ AND A."FORMAT"!~$$vhs$$ AND A."FORMAT"!~$$blue$$
+	WHERE A."FORMAT"!~$$dvd$$ AND A."FORMAT"!~$$vhs$$ AND A."FORMAT"!~$$blu$$
 	UNION
 	SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
 ) order by BRE.id;
@@ -788,7 +894,7 @@ BRE.ID IN
 	(
 	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
 	) AS A
-	WHERE A."FORMAT"~$$dvd$$ or A."FORMAT"~$$blue$$ or A."FORMAT"~$$vhs$$
+	WHERE A."FORMAT"~$$dvd$$ or A."FORMAT"~$$blu$$ or A."FORMAT"~$$vhs$$
 )
 order by BRE.id;
  
@@ -832,6 +938,7 @@ ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cd$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdaudiobook$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdmusic$$ and
+(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$playaway$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$kit$$
 )
 OR
@@ -912,6 +1019,7 @@ BRE.ID>0 AND
 	lower(acn.label) ~* $$aud$$ or
 	lower(acn.label) ~* $$disc$$ or
 	lower(acn.label) ~* $$mus$$ or
+	lower(acn.label) ~* $$play$$ or
 	lower(acn.label) ~* $$ cd$$ or
 	lower(acn.label) ~* $$^cd$$ or
 	lower(acn.label) ~* $$disk$$
@@ -920,6 +1028,7 @@ or
 	lower(acl.name) ~* $$aud$$ or
 	lower(acl.name) ~* $$disc$$ or
 	lower(acl.name) ~* $$mus$$ or
+	lower(acl.name) ~* $$play$$ or
 	lower(acl.name) ~* $$ cd$$ or
 	lower(acl.name) ~* $$^cd$$ or
 	lower(acl.name) ~* $$disk$$ 
@@ -935,6 +1044,7 @@ ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cd$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdaudiobook$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdmusic$$ and
+(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$playaway$$ and
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$kit$$
 )
 OR
@@ -958,6 +1068,7 @@ bre.marc ~ $$<leader>......i$$ and
 	lower(acn.label) !~* $$aud$$ and
 	lower(acn.label) !~* $$disc$$ and
 	lower(acn.label) !~* $$mus$$ and
+	lower(acn.label) !~* $$play$$ and
 	lower(acn.label) !~* $$ cd$$ and
 	lower(acn.label) !~* $$^cd$$ and
 	lower(acn.label) !~* $$disk$$
@@ -968,6 +1079,7 @@ and
 	lower(acl.name) !~* $$aud$$ and
 	lower(acl.name) !~* $$disc$$ and
 	lower(acl.name) !~* $$mus$$ and
+	lower(acl.name) !~* $$play$$ and
 	lower(acl.name) !~* $$ cd$$ and
 	lower(acl.name) !~* $$^cd$$ and
 	lower(acl.name) !~* $$disk$$ 

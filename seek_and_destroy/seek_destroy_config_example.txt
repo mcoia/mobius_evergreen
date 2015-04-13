@@ -1,6 +1,6 @@
 logfile = /mnt/evergreen/tmp/test/seekanddestroy.log
 electronicsearchphrases = electronic resource,ebook,eaudiobook,overdrive,download,ebrary,electronic reproduction,ebscohost,netlibrary
-audiobooksearchphrases = audiobook,audio book,compact dis,sound dis,hachette audio,books on tape,audiodisc,Random House Audio,Talking books,Recorded Books
+audiobooksearchphrases = audiobook,audio book,compact dis,sound dis,hachette audio,books on tape,audiodisc,Random House Audio,Talking books,Recorded Books,sound casse
 microfichesearchphrases = microfiche
 largeprintbooksearchphrases = Large type books,Large print,lg print,SightSaving,lg. print,lg prt.,lg. prt.,Thorndike Press,centerpoint,center point
 microfilmsearchphrases = microfilm

@@ -189,7 +189,7 @@ if(! -e $xmlconf)
 				#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 				#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 				#findInvalid856TOCURL();
-				findPossibleDups();
+				#findPossibleDups();
 				
 				
 				#print "regular cache\n";
@@ -197,9 +197,13 @@ if(! -e $xmlconf)
 				# and lower(marc) ~ \$\$abridge\$\$");
 				#updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
 				
-				 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-				 # (select record from 
-				 # SEEKDESTROY.bib_score where score_time>\$\$2014-12-10\$\$::date)");
+				 updateScoreWithQuery("select id,marc from biblio.record_entry where id in
+				 (select record from 
+				 SEEKDESTROY.problem_bibs where problem ~ \$\$MARC with music phrases but incomplete marc\$\$)
+				 and
+				 lower(marc) ~ \$\$<datafield tag=\"505\"\$\$
+				 ");
+				 exit;
 				
 				 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
 				 # (select record from 
@@ -223,7 +227,7 @@ if(! -e $xmlconf)
 				my $difference = $afterProcess - $dt;
 				my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
 				my $duration =  $format->format_duration($difference);
-				$email->sendWithAttachments("Evergreen Utility - Catalog Audit Job # $jobid","Duration: $duration\r\n\r\n$reports\r\n\r\n-Evergreen Perl Squad-",\@attachments);
+				$email->sendWithAttachments("****SAMPLE**** Evergreen Utility - Catalog Audit Job # $jobid","Duration: $duration\r\n\r\n$reports\r\n\r\n-Evergreen Perl Squad-",\@attachments);
 				foreach(@attachments)
 				{
 					unlink $_ or warn "Could not remove $_\n";
@@ -256,7 +260,7 @@ sub reportResults
 	my $copyMoveRecords='';
 	my $undedupeRecords='';
 	my $largePrintItemsOnNonLargePrintBibs='';
-	my $nonLargePrintItemsOnLargePrintBibs=''
+	my $nonLargePrintItemsOnLargePrintBibs='';
 	my $DVDItemsOnNonDVDBibs='';
 	my $nonDVDItemsOnDVDBibs='';
 	my $AudiobookItemsOnNonAudiobookBibs='';
@@ -478,46 +482,36 @@ sub reportResults
 	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Call Number",29); #Call Number
 	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," OPAC Icon",49); #Bib Format Icon
 	$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Owning Library",70); #Owning Library
+	
+	
 	#Audiobook Items attached to non Audiobook bibs and visa versa
 	$query =  $queries{"questionable_audiobook_bib_to_item"};
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
+	
+	if($#results>-1)
 	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$AudiobookItemsOnNonAudiobookBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$AudiobookItemsOnNonAudiobookBibs = $headerForEmail."\r\n".$AudiobookItemsOnNonAudiobookBibs;
-		$AudiobookItemsOnNonAudiobookBibs = truncateOutput($AudiobookItemsOnNonAudiobookBibs,7000);
-		$AudiobookItemsOnNonAudiobookBibs="$count Audiobook items/bibs are mismatched.\r\n$AudiobookItemsOnNonAudiobookBibs\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Audiobook items/bibs mismatched");
+		$AudiobookItemsOnNonAudiobookBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","Library");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_audiobook_bib_to_item.csv");
 		push(@attachments,$baseTemp."questionable_audiobook_bib_to_item.csv");
 	}
 	
+	
 	#Audiobook Possible E-Audiobooks
 	$query =  $queries{"non_audiobook_bib_possible_eaudiobook"};
 	$query = "select	
-	(select deleted from biblio.record_entry where id= sbs.record),record,
+	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
  circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
-  from seekdestroy.bib_score sbs where record in( $query )
-  order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
+  from seekdestroy.bib_score outsidesbs where record in( $query )
+  order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
   ";
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};	
@@ -537,25 +531,11 @@ sub reportResults
 	#DVD Items attached to non DVD bibs
 	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
 	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
+	@results = @{$dbHandler->query($query)};
+	if($#results>-1)
 	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$DVDItemsOnNonDVDBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$DVDItemsOnNonDVDBibs = $headerForEmail."\r\n".$DVDItemsOnNonDVDBibs;
-		$DVDItemsOnNonDVDBibs = truncateOutput($DVDItemsOnNonDVDBibs,7000);
-		$DVDItemsOnNonDVDBibs="$count items look like they are Video but they are attached to non Video bibs.\r\n$DVDItemsOnNonDVDBibs\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items look like they are Video but they are attached to non Video bibs.");
+		$DVDItemsOnNonDVDBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","Library");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Video_items_on_non_Video_bibs.csv");
@@ -566,25 +546,11 @@ sub reportResults
 	#Non DVD Items attached to DVD bibs
 	$query =  $queries{"non_DVD_items_on_DVD_bibs"};
 	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
+	@results = @{$dbHandler->query($query)};
+	if($#results>-1)
 	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$nonDVDItemsOnDVDBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$nonDVDItemsOnDVDBibs = $headerForEmail."\r\n".$nonDVDItemsOnDVDBibs;
-		$nonDVDItemsOnDVDBibs = truncateOutput($nonDVDItemsOnDVDBibs,7000);
-		$nonDVDItemsOnDVDBibs="$count items look like they are Video but they are attached to non Video bibs.\r\n$nonDVDItemsOnDVDBibs\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items look like they are Video but attached to non Video bibs.");
+		$nonDVDItemsOnDVDBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","Library");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."non_Video_items_on_Video_bibs.csv");
@@ -595,25 +561,11 @@ sub reportResults
 	#Large print Items attached to non large print bibs
 	$query =  $queries{"large_print_items_on_non_large_print_bibs"};
 	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
+	@results = @{$dbHandler->query($query)};
+	if($#results>-1)
 	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$largePrintItemsOnNonLargePrintBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$largePrintItemsOnNonLargePrintBibs = $headerForEmail."\r\n".$largePrintItemsOnNonLargePrintBibs;
-		$largePrintItemsOnNonLargePrintBibs = truncateOutput($largePrintItemsOnNonLargePrintBibs,7000);
-		$largePrintItemsOnNonLargePrintBibs="$count items look like they are large print but they are attached to non large print bibs.\r\n$largePrintItemsOnNonLargePrintBibs\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items look like they are large print but attached to non large print bibs.");
+		$largePrintItemsOnNonLargePrintBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","Library");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
@@ -625,24 +577,10 @@ sub reportResults
 	$query =  $queries{"non_large_print_items_on_large_print_bibs"};
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};	
-	$count=0;	
-	foreach(@results)
+	if($#results>-1)
 	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0]; #BIB ID
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],12); #Item Barcode
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[2],29); #Call Number
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],49); #Bib Format Icon
-		$line = $mobUtil->insertDataIntoColumn($line," ".@row[4],70); #Owning Library
-		$nonLargePrintItemsOnLargePrintBibs.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
-	{
-		$nonLargePrintItemsOnLargePrintBibs = $headerForEmail."\r\n".$nonLargePrintItemsOnLargePrintBibs;
-		$nonLargePrintItemsOnLargePrintBibs = truncateOutput($nonLargePrintItemsOnLargePrintBibs,7000);
-		$nonLargePrintItemsOnLargePrintBibs="$count items do not look like large print but they are attached to large print bibs.\r\n$nonLargePrintItemsOnLargePrintBibs\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items do not look like large print but attached to large print bibs.");
+		$nonLargePrintItemsOnLargePrintBibs="****\r\nItems do not look like large print but attached to large print bibs.\r\n****\r\n$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","Library");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Non_large_print_items_on_large_print_bibs.csv");
@@ -654,6 +592,63 @@ sub reportResults
 	#print $ret;
 	my @returns = ($ret,\@attachments);
 	return \@returns;
+}
+
+sub summaryReportResults
+{
+	my @results = @{@_[0]};
+	my $namecolumnpos = @_[1];
+	my $nameColumnName = @_[2];
+	my $nameWidth = @_[3];
+	my $title = @_[4];
+	my %ret = ();
+	my @sorted = ();
+	my $total = 0;
+	my $summary='';
+	foreach(@results)
+	{
+		my @row = @{$_};
+		if($ret{@row[$namecolumnpos]})
+		{
+			$ret{@row[$namecolumnpos]}++;
+		}
+		else
+		{
+			$ret{@row[$namecolumnpos]}=1;
+			push(@sorted, @row[$namecolumnpos]);
+		}
+		$total++;
+	}
+	my $i=1;
+	while($i<$#sorted+1)
+	{
+		if($ret{@sorted[$i]} > $ret{@sorted[$i-1]})
+		{
+			my $temp = @sorted[$i];
+			@sorted[$i]=@sorted[$i-1];
+			@sorted[$i-1] = $temp;
+			$i-=2 unless $i<2;
+			$i-- unless $i<1;
+		}
+		$i++;
+	}
+	my $header = $nameColumnName;
+	$header = $mobUtil->insertDataIntoColumn($header,"Count",$nameWidth)."\r\n";
+	foreach(@sorted)
+	{
+		my $line = $_;
+		$line = $mobUtil->insertDataIntoColumn($line," ".$ret{$_},$nameWidth);
+		$summary.="$line\r\n";
+	}
+	my $line = "Total";
+	$line = $mobUtil->insertDataIntoColumn($line," ".$total,$nameWidth);
+	$summary.="$line\r\n";
+	
+	my $titleStars = "*";
+	while(length($titleStars)<length($title)){$titleStars.="*";}
+	$title="$titleStars\r\n$title\r\n$titleStars\r\n";
+	$summary = $title.$header.$summary;
+	return $summary;
 }
 
 sub createCSVFileFrom2DArray
@@ -680,7 +675,7 @@ sub truncateOutput
 	my $length = @_[1];
 	if(length($ret)>$length)
 	{
-		$ret = substr($ret,0,$length)."\nTRUNCATED FOR LENGTH\n\n";
+		$ret = substr($ret,0,$length)."\r\nTRUNCATED FOR LENGTH\n\n";
 	}
 	return $ret;
 }
@@ -1157,7 +1152,7 @@ sub findInvalidMARC
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";	
 	updateJob("Processing","findInvalidMARC  $query");
-	#$dbHandler->update($query);
+	$dbHandler->update($query);
 	foreach(@marcSearchPhrases)
 	{
 		my $phrase = lc$_;
@@ -1180,16 +1175,16 @@ sub findInvalidMARC
 	my $output='';
 	my $toCSV = "";
 	my $query = "select	
-	(select deleted from biblio.record_entry where id= sbs.record),record,
+	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
  circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
- (select marc from biblio.record_entry where id=sbs.record)
-  from seekdestroy.bib_score sbs where record in( $subQueryConvert )
-  order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
+ (select marc from biblio.record_entry where id=outsidesbs.record)
+  from seekdestroy.bib_score outsidesbs where record in( $subQueryConvert )
+  order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
 	$query =~ s/\$problemphrase/$problemPhrase/g;
 	updateJob("Processing","findInvalidMARC  $query");
@@ -1223,15 +1218,15 @@ sub findInvalidMARC
 	@convertList=();
 	
 	my $query = "select	
-	(select deleted from biblio.record_entry where id= sbs.record),record,
+	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
   opac_icon \"opac icon\",
  winning_score_score,winning_score_distance,second_place_score,
  circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
-  from seekdestroy.bib_score sbs where record in( $subQueryNotConvert )
-  order by (select deleted from biblio.record_entry where id= sbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
+  from seekdestroy.bib_score outsidesbs where record in( $subQueryNotConvert )
+  order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
 	$query =~ s/\$problemphrase/$problemPhrase/g;
 	updateJob("Processing","findInvalidMARC  $query");
@@ -2849,6 +2844,21 @@ sub determineMusicScore
 					#$log->addLine("$phrase + 5 points 245h");
 				}
 			}
+			if($subf =~ m/a novel/g)
+			{
+				#This is a novel!
+				return 0;
+			}
+		}
+		my @subs = $field->subfield('b');
+		foreach(@subs)
+		{
+			my $subf = lc($_);
+			if($subf =~ m/a novel/g)
+			{
+				#This is a novel!
+				return 0;
+			}
 		}
 	}
 	foreach(@musicSearchPhrases)
@@ -2871,10 +2881,14 @@ sub determineMusicScore
 		my @subfieldts = $field->subfield('t');
 		foreach(@subfieldts)
 		{
-			$score++;
+			$tcount++;
 		}
 		
 	}
+	#only tick once for track listings, because it may not be tracks
+	#It could be poetry
+	#It could be chapters on a dvd
+	$score++ unless $tcount==0;
 	
 	my @nonmusicphrases = ('non music', 'non-music', 'abridge', 'talking books', 'recorded books');
 	# Make the score 0 if non musical shows up

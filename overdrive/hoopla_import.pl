@@ -51,7 +51,7 @@ use File::stat;
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
-		$log->truncFile("");
+		#$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		my @reqs = ("server","login","password","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
 		my $valid = 1;
@@ -209,8 +209,8 @@ use File::stat;
 			my @notworked = @{@info[1]};
 			my @updated = @{@info[2]};
 			
-			my @workedRemoval = @{@infoRemoval[0]};		
-			my @notworkedRemoval = @{@infoRemoval[1]};
+			my @notworkedRemoval = @{@infoRemoval[0]};
+			my @workedRemoval = @{@infoRemoval[1]};
 			
 			my $workedCount = $#worked+1;
 			my $notWorkedCount = $#notworked+1;
@@ -246,7 +246,7 @@ use File::stat;
 				my $bibid = @both[0];
 				my $title = @both[1];
 				$successTitleList.=$bibid." ".$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Insert\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Insert\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -256,7 +256,7 @@ use File::stat;
 			{
 				my $title = $_;
 				$failedTitleList.=$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Insert\",\"\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Insert\",\"\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -268,7 +268,7 @@ use File::stat;
 				my $bibid = @both[0];
 				my $title = @both[1];
 				$successUpdateTitleList.=$bibid." ".$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Update\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Update\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -281,7 +281,7 @@ use File::stat;
 				my $bibid = @both[0];
 				my $title = @both[1];
 				$successTitleListRemoval.=$bibid." ".$title."\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Remove\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Success Remove\",\"$bibid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -292,10 +292,10 @@ use File::stat;
 			{
 				my @both = @{$_};
 				my $bibid = @both[0];
-				my $cid = @both[1];
-				my $title = @both[2];
-				$failedTitleListRemoval.=$bibid." ".$title." $cid\r\n";
-				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Remove\",\"$bibid $cid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removeal\",\"$fileList\"";
+				my $title = @both[1];
+				my $cid = @both[2];
+				$failedTitleListRemoval.=$bibid." ".$cid." $title\r\n";
+				my $csvline = "\"$dateString\",\"$errorMessage\",\"Failed Remove\",\"$bibid $cid\",\"$title\",\"$duration\",\"$count Record(s)\",\"$fileCount File(s)\",\"$workedCount success\",\"$notWorkedCount failed\",\"$updatedCount Updated\",\"$workedCountRemoval Removed\",\"$notWorkedCountRemoval Failed Removal\",\"$fileList\"";
 				$csvline=~s/\n//g;
 				$csvline=~s/\r//g;
 				$csvline=~s/\r\n//g;
@@ -334,12 +334,12 @@ use File::stat;
 				$fileList=~s/\s/\r\n/g;
 				$email->send("Evergreen Utility - Hoopla Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n$count adds and $countremoval removals from $fileCount file(s)\r\n Duration: $duration
 	\r\n\r\nFiles:\r\n$fileList
-	Unsuccessful Removals:
-	$failedTitleListRemoval
-	These could have failed because there are copies attached which are listed above.
-	Successful Removals:
-	$successTitleListRemoval
-	$reports\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-Evergreen Perl Squad-");
+Unsuccessful Removals:
+$failedTitleListRemoval
+	These could have failed because there are copies attached which are listed above.\r\n
+Successful Removals:
+$successTitleListRemoval\r\n\r\n
+$reports\r\nSuccessful Imports:\r\n$successTitleList\r\n\r\n\r\nSuccessful Updates:\r\n$successUpdateTitleList\r\n\r\nUnsuccessful:\r\n$failedTitleList\r\n\r\n-Evergreen Perl Squad-");
 			}
 		}
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
@@ -447,7 +447,7 @@ sub gatherOutputReport
 	}
 	my $ret=$newRecordCount." New record(s) were created.\r\n\r\n\r\n".
 	$updatedRecordCount." Record(s) were updated\r\n\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$undedupeRecords;
-	print $ret;
+	#print $ret;
 	return $ret;
 	
 }
@@ -528,8 +528,8 @@ sub getmarc
 			{
 				my $size = stat("$archivefolder/$filename")->size; #[7];
 				my $rsize = $ftp->size($filename);
-				print "Local: $size\n";
-				print "remot: $rsize\n";
+				# print "Local: $size\n";
+				# print "remot: $rsize\n";
 				if($size ne $rsize)
 				{
 					$log->addLine("$archivefolder/$filename differes in size remote $filename");
@@ -804,8 +804,8 @@ sub getsubfield
 sub removeBibsEvergreen
 {
 	my @ret;
-	my @notworked;
-	my @updated;
+	my @notworked = ();
+	my @updated = ();
 	my $inputFile = @_[0];
 	my $log = @_[1];
 	my $dbHandler = @_[2];
@@ -814,17 +814,22 @@ sub removeBibsEvergreen
 	my $file = MARC::File::USMARC->in( $inputFile );
 	my $r =0;		
 	my $removed = 0;
+	my $loops = 0;
 	my $query;	
-	print "Working on removeBibsEvergreen\n";
+	#print "Working on removeBibsEvergreen\n";
 	updateJob($dbHandler,"Processing","removeBibsEvergreen");
 	while ( my $marc = $file->next() ) 
 	{
+		# if($loops < 5)
+		# {
 		my $title = getsubfield($marc,'245','a');
 		my $sha1 = calcSHA1($marc);
-		my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);			
+		my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
 		if($bibid!=-1) #already exists
 		{	
-			@ret = @{attemptRemoveBibs($bibid, $dbHandler, $title, \@notworked, \@updated, $log)};
+			@ret = @{attemptRemoveBibs($bibid, $dbHandler, $title, \@notworked, \@updated, $log)};			
+			$log->addLine("Got attemptRemoveBibs");
+			$log->addLine(Dumper(\@ret));
 			@updated = @{@ret[0]};
 			@notworked = @{@ret[1]};
 			$removed+=$#updated+1;
@@ -834,7 +839,10 @@ sub removeBibsEvergreen
 			my @copy = ($bibid,$title,"No matching bib in ME");
 			push( @notworked, [@copy] );
 		}
+		$loops++;
+		#}
 	}
+	my @ret = ();
 	push(@ret, (\@notworked, \@updated));
 	return \@ret;
 }
@@ -855,7 +863,7 @@ sub importMARCintoEvergreen
 	my $r =0;		
 	my $overlay = 0;
 	my $query;	
-	print "Working on importMARCintoEvergreen\n";
+	#print "Working on importMARCintoEvergreen\n";
 	updateJob($dbHandler,"Processing","importMARCintoEvergreen");
 	
 	while ( my $marc = $file->next() ) 
@@ -957,7 +965,7 @@ sub attemptRemoveBibs
 			if($res)
 			{
 				my @temp = ($id, $title);
-				push @updated, [@temp];
+				push (@updated, [@temp]);
 			}
 			else
 			{
@@ -966,6 +974,11 @@ sub attemptRemoveBibs
 			}
 		}
 	}
+	my @ret;
+	push @ret, [@updated];
+	push @ret, [@notworked];
+	
+	return \@ret;
 }
 
 

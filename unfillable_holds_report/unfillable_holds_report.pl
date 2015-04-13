@@ -133,6 +133,7 @@ sub reportResults
 {
 	my $unfills='';
 	my $partholddeletes='';	
+	my $metaholddeletes='';	
 	my @attachments=();
 	my $ret;
 	my @returns;
@@ -251,7 +252,68 @@ WARNING: These holds have been removed from the database.
 		push(@attachments,$baseTemp."Deleted_broken_part_level_holds.csv");
 	}
 	
-	$ret.=$unfills.$partholddeletes."\r\n\r\nPlease see attached spreadsheets for full details";	
+	my $query = "
+select ahr.id,acard.barcode,ahr.target,ahr.hold_type,ahr.request_time,aou.name from
+action.hold_request ahr,
+actor.usr au,
+actor.org_unit aou,
+actor.card acard
+where
+ahr.hold_type='M' and
+aou.id=ahr.pickup_lib and
+acard.active='t' and
+acard.usr = au.id and
+au.id=ahr.usr and
+ahr.fulfillment_time is null and
+ahr.cancel_time is null and
+ahr.expire_time is null and
+ahr.capture_time is null and
+ahr.current_copy is null and
+ahr.target not in(select id from metabib.metarecord)
+order by aou.name,ahr.request_time";
+$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};	
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line = @row[0];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],11);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],39);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],43);
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[5],54);
+		$metaholddeletes.="$line\r\n";
+		$count++;
+		$query = "DELETE FROM ACTION.HOLD_REQUEST WHERE ID=\$1";
+		my @values = (@row[0]);
+		$dbHandler->updateWithParameters($query,\@values);
+	}
+	if($count>0)
+	{
+		my $headerForEmail = "Hold ID";
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Patron Barcode",11);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Target",29);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"HT",39);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Rqst Time",43);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Pickup Library",54);
+	
+		$metaholddeletes = $headerForEmail."\r\n$metaholddeletes";
+		$metaholddeletes=
+"--- Metarecord Level holds for Metarecord that do not exist in the database ---
+WARNING: These holds have been removed from the database.
+		The Metarecord no longer exists and we have no way of knowing the intended target.
+		You may contact the patron to explain that a hold was removed.\r\nTotal: $count
+\r\n$metaholddeletes\r\n\r\n\r\n";
+		$metaholddeletes = truncateOutput($metaholddeletes,7000);
+		my @header = ("Hold ID","Patron Barcode","Target","Hold Type","Request Time","Pickup Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Deleted_broken_metarecord_holds.csv");
+		push(@attachments,$baseTemp."Deleted_broken_metarecord_holds.csv");
+	}
+	
+	$ret.=$unfills.$partholddeletes.$metaholddeletes."\r\n\r\nPlease see attached spreadsheets for full details";	
 	@returns = ($ret,\@attachments);
 	my @ret = ();
 	return \@returns;
