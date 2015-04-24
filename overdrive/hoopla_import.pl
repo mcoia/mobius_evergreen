@@ -108,8 +108,9 @@ use File::stat;
 					
 					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
 					my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
-					if(!$thisfilename =~m/remove/g)
-					{
+					
+					if(! ($thisfilename =~ m/remove/))
+					{					
 						while ( my $marc = $file->next() ) 
 						{	
 							$marc = add9($marc,\@shortnames);

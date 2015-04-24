@@ -277,7 +277,8 @@ sub padLeft  #line, width, fill char
 	 }
 	 
 	 $log->addLogLine("************Ending Z39.50 Connection************");
-	 undef $conection, $results;
+	 $connection->destroy();
+	 undef $connection, $results;
 	 return \@ret;
  }
  
