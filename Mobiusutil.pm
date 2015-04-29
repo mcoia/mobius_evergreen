@@ -261,12 +261,12 @@ sub padLeft  #line, width, fill char
 		 return;
 	 }
 	 
-	 $log->addLogLine("************Starting Z39.50 Connection -> $DATABASE $query");
+	 #$log->addLogLine("************Starting Z39.50 Connection -> $DATABASE $query");
 	 my $connection = new ZOOM::Connection( $DATABASE, 0, count=>1, preferredRecordSyntax => "USMARC" );
 	 my $results = $connection->search_pqf( qq[$query] );
 	 
 	 my $size = $results->size();
-	 $log->addLogLine("Received $size records");
+	 $log->addLogLine("Received $size records $DATABASE $query");
 	 my $index = 0;
 	 for my $i ( 0 .. $results->size()-1 ) 
 	 {
@@ -276,7 +276,7 @@ sub padLeft  #line, width, fill char
 		 push(@ret,$marc);
 	 }
 	 
-	 $log->addLogLine("************Ending Z39.50 Connection************");
+	 #$log->addLogLine("************Ending Z39.50 Connection************");
 	 $connection->destroy();
 	 undef $connection, $results;
 	 return \@ret;

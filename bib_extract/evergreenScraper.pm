@@ -956,7 +956,7 @@ package evergreenScraper;
 		my $fileName = $mobUtil->chooseNewFileName("/mnt/evergreen/tmp/temp",$title."tempmarc","mrc");		
 		#print "Decided on $fileName \n";	
 		my $marcout = new Loghandler($fileName);
-		$marcout->appendLine($output);
+		$marcout->appendLineRaw($output);
 		push(@newDump, $fileName);
 		my $addedToDisk = scalar keys %standard;
 		$recordsInFiles+=$addedToDisk;
