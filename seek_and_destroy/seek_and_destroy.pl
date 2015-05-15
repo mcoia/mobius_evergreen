@@ -309,23 +309,12 @@ sub reportResults
 	#bib_merge table report
 	$query = "select leadbib,subbib from seekdestroy.bib_merge where job=$jobid";
 	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	my $count=0;	
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $line=@row[0];
-		$line = $mobUtil->insertDataIntoColumn($line,"<",12);
-		$line = $mobUtil->insertDataIntoColumn($line,@row[1],14);
-		$mergedRecords.="$line\r\n";
-		$count++;
-	}
-	if($count>0)
+	@results = @{$dbHandler->query($query)};
+	if($#results>-1)
 	{	
-		$mergedRecords = truncateOutput($mergedRecords,7000);
-		$mergedRecords="$count records were merged - The left number is the winner\r\n".$mergedRecords;
-		$mergedRecords."\r\n\r\n\r\n";
+		my $count = $#results+1;
+		$mergedRecords="$count records were merged\r\n";
+		$mergedRecords."\r\n\r\n";
 		my @header = ("Winning Bib","Deleted/Merged Bib");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Merged_bibs.csv");
@@ -341,7 +330,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,3,"Owning Library",45,"Moved Call Numbers");
+		my $summary = summaryReportResults(\@results,3,"Owning Library",45,"AUTOMATED FIX: Moved Call Numbers");
 		$itemsAssignedRecords="$summary\r\n\r\n\r\n";
 		my @header = ("Destination Bib","Source Bib","Call Number","Owning Library");
 		my @outputs = ([@header],@results);
@@ -359,7 +348,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,1,"Owning Library",45,"Call Numbers FAILED to be moved");
+		my $summary = summaryReportResults(\@results,1,"Owning Library",45,"FAILED: Call Numbers FAILED to be moved");
 		$itemsFailedAssignedRecords="$summary\r\n\r\n\r\n";
 		my @header = ("Source Bib","Call Number Owning Library","Call Number");
 		my @outputs = ([@header],@results);
@@ -378,7 +367,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};	
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,4,"Circulating Library",45,"Copies moved");
+		my $summary = summaryReportResults(\@results,4,"Circulating Library",45,"AUTOMATED FIX: Copies moved");
 		$copyMoveRecords="$summary\r\n\r\n\r\n";
 		my @header = ("Barcode","Source Bib","Destination Bib","Call Number","Circulating Library");
 		my @outputs = ([@header],@results);
@@ -397,7 +386,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};	
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,3,"Owning Library",45,"Un-deduplicated Records");
+		my $summary = summaryReportResults(\@results,3,"Owning Library",45,"AUTOMATED FIX: Un-deduplicated Records");
 		$undedupeRecords="$summary\r\n\r\n\r\n";				
 		my @header = ("Undeleted Bib","Old Leading Bib","Call Number","Owning Library");
 		my @outputs = ([@header],@results);
@@ -440,7 +429,7 @@ sub reportResults
 	
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Audiobook items/bibs mismatched");
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Audiobook items/bibs mismatched");
 		$AudiobookItemsOnNonAudiobookBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
@@ -455,7 +444,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items look like they are Video but they are attached to non Video bibs.");
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Video items attached to non-video bibs");
 		$DVDItemsOnNonDVDBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
@@ -470,7 +459,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Non Video Items attached to Video bibs.");
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Non-video items attached to video bibs");
 		$nonDVDItemsOnDVDBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
@@ -485,7 +474,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items look like they are large print but attached to non large print bibs.");
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Large print items attached to non-large print bibs");
 		$largePrintItemsOnNonLargePrintBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
@@ -500,7 +489,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};	
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items do not look like large print but attached to large print bibs.");
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: non large print items attached to large print bibs");
 		$nonLargePrintItemsOnLargePrintBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
@@ -514,7 +503,7 @@ sub reportResults
 	@results = @{$dbHandler->query($query)};	
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"Items attached to DELETED Bibs.");
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Items attached to DELETED Bibs.");
 		$itemsAttachedToDeletedBibs="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
@@ -1180,8 +1169,7 @@ sub findInvalidMARC
 	if(length($toCSV)>0)
 	{
 		my $csv = new Loghandler($baseTemp."Need_Humans_".$typeName."_bibs.csv");
-		$csv->truncFile("");
-		$csv->addLine($header."\n".$toCSV);
+		$csv->truncFile($header."\n".$toCSV);
 		push(@seekdestroyReportFiles,$baseTemp."Need_Humans_".$typeName."_bibs.csv");
 	}
 	$log->addLine($output);

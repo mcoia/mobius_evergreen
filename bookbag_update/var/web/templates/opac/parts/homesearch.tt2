@@ -1,0 +1,1 @@
+[% INCLUDE "opac/parts/book_carousel.tt2" %]

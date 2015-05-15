@@ -1,0 +1,93 @@
+
+html, body {
+    height: auto !important;
+    min-height: 100%;
+}
+body {
+    color: #333;
+    font-family: "Lucida Grande","Lucida Sans Unicode",Arial,Verdana,sans-serif;
+    font-size: 12px;
+    padding: 0;
+}
+body * {
+    line-height: 1.22em;
+}
+h1, h2, h3, h4, h5, h6 {
+    clear: both;
+    color: #4088b8;
+    font-family: Georgia,"Times New Roman",Times,serif;
+}
+h1 {
+}
+h2 {
+    color: #c8c8c8;
+    margin-top: -25px;
+}
+h3 {
+}
+h4 {
+    color: #333;
+    margin-bottom: -10px;
+}
+p {
+    clear: both;
+    margin: 10px 0;
+}
+ul, ol {
+    background: none repeat scroll 0 0 transparent;
+}
+ul ul {
+    background: none repeat scroll 0 0 transparent;
+    margin-bottom: 20px;
+}
+ul {
+    background: none repeat scroll 0 0 transparent;
+}
+li {
+    background: none repeat scroll 0 0 transparent;
+}
+#wrap {
+    color: #404040;
+    margin: 0;
+}
+a {
+    color: #616161;
+    text-decoration: none;
+}
+a:hover {
+    color: #f70;
+}
+img {
+    border: medium none;
+}
+table {
+    border: 1px solid #c8c8c8;
+    font-size: inherit;
+}
+th {
+    padding: 5px;
+    text-align: left;
+    white-space: nowrap;
+}
+td {
+    padding: 5px;
+    text-align: left;
+    vertical-align: top;
+}
+select, input, textarea {
+    font: 99% "Trebuchet MS",Trebuchet,Tahoma,Verdana,Arial,sans-serif;
+}
+pre, code, tt, dt {
+    font: 100% monospace;
+    margin: 20px 0;
+}
+pre, blockquote {
+    background-color: #f0f0f0;
+    margin: 20px 0;
+    padding: 15px;
+}
+td pre {
+    font: 85% monospace;
+    margin: 5px 0;
+    padding: 5px;
+}

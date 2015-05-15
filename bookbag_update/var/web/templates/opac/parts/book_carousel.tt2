@@ -1,0 +1,38 @@
+<div id="carousels">
+
+</div>
+
+<script language='javascript' src='/opac/common/js/utils.js'> </script>
+<script language='javascript' src='/opac/common/js/config.js'> </script> 
+<script language='javascript' src='/opac/common/js/CGI.js'> </script>
+
+<script language='javascript' src='/opac/common/js/slimtree.js'> </script>
+<script language='javascript' src='/opac/common/js/JSON_v1.js'> </script>
+<script language='javascript' src='/opac/common/js/fmall.js'> </script>
+<script language='javascript' src='/opac/common/js/fmgen.js'> </script>
+<script language='javascript' src='/opac/common/js/opac_utils.js'> </script>
+<script language='javascript' src='/opac/common/js/en/OrgTree.js'> </script>
+<script language='javascript' src='/opac/common/js/init.js'> </script>
+<script language='javascript' src='/opac/common/js/RemoteRequest.js'> </script>
+
+<script src="[% mkurl(ctx.opac_root _ 'opac/skin/default/js/carousel/jquery-1.9.1.min.js').replace('eg\/opac', '')  %]" type="text/javascript"></script>
+<script src="[% mkurl(ctx.opac_root _ 'opac/skin/default/js/carousel/jquery.jcarousel.min.js').replace('eg\/opac', '') %]" type="text/javascript"></script>
+
+<script language='javascript'> 
+jQuery.noConflict(); 
+
+bbags = [153169,153171];
+</script> 
+
+
+
+<div class='hide_me' id='hidden_bb_info'>
+	
+</div>
+
+
+
+<link rel="stylesheet" type="text/css" href="[% mkurl(ctx.opac_root _ 'opac/skin/default/js/carousel/me_carousel.css').replace('eg\/opac', '')  %]" /> 
+
+<script src="[% mkurl(ctx.opac_root _ 'opac/skin/default/js/carousel/bbag_flesh.js').replace('eg\/opac', '')  %]" type="text/javascript"></script>
+<script src="[% mkurl(ctx.opac_root _ 'opac/skin/default/js/carousel/basic.js').replace('eg\/opac', '')  %]" type="text/javascript"></script>

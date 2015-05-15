@@ -261,7 +261,7 @@ sub padLeft  #line, width, fill char
 		 return;
 	 }
 	 
-	 #$log->addLogLine("************Starting Z39.50 Connection -> $DATABASE $query");
+	 $log->addLogLine("************Starting Z39.50 Connection -> $DATABASE $query");
 	 my $connection = new ZOOM::Connection( $DATABASE, 0, count=>1, preferredRecordSyntax => "USMARC" );
 	 my $results = $connection->search_pqf( qq[$query] );
 	 

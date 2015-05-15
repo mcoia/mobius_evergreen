@@ -154,6 +154,7 @@ ahr.cancel_time is null and
 ahr.expire_time is null and
 ahr.capture_time is null and
 ahr.current_copy is null and
+not ahr.frozen and
 ahr.request_time<now()-\$\$200 days\$\$::interval and 
 ahr.id not in(select hold from action.hold_copy_map)
 order by aou.name,ahr.request_time";
@@ -208,6 +209,7 @@ ahr.cancel_time is null and
 ahr.expire_time is null and
 ahr.capture_time is null and
 ahr.current_copy is null and
+not ahr.frozen and
 ahr.target not in(select id from biblio.monograph_part)
 order by aou.name,ahr.request_time";
 $log->addLine($query);
@@ -269,6 +271,7 @@ ahr.cancel_time is null and
 ahr.expire_time is null and
 ahr.capture_time is null and
 ahr.current_copy is null and
+not ahr.frozen and
 ahr.target not in(select id from metabib.metarecord)
 order by aou.name,ahr.request_time";
 $log->addLine($query);
