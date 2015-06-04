@@ -132,6 +132,7 @@ if(! -e $xmlconf)
 sub reportResults
 {
 	my $unfills='';
+	my $longtransit='';
 	my $partholddeletes='';	
 	my $metaholddeletes='';	
 	my @attachments=();
@@ -192,6 +193,77 @@ $log->addLine($query);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Unfillable_holds.csv");
 		push(@attachments,$baseTemp."Unfillable_holds.csv");
 	}
+	
+	my $query = "
+	select ahr.id,acard.barcode,ahr.target,ahr.hold_type,ahr.request_time::date,ac.barcode,ahtc.source_send_time::date,sendinglib.shortname,pickuplib.shortname from 
+action.hold_request ahr,
+actor.usr au,
+actor.org_unit pickuplib,
+actor.org_unit sendinglib,
+actor.card acard,
+asset.copy ac,
+action.hold_transit_copy ahtc
+where
+pickuplib.id=ahr.pickup_lib and
+sendinglib.id=ahtc.source and
+acard.active='t' and
+acard.usr = au.id and
+au.id=ahr.usr and
+ahr.current_copy=ac.id and
+ahtc.hold=ahr.id and
+ahr.fulfillment_time is null and
+ahr.cancel_time is null and
+ahr.expire_time is null and
+not ahr.frozen and
+ahr.capture_time is not null and
+ahtc.dest_recv_time is null and
+not ac.deleted and
+ahtc.source_send_time<now()-\$\$50 days\$\$::interval and
+ac.status_changed_time<now()-\$\$50 days\$\$::interval and
+ac.status=6
+order by pickuplib.shortname,ahr.request_time
+";
+$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};	
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line = @row[0];		
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],11);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],29);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[3],39);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[4],43);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[5],56);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[6],73);		
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[7],85);
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[8],96);
+		$longtransit.="$line\r\n";
+		$count++;
+	}
+	if($count>0)
+	{
+		my $headerForEmail = "Hold ID";
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Patron Barcode",11);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Target",29);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"HT",39);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Rqst Time",43);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Copy Barcode",56);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Send Date",73);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Sndng Lib",85);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Dest Lib",96);
+		
+		$longtransit = $headerForEmail."\r\n$longtransit";
+		$longtransit="Holds in transit for more than 50 days\r\nTotal: $count
+		Hold Type key: T=Title,V=Volume,C=Copy,P=Part,M=Metarecord\r\n$longtransit\r\n\r\n\r\n";
+		$longtransit = truncateOutput($longtransit,7000);
+		my @header = ("Hold ID","Patron Barcode","Target","Hold Type","Request Time","Copy Barcode","Send Date","Sending Library","Destination Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Long_transit_holds.csv");
+		push(@attachments,$baseTemp."Long_transit_holds.csv");
+	}
+	
 	my $query = "
 select ahr.id,acard.barcode,ahr.target,ahr.hold_type,ahr.request_time,aou.name from
 action.hold_request ahr,
@@ -316,7 +388,7 @@ WARNING: These holds have been removed from the database.
 		push(@attachments,$baseTemp."Deleted_broken_metarecord_holds.csv");
 	}
 	
-	$ret.=$unfills.$partholddeletes.$metaholddeletes."\r\n\r\nPlease see attached spreadsheets for full details";	
+	$ret.=$unfills.$longtransit.$partholddeletes.$metaholddeletes."\r\n\r\nPlease see attached spreadsheets for full details";	
 	@returns = ($ret,\@attachments);
 	my @ret = ();
 	return \@returns;
