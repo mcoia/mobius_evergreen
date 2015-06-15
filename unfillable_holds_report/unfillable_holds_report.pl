@@ -218,8 +218,8 @@ not ahr.frozen and
 ahr.capture_time is not null and
 ahtc.dest_recv_time is null and
 not ac.deleted and
-ahtc.source_send_time<now()-\$\$50 days\$\$::interval and
-ac.status_changed_time<now()-\$\$50 days\$\$::interval and
+ahtc.source_send_time<now()-\$\$31 days\$\$::interval and
+ac.status_changed_time<now()-\$\$31 days\$\$::interval and
 ac.status=6
 order by pickuplib.shortname,ahr.request_time
 ";
@@ -255,7 +255,7 @@ $log->addLine($query);
 		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Dest Lib",96);
 		
 		$longtransit = $headerForEmail."\r\n$longtransit";
-		$longtransit="Holds in transit for more than 50 days\r\nTotal: $count
+		$longtransit="Holds in transit for more than 31 days\r\nTotal: $count
 		Hold Type key: T=Title,V=Volume,C=Copy,P=Part,M=Metarecord\r\n$longtransit\r\n\r\n\r\n";
 		$longtransit = truncateOutput($longtransit,7000);
 		my @header = ("Hold ID","Patron Barcode","Target","Hold Type","Request Time","Copy Barcode","Send Date","Sending Library","Destination Library");

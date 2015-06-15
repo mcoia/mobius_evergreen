@@ -54,6 +54,7 @@ if(! -e $xmlconf)
 	our %lib_notices;
 	our %lib_confs;
 	our %system_short_codes;
+	our %branch_names;
 	our %affectedDirectories;
 	our %conf;
   
@@ -82,14 +83,15 @@ if($conf)
 		}
 		if($valid)
 		{	
+			my %dbconf = %{getDBconnects($xmlconf)};
+			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});		
+						
 			if($reindex)
 			{
 				reIndex();
 				exit;
 			}
-			my %dbconf = %{getDBconnects($xmlconf)};
-			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});		
-						
+			
 			my $query = "SELECT ATED.ID,ATED.NAME,
 			(SELECT SHORTNAME FROM ACTOR.ORG_UNIT WHERE ID=ATED.OWNER),DELAY
 			FROM ACTION_TRIGGER.EVENT_DEFINITION ATED
@@ -226,10 +228,21 @@ sub setupIndexForAffectedDirectories
 		#Alphabetical order please
 		@files = sort @files;
 		
+		my $branchName = "";
 		$content.="<ul>\n";
 		foreach(@files)
 		{
 			my $file = $_;
+			# We are relying on the file name to be consistent system_short_code branch_short_code-notice_title-date.pdf
+			my @s = split(/\s/,$file);
+			my @s2 = split(/-/,@s[1]);
+			pop @s2;
+			my $bname = getBranchName(join("-",@s2));			
+			if($branchName ne $bname)
+			{
+				$branchName = $bname;
+				$content.="<h2>$branchName</h2>";
+			}
 			$content.="<li><a href=\"$file\">$file</a></li>\n";
 		}
 		$content.="</ul>\n";
@@ -269,6 +282,27 @@ sub getSystemShortCode
 		return "none-$branchshortcode";		
 	}
 	return $system_short_codes{$branchshortcode};
+}
+
+sub getBranchName
+{
+	my $shortcode = @_[0];
+	my $ret = "Unidentified";
+	if(!$branch_names{$shortcode})
+	{
+		my $query = "SELECT NAME FROM ACTOR.ORG_UNIT WHERE LOWER(SHORTNAME)=LOWER(\$\$$shortcode\$\$)";
+		$log->addLine($query);
+		my @results = @{$dbHandler->query($query)};	
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			$branch_names{$shortcode} = @row[0];
+			return @row[0];
+		}
+		return "Unidentified";
+	}
+	return $branch_names{$shortcode};
 }
 
 sub gatherDB
