@@ -214,7 +214,6 @@ ahtc.hold=ahr.id and
 ahr.fulfillment_time is null and
 ahr.cancel_time is null and
 ahr.expire_time is null and
-not ahr.frozen and
 ahr.capture_time is not null and
 ahtc.dest_recv_time is null and
 not ac.deleted and
@@ -281,7 +280,6 @@ ahr.cancel_time is null and
 ahr.expire_time is null and
 ahr.capture_time is null and
 ahr.current_copy is null and
-not ahr.frozen and
 ahr.target not in(select id from biblio.monograph_part)
 order by aou.name,ahr.request_time";
 $log->addLine($query);
@@ -343,7 +341,6 @@ ahr.cancel_time is null and
 ahr.expire_time is null and
 ahr.capture_time is null and
 ahr.current_copy is null and
-not ahr.frozen and
 ahr.target not in(select id from metabib.metarecord)
 order by aou.name,ahr.request_time";
 $log->addLine($query);

@@ -188,11 +188,11 @@ if(! -e $xmlconf)
 					
 					#tag902s();
 					
-					# findInvalidElectronicMARC();
-					# findInvalidAudioBookMARC();
-					# findInvalidDVDMARC();
-					# findInvalidLargePrintMARC();
-					# findInvalidMusicMARC();
+					findInvalidElectronicMARC();
+					findInvalidAudioBookMARC();
+					findInvalidDVDMARC();
+					findInvalidLargePrintMARC();
+					findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -228,7 +228,7 @@ if(! -e $xmlconf)
 			}
 			updateJob("Executing reports and email","");
 		
-			$jobid=2;
+			#$jobid=2;
 			
 			my @tolist = ($conf{"alwaysemail"});
 			if(length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
@@ -397,6 +397,7 @@ sub reportResults
 	#Possible Electronic
 	$query =  $queries{"possible_electronic"};
 	$query = "select	
+	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
 	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
@@ -413,7 +414,7 @@ sub reportResults
 	{	
 		my $count = $#results+1;
 		$AudiobooksPossbileEAudiobooks="$count Possible Electronic (see attached bibs_possible_electronic.csv)\r\n\r\n";
-		my @header = ("Deleted","BIB ID","OPAC Link","Winning_score","OPAC ICON","Winning Score",
+		my @header = ("902","Deleted","BIB ID","OPAC Link","Winning_score","OPAC ICON","Winning Score",
 		"Winning Score Distance","Second Place Score","Circ Modifiers","Call Numbers","Locations",
 		"Record Quality","record_type","audioformat","videoformat","electronic","audiobook_score",
 		"music_score","playaway_score","largeprint_score","video_score","microfilm_score","microfiche_score");		
@@ -880,6 +881,7 @@ sub updateMARCSetLargePrint
 	my $xmlresult = convertMARCtoXML($marcob);
 	$xmlresult = fingerprintScriptMARC($xmlresult,'L a r g e P r i n t');
 	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'a');	
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,8,'m');
 	updateMARC($xmlresult,$bibid,'false','Correcting for Large Print in the leader/007 rem 008_23');
 }
 
@@ -1098,7 +1100,8 @@ sub findInvalidMARC
 	# Lets weed them out into bibs that we want to convert	
 	my $output='';
 	my $toCSV = "";
-	my $query = "select	
+	my $query = "select 
+	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
 	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
@@ -1118,9 +1121,9 @@ sub findInvalidMARC
 	{
 		my @row = @{$_};
 		my $id = @row[1];
-		my $marc = @row[23];
+		my $marc = @row[24];
 		my @line=@{$_};
-		@line[23]='';
+		@line[24]='';
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
 		if(!$dryrun)
@@ -1129,7 +1132,7 @@ sub findInvalidMARC
 		}
 	}
 	
-	my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	my $header = "\"902\",\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
 	if(length($toCSV)>0)
 	{
 		my $csv = new Loghandler($baseTemp."Converted_".$typeName."_bibs.csv");
@@ -1142,6 +1145,7 @@ sub findInvalidMARC
 	@convertList=();
 	
 	my $query = "select	
+	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
 	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
@@ -1165,7 +1169,7 @@ sub findInvalidMARC
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
 	}	
-	my $header = "\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	my $header = "\"902\",\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
 	if(length($toCSV)>0)
 	{
 		my $csv = new Loghandler($baseTemp."Need_Humans_".$typeName."_bibs.csv");

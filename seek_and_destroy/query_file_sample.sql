@@ -535,7 +535,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score where (lower(circ_mods)~$$videos$$ or lower(circ_mods)~$$vhs$$) and winning_score_score=1 )
  and record not in ( select record from seekdestroy.bib_score where lower(call_labels)!~$$music$$ and lower(call_labels)!~$$ cd$$ and lower(call_labels)!~$$^cd$$ and lower(call_labels)!~$$audio$$ and lower(copy_locations)!~$$music$$ and lower(copy_locations)!~$$ cd$$ and lower(copy_locations)!~$$^cd$$ and lower(copy_locations)!~$$audio$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score<5)
  and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
- and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~'dvd' or lower(circ_mods)~'dvd' or lower(copy_locations)~'dvd'))
+ and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~$$dvd$$ or lower(circ_mods)~$$dvd$$ or lower(copy_locations)~$$dvd$$))
  and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$noncirculating$$ )
  and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
  and winning_score = $$music_score$$
@@ -565,7 +565,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score where (lower(circ_mods)~$$videos$$ or lower(circ_mods)~$$vhs$$) and winning_score_score=1 )
  and record not in ( select record from seekdestroy.bib_score where lower(call_labels)!~$$music$$ and lower(call_labels)!~$$ cd$$ and lower(call_labels)!~$$^cd$$ and lower(call_labels)!~$$audio$$ and lower(copy_locations)!~$$music$$ and lower(copy_locations)!~$$ cd$$ and lower(copy_locations)!~$$^cd$$ and lower(copy_locations)!~$$audio$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score<5)
  and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
- and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~'dvd' or lower(circ_mods)~'dvd' or lower(copy_locations)~'dvd'))
+ and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~$dvd$ or lower(circ_mods)~$dvd$ or lower(copy_locations)~$dvd$))
  and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$noncirculating$$ )
  and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
  and winning_score = $$music_score$$

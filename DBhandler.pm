@@ -29,7 +29,7 @@
 
 package DBhandler;
  use DBD::Pg;
- use DBD::Firebird;
+ #use DBD::Firebird;
  use Loghandler;
  use strict; 
  #use Unicode::Normalize;
