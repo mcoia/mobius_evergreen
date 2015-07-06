@@ -188,11 +188,11 @@ if(! -e $xmlconf)
 					
 					#tag902s();
 					
-					findInvalidElectronicMARC();
-					findInvalidAudioBookMARC();
-					findInvalidDVDMARC();
-					findInvalidLargePrintMARC();
-					findInvalidMusicMARC();
+					# findInvalidElectronicMARC();
+					 findInvalidAudioBookMARC();
+					# findInvalidDVDMARC();
+					# findInvalidLargePrintMARC();
+					# findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -221,6 +221,7 @@ if(! -e $xmlconf)
 					 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
 					 # (select record from 
 					 # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
+					 updateScoreWithQuery("select id,marc from biblio.record_entry where id=1006978");
 					
 					#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 					#updateScoreCache();
@@ -231,7 +232,7 @@ if(! -e $xmlconf)
 			#$jobid=2;
 			
 			my @tolist = ($conf{"alwaysemail"});
-			if(length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
+			if(0)#length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
 			{
 				my $email = new email($conf{"fromemail"},\@tolist,$valid,1,\%conf);
 				my @reports = @{reportResults()};
@@ -254,7 +255,7 @@ if(! -e $xmlconf)
 			{
 				my @tolist = ($conf{"alwaysemail"});
 				my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
-				$email->send("Evergreen Utility - Catalog Audit Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
+				#$email->send("Evergreen Utility - Catalog Audit Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
 			}
 			updateJob("Completed","");
 		}
