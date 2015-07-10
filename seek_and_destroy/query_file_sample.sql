@@ -66,7 +66,9 @@ select record
  and
  opac_icon !=$$evideo$$
  and
- winning_score_score>6;
+ winning_score_score>6
+ and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+ ;
  
 # 
 # Electronic Need Humans
@@ -74,6 +76,21 @@ select record
 non_electronic_bib_not_convert_to_electronic~~
 select record
  from seekdestroy.bib_score sbs where 
+ record not in(
+ select record
+ from seekdestroy.bib_score sbs where 
+ winning_score=$$electricScore$$ 
+ and
+ opac_icon !=$$eaudio$$
+ and
+ opac_icon !=$$ebook$$
+ and
+ opac_icon !=$$evideo$$
+ and
+ winning_score_score>6
+ and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
+ )
+ and
  winning_score~$$electricScore$$ 
  and
  winning_score_score<7
@@ -85,6 +102,7 @@ select record
  opac_icon !=$$evideo$$
  and
  opac_icon !=$$ebook$$
+ and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 ;
  
  
@@ -146,6 +164,12 @@ and record not in
 	select record from seekdestroy.bib_score where 	
 	opac_icon = $$kit$$
 )
+and record not in
+(
+	select record from seekdestroy.bib_score where 	
+	opac_icon = $$casaudiobook$$
+)
+and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
 and not
 (	
 	(
@@ -225,6 +249,12 @@ and record not in
 	select record from seekdestroy.bib_score where 	
 	opac_icon = $$kit$$
 )
+and record not in
+(
+	select record from seekdestroy.bib_score where 	
+	opac_icon = $$casaudiobook$$
+)
+and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
 and not
 (	
 	(
@@ -252,6 +282,10 @@ and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$probl
 and winning_score ~ $$audioBookScore$$
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 and winning_score_score!=0
+and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$kit$$ and circ_mods~$$Kit$$ and record_type='p')
+and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$eaudio$$ and audioformat~$$z$$ and record_type='i')
+and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$lpbook$$ and circ_mods~$$Books$$ and record_type='a' )
+and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$playaway$$ and circ_mods~$$AudioBooks$$ and record_type='i' and audioformat in($$z$$,$$u$$) )
 ;
 
 #

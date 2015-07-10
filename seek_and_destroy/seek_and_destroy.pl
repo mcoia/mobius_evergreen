@@ -186,13 +186,15 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
+					#$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 					
-					# findInvalidElectronicMARC();
-					 findInvalidAudioBookMARC();
-					# findInvalidDVDMARC();
-					# findInvalidLargePrintMARC();
-					# findInvalidMusicMARC();
+					findInvalidElectronicMARC();
+					findInvalidAudioBookMARC();
+					findInvalidDVDMARC();
+					findInvalidLargePrintMARC();
+					findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -208,20 +210,17 @@ if(! -e $xmlconf)
 					#print "regular cache\n";
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
 					# and lower(marc) ~ \$\$abridge\$\$");
-					#updateScoreWithQuery("select id,marc from biblio.record_entry where id=670986");
 					
 					 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
 					 # (select record from 
-					 # SEEKDESTROY.problem_bibs where problem ~ \$\$MARC with music phrases but incomplete marc\$\$)
-					 # and
-					 # lower(marc) ~ \$\$<datafield tag=\"505\"\$\$
+					 # SEEKDESTROY.bib_score where score_time < now() - '5 days'::interval) and not deleted
 					 # ");
 					 # exit;
 					
 					 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
 					 # (select record from 
 					 # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
-					 updateScoreWithQuery("select id,marc from biblio.record_entry where id=1006978");
+					 # updateScoreWithQuery("select id,marc from biblio.record_entry where id=243577");
 					
 					#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
 					#updateScoreCache();
@@ -1206,8 +1205,6 @@ sub updateProblemBibs
 	}
 }
 
-
-
 sub isScored
 {	
 	my $bibid = @_[0];
@@ -1244,7 +1241,8 @@ sub updateScoreCache
 	foreach(@newIDs)
 	{
 		my @thisone = @{$_};
-		my $bibid = @thisone[0];		
+		my $bibid = @thisone[0];
+		#$log->addLine("Adding Score ".$bibid);
 		my $marc = @thisone[1];
 		#$log->addLine("bibid = $bibid");
 		#print "bibid = $bibid";
@@ -1310,7 +1308,7 @@ sub updateScoreCache
 		$fingerprints{videoformat}
 		);		
 		$dbHandler->updateWithParameters($query,\@values);
-		updateBibCircsScore($bibid,$dbHandler);
+		updateBibCircsScore($bibid);
 		updateBibCallLabelsScore($bibid);
 		updateBibCopyLocationsScore($bibid);		
 	}
@@ -1318,6 +1316,7 @@ sub updateScoreCache
 	{
 		my @thisone = @{$_};
 		my $bibid = @thisone[0];
+		$log->addLine("Updating Score ".@thisone[0]);
 		my $marc = @thisone[1];
 		my $bibscoreid = @thisone[2];
 		my $oldscore = @thisone[3];
@@ -1414,6 +1413,8 @@ sub updateBibCircsScore
 	}
 	$query = "UPDATE SEEKDESTROY.BIB_SCORE SET OPAC_ICON=\$1,CIRC_MODS=\$2 WHERE RECORD=$bibid";
 	my @values = ($opacicons,$allcircs);
+	#$log->addLine($query);
+	#$log->addLine("$opacicons $allcircs");	
 	$dbHandler->updateWithParameters($query,\@values);
 	
 }
@@ -2181,7 +2182,7 @@ sub findPossibleDups
 		and not deleted
 		and fingerprint != \$\$\$\$
 		group by fingerprint
-		limit 10;
+		limit 5000;
 		";
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
@@ -2217,7 +2218,7 @@ updateJob("Processing","findPossibleDups  looping results");
 	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
 	updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
 	print $dbHandler->update($q);	
-	updateJob("Processing","findPossibleDups updating scorecache selectivly");
+	updateJob("Processing","findPossibleDups updating scorecache selectively");
 	updateScoreCache(\@st);
 	
 	
@@ -2228,7 +2229,8 @@ updateJob("Processing","findPossibleDups  looping results");
 		and record not in(select id from biblio.record_entry where deleted)
 		group by sd_fingerprint having count(*) > 1) as a 
 		)
-		--and record not in(select id from biblio.record_entry where deleted)
+		and record not in(select id from biblio.record_entry where deleted)
+		-- and score_time > now()- \$\$5 hours\$\$::interval
 		order by sd_fingerprint,score desc, record
 		";
 updateJob("Processing","findPossibleDups  $query");
@@ -2254,7 +2256,7 @@ updateJob("Processing","findPossibleDups  $query");
 		}
 		else
 		{
-			my $hold = findHoldsOnBib($record, $dbHandler);
+			my $hold = 0;#findHoldsOnBib($record, $dbHandler);
 			my $q = "INSERT INTO SEEKDESTROY.BIB_MATCH(BIB1,BIB2,MATCH_REASON,HAS_HOLDS,JOB)
 			VALUES(\$1,\$2,\$3,\$4,\$5)";
 			my @values = ($master_record,$record,"Duplicate SD Fingerprint",$hold,$jobid);
@@ -2273,6 +2275,28 @@ updateJob("Processing","findPossibleDups  $query");
 			}
 		}
 	}
+	$query = "
+	select bib1,bib2, 
+	\$\$$domainname"."eg/opac/record/\$\$||bib1||\$\$?expand=marchtml\$\$ \"leadlink\",
+\$\$$domainname"."eg/opac/record/\$\$||bib2||\$\$?expand=marchtml\$\$ \"sublink\",
+has_holds,
+(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=sbm.bib1) \"leadicon\",
+(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=sbm.bib2) \"subicon\",
+(select value from metabib.title_field_entry where source=sbm.bib1 limit 1) \"title\"
+from SEEKDESTROY.BIB_MATCH sbm where 
+job=$jobid and
+bib1 not in(select id from biblio.record_entry where deleted)
+order by bib1,bib2
+";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $out = join(';',@row);
+		$log->addLine($out);
+	}
+	
 	$log->addLine(Dumper(\%mergeMap));
 }
 
@@ -2281,10 +2305,21 @@ sub findHoldsOnBib
 	my $bibid=@_[0];	
 	my $hold = 0;
 	my $query = "select id from action.hold_request ahr where 
-	ahr.target=$bibid and
-	ahr.hold_type=\$\$T\$\$ and
-	ahr.capture_time is null and
-	ahr.cancel_time is null";
+	(
+		ahr.id in(select hold from action.hold_copy_map where target_copy in(select id from asset.copy where call_number in(select id from asset.call_number where record=$bibid))) and
+		ahr.capture_time is null and
+		ahr.fulfillment_time is null and
+		ahr.cancel_time is null
+	)
+	or
+	(
+		ahr.capture_time is null and
+		ahr.cancel_time is null and
+		ahr.fulfillment_time is null and
+		ahr.hold_type=\$\$T\$\$ and
+		ahr.target=$bibid
+	)
+	";
 	updateJob("Processing","findHolds $query");
 	my @results = @{$dbHandler->query($query)};
 	if($#results != -1)
@@ -3514,7 +3549,9 @@ sub getFingerprints
 	my %fingerprints;
     $fingerprints{baseline} = join("\t", 
 	  $marc{item_form}, $marc{date1}, $marc{record_type},
-	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '');
+	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '',
+	  $marc{audioformat}, $marc{videoformat}
+	  );
 	$fingerprints{item_form} = $marc{item_form};
 	$fingerprints{date1} = $marc{date1};
 	$fingerprints{record_type} = $marc{record_type};
