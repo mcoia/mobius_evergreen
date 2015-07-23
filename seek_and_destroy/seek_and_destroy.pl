@@ -186,15 +186,15 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					#$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
 					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 					
-					findInvalidElectronicMARC();
-					findInvalidAudioBookMARC();
-					findInvalidDVDMARC();
-					findInvalidLargePrintMARC();
-					findInvalidMusicMARC();
+					# findInvalidElectronicMARC();
+					# findInvalidAudioBookMARC();
+					# findInvalidDVDMARC();
+					# findInvalidLargePrintMARC();
+					# findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -204,10 +204,18 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-					#findPossibleDups();
+					findPossibleDups();
 					
 					
 					#print "regular cache\n";
+					
+					# updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from 
+# (
+# select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
+# union
+# select distinct bib2 as \"bibid\" from SEEKDESTROY.BIB_MATCH
+# ) as a");
+ 
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
 					# and lower(marc) ~ \$\$abridge\$\$");
 					
@@ -1280,7 +1288,8 @@ sub updateScoreCache
 		sd_fingerprint,
 		audioformat,
 		videoformat,
-		eg_fingerprint) 
+		eg_fingerprint,
+		sd_alt_fingerprint) 
 		VALUES($bibid,$score,
 		$allscores{'electricScore'},
 		$allscores{'audioBookScore'},
@@ -1294,7 +1303,7 @@ sub updateScoreCache
 		$allscores{'winning_score_score'},
 		$allscores{'winning_score_distance'},
 		'$allscores{'second_place_score'}',
-		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
+		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),\$10
 		)";		
 		my @values = (
 		$fingerprints{item_form},
@@ -1305,8 +1314,11 @@ sub updateScoreCache
 		$fingerprints{author},
 		$fingerprints{baseline},
 		$fingerprints{audioformat},
-		$fingerprints{videoformat}
-		);		
+		$fingerprints{videoformat},
+		$fingerprints{alternate}
+		);
+		#$log->addLine($query);
+		#$log->addLine(Dumper(\@values));
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircsScore($bibid);
 		updateBibCallLabelsScore($bibid);
@@ -1349,7 +1361,8 @@ sub updateScoreCache
 		sd_fingerprint = \$7,
 		audioformat = \$8,
 		audioformat = \$9,
-		eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid)
+		eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),
+		sd_alt_fingerprint = \$10
 		WHERE ID=$bibscoreid";
 		my @values = (
 		$fingerprints{item_form},
@@ -1360,7 +1373,8 @@ sub updateScoreCache
 		$fingerprints{author},
 		$fingerprints{baseline},
 		$fingerprints{audioformat},
-		$fingerprints{videoformat}
+		$fingerprints{videoformat},
+		$fingerprints{alternate}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircsScore($bibid);
@@ -2223,15 +2237,14 @@ updateJob("Processing","findPossibleDups  looping results");
 	
 	
 	my $query="
-			select record,sd_fingerprint,score from seekdestroy.bib_score sbs2 where sd_fingerprint in(
-		select sd_fingerprint from(
-		select sd_fingerprint,count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
+			select record,sd_alt_fingerprint,score from seekdestroy.bib_score sbs2 where sd_alt_fingerprint||opac_icon in(
+		select idp from(
+		select sd_alt_fingerprint||opac_icon \"idp\",count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_alt_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
 		and record not in(select id from biblio.record_entry where deleted)
-		group by sd_fingerprint having count(*) > 1) as a 
+		group by sd_alt_fingerprint||opac_icon having count(*) > 1) as a 
 		)
 		and record not in(select id from biblio.record_entry where deleted)
-		-- and score_time > now()- \$\$5 hours\$\$::interval
-		order by sd_fingerprint,score desc, record
+		order by sd_alt_fingerprint,score desc, record
 		";
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
@@ -3552,6 +3565,11 @@ sub getFingerprints
 	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '',
 	  $marc{audioformat}, $marc{videoformat}
 	  );
+	 $fingerprints{alternate} = join("\t", 
+	  $marc{item_form}, $marc{date1}, $marc{record_type},
+	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '',
+	  $marc{audioformat}, $marc{videoformat}, $marc{pubyear}, $marc{normalizedisbns}
+	  );
 	$fingerprints{item_form} = $marc{item_form};
 	$fingerprints{date1} = $marc{date1};
 	$fingerprints{record_type} = $marc{record_type};
@@ -3586,18 +3604,21 @@ sub populate_marc {
         $marc{date1} = substr($marc{tag008},7,4) if ($marc{tag008});
         $marc{date2} = substr($marc{tag008},11,4) if ($marc{tag008}); # UNUSED
     }
-    unless ($marc{date1} and $marc{date1} =~ /\d{4}/) {
-        my $my_260 = $record->field('260');
-        if ($my_260 and $my_260->subfield('c')) {
-            my $date1 = $my_260->subfield('c');
-            $date1 =~ s/\D//g;
-            if (defined $date1 and $date1 =~ /\d{4}/) {
-                $marc{date1} = $date1;
-                $marc{fudgedate} = 1;
+	my $my_260 = $record->field('260');
+	$marc{pubyear} = '';
+	if ($my_260 and $my_260->subfield('c')) {
+		my $date1 = $my_260->subfield('c');
+		$date1 =~ s/\D//g;
+		if (defined $date1 and $date1 =~ /\d{4}/) {
+			unless ($marc{date1} and $marc{date1} =~ /\d{4}/) {
+				$marc{date1} = $date1;
+				$marc{fudgedate} = 1;
  #               print XF ">> using 260c as date1 at rec $count\n";
-            }
-        }
-    }	
+			}
+			$marc{pubyear} = $date1;
+		}
+	}
+
 	$marc{tag006} = $my_006->as_string() if ($my_006);
 	$marc{tag007} = \@my_007 if (@my_007);
 	$marc{audioformat}='';
@@ -3629,12 +3650,12 @@ sub populate_marc {
 	}	
 
     # isbns
-    my @isbns = $record->field('020') if $record->field('020');
-    push @isbns, $record->field('024') if $record->field('024');
-    for my $f ( @isbns ) {
-        push @{ $marc{isbns} }, $1 if ( defined $f->subfield('a') and
-                                        $f->subfield('a')=~/(\S+)/ );
-    }
+    # my @isbns = $record->field('020') if $record->field('020');
+    # push @isbns, $record->field('024') if $record->field('024');
+    # for my $f ( @isbns ) {
+        # push @{ $marc{isbns} }, $1 if ( defined $f->subfield('a') and
+                                        # $f->subfield('a')=~/(\S+)/ );
+    # }
 
     # author
     for my $rec_field (100, 110, 111) {
@@ -3678,11 +3699,45 @@ sub populate_marc {
       if $record->field('250');
     if ($record->field('260')) {
         $marc{publisher} = $record->field('260')->subfield('b');
-        $marc{pubyear} = $record->field('260')->subfield('c');
-        $marc{pubyear} =
-          (defined $marc{pubyear} and $marc{pubyear} =~ /(\d{4})/) ? $1 : '';
+        # $marc{pubyear} = $record->field('260')->subfield('c');
+        # $marc{pubyear} =
+          # (defined $marc{pubyear} and $marc{pubyear} =~ /(\d{4})/) ? $1 : '';
     }
-	#print Dumper(%marc);
+	
+	$marc{normalizedisbns}='';
+	my @isbns = $record->subfield('020','a');
+	#$log->addLine(Dumper(\@isbns));
+	my %finalISBNs = ();
+	my $l = 0;
+	foreach(@isbns)
+	{
+		my $thisone = $_;
+		$thisone =~ s/\D*([\d]+).*/$1/;
+		#remove the last digit
+		$thisone = substr($thisone,0,-1);
+		if(length($thisone)>10 && substr($thisone,0,3) eq '978')
+		{
+			#remove the beginning 978
+			$thisone = substr($thisone,3);
+		}
+		@isbns[$l] = $thisone;
+		$l++;
+	}
+	@isbns = sort(@isbns);
+	foreach(@isbns)
+	{
+		if(! $finalISBNs{$_})
+		{
+			$finalISBNs{$_}=1;
+		}
+	}
+	while ((my $internal, my $mvalue ) = each(%finalISBNs))
+	{
+		$marc{normalizedisbns}.=$internal.' ';
+	}
+	$marc{normalizedisbns} = substr($marc{normalizedisbns},0,-1);
+	#$log->addLine(Dumper($marc{normalizedisbns}));
+	#$log->addLine(Dumper(\%marc));
     return \%marc;
 }
 
@@ -3776,7 +3831,8 @@ sub setupSchema
 		call_labels text DEFAULT ''::text,
 		copy_locations text DEFAULT ''::text,
 		opac_icon text DEFAULT ''::text,
-		eg_fingerprint text
+		eg_fingerprint text,
+		sd_alt_fingerprint text
 		)";		
 		$dbHandler->update($query);		
 		$query = "CREATE TABLE seekdestroy.bib_merge(
