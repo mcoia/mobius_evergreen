@@ -298,6 +298,7 @@ $log->addLine($query);
 		$partholddeletes.="$line\r\n";
 		$count++;
 		$query = "DELETE FROM ACTION.HOLD_REQUEST WHERE ID=\$1";
+		$log->addLine($query.@row[0]);
 		my @values = (@row[0]);
 		$dbHandler->updateWithParameters($query,\@values);
 	}
@@ -359,6 +360,7 @@ $log->addLine($query);
 		$metaholddeletes.="$line\r\n";
 		$count++;
 		$query = "DELETE FROM ACTION.HOLD_REQUEST WHERE ID=\$1";
+		$log->addLine($query.@row[0]);
 		my @values = (@row[0]);
 		$dbHandler->updateWithParameters($query,\@values);
 	}

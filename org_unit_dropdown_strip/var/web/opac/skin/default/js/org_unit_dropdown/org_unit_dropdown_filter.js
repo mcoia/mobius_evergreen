@@ -74,6 +74,7 @@ function stripDropDown(visualFeedback)
 	}
 	jQuery("#search_org_selector").find('option:selected').removeAttr('selected');
 	jQuery("#search_org_selector").find('option[value="'+cookie+'"]').attr('selected',true);
+	jQuery("#search_org_selector").find('option[value="'+cookie+'"]').prop('selected',true);
 	jQuery('#showmoredropdowndiv').show();
 	jQuery('#showlessdropdowndiv').hide();
 	if(visualFeedback==1)
