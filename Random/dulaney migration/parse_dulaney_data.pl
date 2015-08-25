@@ -57,11 +57,9 @@ my $itemsWithDates = "/mnt/evergreen/migration/dulaney/data/items_dates.csv";
 			my $query = "CREATE SCHEMA m_dm";
 			#$dbHandler->update($query);
 			
-			#removedDeletedBibs($allMarc,"/mnt/evergreen/migration/dulaney/data/AllRecords_without_deleted.mrc");
-			
 			#parsePatrons($patrons,$dbHandler);
-			parseHoldingDates($itemsWithDates,$dbHandler);
-			#parseTransactions($transactions,$conf{"finesout"},$conf{"loanssout"},$conf{"holdsout"});
+			#parseHoldingDates($itemsWithDates,$dbHandler);
+			parseTransactions($transactions,$conf{"finesout"},$conf{"loanssout"},$conf{"holdsout"});
 			#parseDonationNotes($allMarc,$dbHandler);
 			#extractItems($allMarc,$dbHandler);
 			#generateFieldCount($allMarc);
@@ -109,9 +107,9 @@ my $itemsWithDates = "/mnt/evergreen/migration/dulaney/data/items_dates.csv";
 	$loansOut->deleteFile();
 	$holdsOut->deleteFile();
 	my $header = "CopyID,PatronID,TransDate,DateDue";
-	$loansOut->addLine($header);
+	#$loansOut->addLine($header);
 	$header.=",l_fines";
-	$finesOut->addLine($header);
+	#$finesOut->addLine($header);
 	my @con = @{$file->readFile()};
 	my $lines = $#con;
 	my $count=0;
@@ -124,8 +122,8 @@ my $itemsWithDates = "/mnt/evergreen/migration/dulaney/data/items_dates.csv";
 			@s = split(/~/,@s[1]);
 			if($#s>8)
 			{
-				my $itembcode = padcode(@s[5],"1","35712");
-				my $patronbcode = padcode(@s[2],"0","25712");
+				my $itembcode = padcode(@s[5],"0","35712");
+				my $patronbcode = @s[2];
 				my $date1 = @s[6];
 				my $date2 = @s[7];
 				my $fine = @s[8];
@@ -138,7 +136,7 @@ my $itemsWithDates = "/mnt/evergreen/migration/dulaney/data/items_dates.csv";
 				$month = substr($date2,4,2);
 				$day = substr($date2,6,2);
 				$date2 = "$month/$day/$year";
-				my $finalLine = "$itembcode,$patronbcode,$date1,$date2";
+				my $finalLine = "$itembcode\t$patronbcode\t$date1\t$date2";
 				#print $finalLine."\n";
 				if($type eq 'Loan' || $type eq 'Renewal' )
 				{
@@ -150,7 +148,7 @@ my $itemsWithDates = "/mnt/evergreen/migration/dulaney/data/items_dates.csv";
 				}
 				elsif($type eq 'Fine')
 				{
-					$finesOut->addLine($finalLine.",$fine");
+					$finesOut->addLine($finalLine."\t$fine");
 				}
 			}
 		}
