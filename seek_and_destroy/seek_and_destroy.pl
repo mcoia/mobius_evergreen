@@ -209,13 +209,21 @@ if(! -e $xmlconf)
 					
 					#print "regular cache\n";
 					
+					
+# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(
+# 11981,
+# 192740,
+# 706748,
+# 881384,
+# 1094288,
+# 1227200
+# )");					
 					# updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from 
 # (
 # select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
 # union
 # select distinct bib2 as \"bibid\" from SEEKDESTROY.BIB_MATCH
 # ) as a");
- 
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
 					# and lower(marc) ~ \$\$abridge\$\$");
 					
@@ -2239,7 +2247,7 @@ updateJob("Processing","findPossibleDups  looping results");
 	my $query="
 			select record,sd_alt_fingerprint,score from seekdestroy.bib_score sbs2 where sd_alt_fingerprint||opac_icon in(
 		select idp from(
-		select sd_alt_fingerprint||opac_icon \"idp\",count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_alt_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
+		select sd_alt_fingerprint||opac_icon \"idp\",count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
 		and record not in(select id from biblio.record_entry where deleted)
 		group by sd_alt_fingerprint||opac_icon having count(*) > 1) as a 
 		)
@@ -2308,9 +2316,348 @@ order by bib1,bib2
 		my @row = @{$row};
 		my $out = join(';',@row);
 		$log->addLine($out);
+		# Now let's merge!
+		if(!$dryrun)
+		{
+			
+		}
+	}
+	$log->addLine(Dumper(\%mergeMap));
+	
+	
+}
+
+sub mergeBibsWithMetarecordHoldsInMind
+{
+	my $leadbib = @_[0];
+	my $subbib = @_[1];
+	my $reason = @_[2];
+	my @metarecords = ();
+	my @metarecordsinthegroup = ();
+	my $leadmarc = 0;
+	my $submarc = 0;
+	
+	# Get the metarecord ID(s) for the leadbib
+	my $query = "select metarecord from metabib.metarecord_source_map where source = $subbib";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		push(@metarecords,@row[0]);
 	}
 	
-	$log->addLine(Dumper(\%mergeMap));
+	# Gather up all the other bibs in the metarecord group
+	my $query = "select source from metabib.metarecord_source_map where metarecord = $metarecord";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		if(@row[0] != $leadbib && @row[0] != $subbib)
+		{
+			push(@metarecordsinthegroup, @row[0]);
+		}
+	}
+	
+	# READ MARC FOR THE TWO BIBS
+	my $query = "select id,marc from biblio.record_entry where id in($subbib,$leadbib)";
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		if(@row[0] == $leadbib)
+		{
+			$leadmarc = @row[1];
+			$leadmarc =~ s/(<leader>.........)./${1}a/;
+			$leadmarc = MARC::Record->new_from_xml($leadmarc);
+		}
+		if(@row[0] == $subbib)
+		{
+			$submarc = @row[1];
+			$submarc =~ s/(<leader>.........)./${1}a/;
+			$submarc = MARC::Record->new_from_xml($submarc);
+		}
+	}
+	
+	#Merge the 856s	
+	$leadmarc = mergeMARC856($leadmarc,$submarc);
+	$leadmarc = convertMARCtoXML($leadmarc);
+	
+	moveAllCallNumbers($subbib,$leadbib,$reason);
+	
+	
+	
+}
+
+sub cleanMetaRecords
+{
+
+
+	# Delete any references to deleted bibs in the metarecord source map (related holds will be fixed later)
+	my $query = "select metarecord,source from metabib.metarecord_source_map where source in(select id from biblio.record_entry where deleted)";
+	updateJob("Processing",$query);	
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $metarecord = @row[0];
+		my $source = @row[1];
+		recordMetaRecordChange($metarecord,"null","null",$source,"null","remove deleted bib from source map");
+	}
+	# Delete them
+	my $query = "delete from from metabib.metarecord_source_map where source in(select id from biblio.record_entry where deleted)";
+	updateJob("Processing",$query);
+	$dbHandler->update($query);
+	
+	# Update hold targets where they are pointing to an orphaned metarecord
+	# AKA - nothing in metabib.metarecord_source_map
+	
+	my $query = "
+	select mmsm.metarecord \"dest\",a.master_record,a.id \"source\",mm.fingerprint,ahr.id from 
+metabib.metarecord_source_map mmsm,
+(select master_record,id from metabib.metarecord where id not in(select metarecord from metabib.metarecord_source_map)) as a,
+metabib.metarecord mm,
+action.hold_request ahr
+where
+ahr.target=a.id and
+ahr.hold_type='M' and
+mm.id=mmsm.metarecord and
+a.master_record=mmsm.source
+";
+
+updateJob("Processing",$query);	
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $dest = @row[0];
+		my $source = @row[2];
+		my $fingerprint = @row[3];
+		my $holdid = @row[4];
+		recordMetaRecordChange($source,$dest,$fingerprint,"null",$holdid,"Hold pointed to orphaned metarecord");
+		$query = "update action.hold_request set target=$dest where id=$holdid and target=$source";
+updateJob("Processing",$query);	
+		$dbHandler->update($query);
+	}
+	
+	# Record all of the ophans
+	my $query = "select id,fingerprint,master_record from metabib.metarecord where id not in(select metarecord from metabib.metarecord_source_map)";
+	updateJob("Processing",$query);	
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $metarecord = @row[0];
+		my $fingerprint = @row[1];
+		my $bibid = @row[2];
+		recordMetaRecordChange($metarecord,"null",$fingerprint,$bibid,"null","orphaned metarecord removed");
+	}
+	
+	# Now remove the orphans
+	my $query = "delete from metabib.metarecord where id not in(select metarecord from metabib.metarecord_source_map)";
+updateJob("Processing",$query);	
+	$dbHandler->update($query);
+	
+	# create metarecords for bibs that do not have one
+	my $query = "
+	 update biblio.record_entry set id=id where id in
+	 (
+	select id from biblio.record_entry where not deleted and fingerprint not in(select fingerprint from metabib.metarecord)
+	 )
+	 and not deleted
+	";	
+updateJob("Processing",$query);
+	$dbHandler->update($query);
+	
+	
+	# Merge metarecords with matching fingerprints and move affected metarecord holds
+	my $query = "
+	 select mmsm.metarecord,mmsm.source,mm.fingerprint,mmsm.id from metabib.metarecord_source_map mmsm, metabib.metarecord mm where 
+ mmsm.metarecord=mm.id and
+ mm.id in(select id from metabib.metarecord where fingerprint in(
+select fingerprint from (
+select fingerprint,count(*) from metabib.metarecord group by fingerprint having count(*) > 1
+) as a
+))
+order by mm.fingerprint
+";
+	updateJob("Processing",$query);	
+	my @results = @{$dbHandler->query($query)};	
+	my $currentfingerprint='';
+	my $currentmetarecord='';
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $metarecord = @row[0];
+		my $bibid = @row[1];
+		my $fingerprint = @row[2];
+		my $mmsmid = @row[3];
+		# The fingerprint didnt change but the metarecord did, so we need to move this bib to the previous metarecord source map
+		if( ($currentfingerprint == $fingerprint) && ($metarecord != $currentmetarecord) )
+		{
+			$query = "select id from action.hold_request where target = $metarecord and hold_type='M'";
+			updateJob("Processing",$query);	
+			my @results2 = @{$dbHandler->query($query)};	
+			foreach(@results2)
+			{
+				my $row = $_;
+				my @row = @{$row};
+				my $holdid = @row[0];				
+				recordMetaRecordChange($metarecord,$currentmetarecord,$fingerprint,$bibid,$holdid,"Merging duplicated metarecord fingerprints");
+				$query = "update action.hold_request set target = $currentmetarecord where id = $holdid and target = $metarecord";
+				updateJob("Processing",$query);
+				$dbHandler->update($query);
+			}
+			
+			recordMetaRecordChange($metarecord,$currentmetarecord,$fingerprint,$bibid,"null","Merging duplicated metarecord fingerprints $mmsmid");
+			$query = "update metabib.metarecord_source_map set metarecord = $currentmetarecord where id = $mmsmid and metarecord = $metarecord";
+			updateJob("Processing",$query);
+			$dbHandler->update($query);
+			# lets see if there are anymore mapping rows for that metarecord, if not, time to delete the metabib.metarecord row
+			# we dont want to leave another orphan metabib.metarecord
+			$query = "select id from metabib.metarecord_source_map where metarecord = $metarecord";
+			my @results2 = @{$dbHandler->query($query)};
+			if($#results2 < 0)
+			{
+				$query = "delete from metabib.metarecord where id = $metarecord";
+				updateJob("Processing",$query);
+				$dbHandler->update($query);
+			}
+		}
+		else
+		{
+			$currentmetarecord = $metarecord;
+			$currentfingerprint = $fingerprint;
+		}
+	}
+	
+	
+	
+	# Fix bibs that are on a mismatched fingerprint metarecord
+	my $query = "
+select mmsm.id,bre.id,mm.id,mm.fingerprint,bre.fingerprint,counts.count,
+(select id from metabib.metarecord where fingerprint=bre.fingerprint and id not in(select metarecord from metabib.metarecord_source_map where source=bre.id)) as \"dest\",
+(select id from metabib.metarecord where fingerprint=bre.fingerprint) as \"exists\"
+ from 
+metabib.metarecord_source_map mmsm,biblio.record_entry bre, metabib.metarecord mm,
+(
+select source,count(*) as count from metabib.metarecord_source_map group by source 
+) as counts
+where 
+bre.id = mmsm.source and
+mm.id=mmsm.metarecord and
+mm.fingerprint != bre.fingerprint and
+counts.source=bre.id
+
+order by counts.count,mmsm.source
+)";
+	my @results = @{$dbHandler->query($query)};	
+	my $currentbib = 0;
+	my $currentmetarecord = 0;
+	my @bibsthathavenowheretogo = ();
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};		
+		my $mmsmid = @row[0];
+		my $bibid = @row[1];		
+		my $metarecord = @row[2];
+		my $mmfingerprint = @row[3];
+		my $bibfingerprint = @row[4];
+		my $count = @row[5];  #how many times this bib is listed in the source map
+		my $destmetarecord = @row[6];
+		my $exists = @row[7];
+		
+		if(length($exists) == 0) #huston, we have a problem: this bib doesn't have a metarecord for it to go
+		{
+			# Deal with it later
+			push (@bibsthathavenowheretogo, $bibid);
+			next;
+		}
+		if($currentbib != $bibid)
+		{
+			if(length($destmetarecord) > 0)
+			{
+				recordMetaRecordChange($metarecord,$destmetarecord,$mmfingerprint,$bibid,"null","bib fingerprint mismatch to mm");
+				$query = "update metabib.metarecord_source_map set metarecord = $destmetarecord where metarecord = $metarecord and id = $mmsmid";
+				updateJob("Processing",$query);
+				$dbHandler->update($query);
+			}
+			else  # The bib has a row in mmsm already attached to the proper metarecord
+			{
+				recordMetaRecordChange($metarecord,$destmetarecord,$mmfingerprint,$bibid,"null","bib fingerprint mismatch to mm");
+				$query = "delete from metabib.metarecord_source_map where metarecord = $metarecord and id = $mmsmid";
+				updateJob("Processing",$query);
+				$dbHandler->update($query);
+			}
+		}
+		# we already did this last loop - so just delete this reference in mmsm
+		else
+		{
+			recordMetaRecordChange($metarecord,$destmetarecord,$mmfingerprint,$bibid,"null","bib fingerprint mismatch to mm");
+			$query = "delete from metabib.metarecord_source_map where metarecord = $metarecord and id = $mmsmid";
+			updateJob("Processing",$query);
+			$dbHandler->update($query);
+		}
+		
+		# Now check to see if there are any more bibs in the exited metarecord. If not, we need to adjust the related M holds
+		$query = "select id from metabib.metarecord_source_map where metarecord = $metarecord";
+		updateJob("Processing",$query);	
+		my @results2 = @{$dbHandler->query($query)};	
+		if($#results2 == -1)
+		{
+			# Now we have to handle M hold on the metarecord that we just deleted
+			$query = "select id from action.hold_request where target=$metarecord and hold_type='M'";
+			my @results2 = @{$dbHandler->query($query)};	
+			foreach(@results2)
+			{
+				my $row = $_;
+				my @row = @{$row};
+				my $holdid = @row[0];
+				recordMetaRecordChange($metarecord,$destmetarecord,$mmfingerprint,$bibid,$holdid,"bib fingerprint mismatch to mm");
+			}
+			$query = "delete from metabib.metarecord where id = $metarecord";
+			updateJob("Processing",$query);
+			$dbHandler->update($query);
+			$query = "update action.hold_request set target=$destmetarecord where target=$metarecord and hold_type='M'";
+			updateJob("Processing",$query);
+			$dbHandler->update($query);
+		}
+		
+		$currentbib = $bibid;
+		
+	}
+}
+
+sub recordMetaRecordChange;
+{
+	my $affectedmetarecord = @_[0];
+	my $alternatmetarecord = @_[1];
+	my $fingerprint = @_[2];
+	my $bibid = @_[3];
+	my $holdid = @_[4];
+	my $extra = @_[5];
+	my $query = "INSERT INTO seekdestroy.metarecord_change(
+		metarecord,
+		fingerprint,
+		newmetarecord,
+		bibid,
+		holdid,
+		extra,
+		job)
+		values (\$1,\$2,\$3,\$4,\$5,\$6,\$7)
+		";
+	my @values = ($affectedmetarecord,$fingerprint,$alternatmetarecord,$bibid,$holdid,$extra,$jobid);
+	$log->addLine($query);
+	updateJob("Processing","recordAssetCopyMove  $query");
+	$dbHandler->updateWithParameters($query,\@values);
+	
 }
 
 sub findHoldsOnBib
@@ -3560,14 +3907,15 @@ sub getFingerprints
 	my $marc = populate_marc($marcRecord);	
 	my %marc = %{normalize_marc($marc)};    
 	my %fingerprints;
+	
     $fingerprints{baseline} = join("\t", 
 	  $marc{item_form}, $marc{date1}, $marc{record_type},
-	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '',
+	  $marc{bib_lvl}, $marc{title}, $marc{subtitle}.$marc{subtitlep}, $marc{author} ? $marc{author} : '',
 	  $marc{audioformat}, $marc{videoformat}
 	  );
 	 $fingerprints{alternate} = join("\t", 
 	  $marc{item_form}, $marc{date1}, $marc{record_type},
-	  $marc{bib_lvl}, $marc{title}, $marc{author} ? $marc{author} : '',
+	  $marc{bib_lvl}, $marc{title}, $marc{subtitle}.$marc{subtitlep}, $marc{author} ? $marc{author} : '',
 	  $marc{audioformat}, $marc{videoformat}, $marc{pubyear}, $marc{normalizedisbns}
 	  );
 	$fingerprints{item_form} = $marc{item_form};
@@ -3692,9 +4040,16 @@ sub populate_marc {
     $marc{issn} = $record->field('022')->subfield('a') if $record->field('022');
     $marc{desc} = $record->field('300')->subfield('a') if $record->field('300');
     $marc{pages} = $1 if (defined $marc{desc} and $marc{desc} =~ /(\d+)/);
+	
     $marc{title} = $record->field('245')->subfield('a')
       if $record->field('245');
-   
+	  
+	$marc{subtitle} = $record->field('245')->subfield('b')
+      if $record->field('245');
+	  
+	$marc{subtitlep} = $record->field('245')->subfield('p')
+      if $record->field('245');
+	  
     $marc{edition} = $record->field('250')->subfield('a')
       if $record->field('250');
     if ($record->field('260')) {
@@ -3750,6 +4105,24 @@ sub normalize_marc {
         $marc->{title} =~ s/[\x{80}-\x{ffff}]//go;
         $marc->{title} = lc($marc->{title});
         $marc->{title} =~ s/\W+$//go;
+		$marc->{title} =~ s/\s//go;
+		$marc->{title} =~ s/\t//go;
+    }
+	if ($marc->{subtitle}) {
+        $marc->{subtitle} = NFD($marc->{subtitle});
+        $marc->{subtitle} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{subtitle} = lc($marc->{subtitle});
+        $marc->{subtitle} =~ s/\W+$//go;
+		$marc->{subtitle} =~ s/\s//go;
+		$marc->{subtitle} =~ s/\t//go;
+    }
+	if ($marc->{subtitlep}) {
+        $marc->{subtitlep} = NFD($marc->{subtitlep});
+        $marc->{subtitlep} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{subtitlep} = lc($marc->{subtitlep});
+        $marc->{subtitlep} =~ s/\W+$//go;
+		$marc->{subtitlep} =~ s/\s//go;
+		$marc->{subtitlep} =~ s/\t//go;
     }
     if ($marc->{author}) {
         $marc->{author} = NFD($marc->{author});
@@ -3934,6 +4307,18 @@ sub setupSchema
 		extra text,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_marc_update_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$query = "CREATE TABLE seekdestroy.metarecord_change(
+		id serial,
+		metarecord bigint,
+		fingerprint text,
+		newmetarecord bigint,
+		bibid bigint,
+		holdid bigint,
+		change_time timestamp default now(),
+		extra text,
+		job  bigint NOT NULL,
+		CONSTRAINT metarecord_change_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
 	}

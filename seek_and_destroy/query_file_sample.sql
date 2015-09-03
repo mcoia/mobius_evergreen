@@ -117,81 +117,30 @@ select record
 
 non_audiobook_bib_convert_to_audiobook~~select record
  from seekdestroy.bib_score sbs where 
-#Find only Audiobook winners 
+
  winning_score=$$audioBookScore$$ 
- and 
-#Be sure that they do not score as electric at all
+and 
 electronic=0   
- and 
- (
-# Take away those that scored only 1 better than the second place score
-	not (winning_score_score>1 and winning_score_distance<2) 
-	or
-	(
-# Or if they did score only 1 better than second place, its ok if they have these qualities
-		second_place_score in ($$music_score$$,$$video_score$$)
-		and
-		(circ_mods ~*$$AudioBooks$$ or circ_mods ~*$$CD$$ )
-	)
-	or
-	(
-		opac_icon is null
-		and
-		second_place_score is null
-		and
-		LOWER(circ_mods) ~*$$new$$
-	)
-	or
-	(
-		opac_icon =$$phonospoken$$
-		and
-		(second_place_score is null or second_place_score=$$$$)
-		and
-		(circ_mods ~$$^Books$$ or circ_mods ~*$$,Books$$)
-	)
-	
- )
+and record not in(select record from seekdestroy.bib_score where winning_score_score>1 and winning_score_distance<2)
+and record not in(select record from seekdestroy.bib_score where second_place_score in ($$music_score$$,$$video_score$$) and (circ_mods ~*$$AudioBooks$$ or circ_mods ~*$$CD$$ ) )
+and record not in(select record from seekdestroy.bib_score where opac_icon is null and second_place_score is null and LOWER(circ_mods) ~*$$new$$)
+and record not in(select record from seekdestroy.bib_score where opac_icon=$$phonospoken$$ and (second_place_score is null or second_place_score=$$$$) and (circ_mods ~$$^Books$$ or circ_mods ~*$$,Books$$)) 
 and circ_mods !~* $$Refere$$
-and record not in
-(
-	select record from seekdestroy.bib_score where 
-	circ_mods =$$Books$$
-	and
-	opac_icon = $$book$$
-)
-and record not in
-(
-	select record from seekdestroy.bib_score where 	
-	opac_icon = $$kit$$
-)
-and record not in
-(
-	select record from seekdestroy.bib_score where 	
-	opac_icon = $$casaudiobook$$
-)
+and record not in(select record from seekdestroy.bib_score where circ_mods =$$Books$$ and opac_icon = $$book$$)
+and record not in(select record from seekdestroy.bib_score where opac_icon = $$kit$$)
+and record not in(select record from seekdestroy.bib_score where opac_icon = $$casaudiobook$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
-and not
-(	
-	(
-	circ_mods !~*$$CD$$
-	and
-	circ_mods !~*$$AudioBooks$$
-	and
-	circ_mods !~*$$Media$$
-	and
-	circ_mods !~*$$Kit$$
-	and
-	circ_mods !~*$$Music$$
-	)	
-	and
-	(
-	opac_icon is null 
-	and
-	circ_mods is null 
+and record not in(select record from seekdestroy.bib_score where 
+	winning_score_score=1 and 
+	(circ_mods!~*$$CD$$ and circ_mods!~*$$AudioBooks$$ and circ_mods!~*$$Media$$ and circ_mods!~*$$Kit$$ and circ_mods!~*$$Music$$ and circ_mods is null) and	
+	opac_icon is null
 	)
-	and
-	winning_score_score=1	
-)
+
+and record not in(select record from seekdestroy.bib_score where record_type in ($$p$$,$$o$$))
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$eaudio$$)
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$phono$$)
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$playaway$$)
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$kit$$)
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 ;
 
@@ -202,81 +151,30 @@ non_audiobook_bib_not_convert_to_audiobook~~select record from seekdestroy.bib_s
 (
 select record
  from seekdestroy.bib_score sbs where 
-#Find only Audiobook winners 
+
  winning_score=$$audioBookScore$$ 
- and 
-#Be sure that they do not score as electric at all
+and 
 electronic=0   
- and 
- (
-# Take away those that scored only 1 better than the second place score
-	not (winning_score_score>1 and winning_score_distance<2) 
-	or
-	(
-# Or if they did score only 1 better than second place, its ok if they have these qualities
-		second_place_score in ($$music_score$$,$$video_score$$)
-		and
-		(circ_mods ~*$$AudioBooks$$ or circ_mods ~*$$CD$$ )
-	)
-	or
-	(
-		opac_icon is null
-		and
-		second_place_score is null
-		and
-		LOWER(circ_mods) ~*$$new$$
-	)
-	or
-	(
-		opac_icon =$$phonospoken$$
-		and
-		(second_place_score is null or second_place_score=$$$$)
-		and
-		(circ_mods ~$$^Books$$ or circ_mods ~*$$,Books$$)
-	)
-	
- )
+and record not in(select record from seekdestroy.bib_score where winning_score_score>1 and winning_score_distance<2)
+and record not in(select record from seekdestroy.bib_score where second_place_score in ($$music_score$$,$$video_score$$) and (circ_mods ~*$$AudioBooks$$ or circ_mods ~*$$CD$$ ) )
+and record not in(select record from seekdestroy.bib_score where opac_icon is null and second_place_score is null and LOWER(circ_mods) ~*$$new$$)
+and record not in(select record from seekdestroy.bib_score where opac_icon=$$phonospoken$$ and (second_place_score is null or second_place_score=$$$$) and (circ_mods ~$$^Books$$ or circ_mods ~*$$,Books$$)) 
 and circ_mods !~* $$Refere$$
-and record not in
-(
-	select record from seekdestroy.bib_score where 
-	circ_mods =$$Books$$
-	and
-	opac_icon = $$book$$
-)
-and record not in
-(
-	select record from seekdestroy.bib_score where 	
-	opac_icon = $$kit$$
-)
-and record not in
-(
-	select record from seekdestroy.bib_score where 	
-	opac_icon = $$casaudiobook$$
-)
+and record not in(select record from seekdestroy.bib_score where circ_mods =$$Books$$ and opac_icon = $$book$$)
+and record not in(select record from seekdestroy.bib_score where opac_icon = $$kit$$)
+and record not in(select record from seekdestroy.bib_score where opac_icon = $$casaudiobook$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
-and not
-(	
-	(
-	circ_mods !~*$$CD$$
-	and
-	circ_mods !~*$$AudioBooks$$
-	and
-	circ_mods !~*$$Media$$
-	and
-	circ_mods !~*$$Kit$$
-	and
-	circ_mods !~*$$Music$$
-	)	
-	and
-	(
-	opac_icon is null 
-	and
-	circ_mods is null 
+and record not in(select record from seekdestroy.bib_score where 
+	winning_score_score=1 and 
+	(circ_mods!~*$$CD$$ and circ_mods!~*$$AudioBooks$$ and circ_mods!~*$$Media$$ and circ_mods!~*$$Kit$$ and circ_mods!~*$$Music$$ and circ_mods is null) and	
+	opac_icon is null
 	)
-	and
-	winning_score_score=1	
-)
+
+and record not in(select record from seekdestroy.bib_score where record_type in ($$p$$,$$o$$))
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$eaudio$$)
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$phono$$)
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$playaway$$)
+and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$kit$$)
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 )
 and winning_score ~ $$audioBookScore$$
@@ -1027,7 +925,7 @@ NOT AC.DELETED AND
 BRE.ID>0 AND
 bre.marc ~ $$<leader>......i$$ and
 (
-	lower(acn.label) !~* $$cass$$ and
+	lower(acn.label) !~* $$cas$$ and
 	lower(acn.label) !~* $$aud$$ and
 	lower(acn.label) !~* $$disc$$ and
 	lower(acn.label) !~* $$mus$$ and
@@ -1069,6 +967,8 @@ order by a.id,a.label;
 # and (union)
 # Find Items that are probably AUDIOBOOKs but are attached to non Audiobook bibs
 
+# cameron positive audiobooks
+# ACD AND CAS
 questionable_audiobook_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
 from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
 AOU.ID=AC.CIRC_LIB AND
@@ -1079,14 +979,15 @@ NOT ACN.DELETED AND
 NOT AC.DELETED AND
 BRE.ID>0 AND
 (
-	lower(acn.label) ~* $$cass$$ or
+	lower(acn.label) ~* $$cas$$ or
 	lower(acn.label) ~* $$aud$$ or
 	lower(acn.label) ~* $$disc$$ or
 	lower(acn.label) ~* $$mus$$ or
 	lower(acn.label) ~* $$play$$ or
 	lower(acn.label) ~* $$ cd$$ or
 	lower(acn.label) ~* $$^cd$$ or
-	lower(acn.label) ~* $$disk$$
+	lower(acn.label) ~* $$disk$$ or
+	acn.label ~* $$ACD$$
 or
 	lower(acl.name) ~* $$cas$$ or
 	lower(acl.name) ~* $$aud$$ or
@@ -1095,7 +996,8 @@ or
 	lower(acl.name) ~* $$play$$ or
 	lower(acl.name) ~* $$ cd$$ or
 	lower(acl.name) ~* $$^cd$$ or
-	lower(acl.name) ~* $$disk$$ 
+	lower(acl.name) ~* $$disk$$ or
+	acl.name ~* $$ACD$$ 
 )
 and
 ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
@@ -1128,14 +1030,15 @@ NOT AC.DELETED AND
 BRE.ID>0 AND
 bre.marc ~ $$<leader>......i$$ and
 (
-	lower(acn.label) !~* $$cass$$ and
+	lower(acn.label) !~* $$cas$$ and
 	lower(acn.label) !~* $$aud$$ and
 	lower(acn.label) !~* $$disc$$ and
 	lower(acn.label) !~* $$mus$$ and
 	lower(acn.label) !~* $$play$$ and
 	lower(acn.label) !~* $$ cd$$ and
 	lower(acn.label) !~* $$^cd$$ and
-	lower(acn.label) !~* $$disk$$
+	lower(acn.label) !~* $$disk$$ and
+	acn.label !~* $$ACD$$
 )
 and
 (
@@ -1146,7 +1049,8 @@ and
 	lower(acl.name) !~* $$play$$ and
 	lower(acl.name) !~* $$ cd$$ and
 	lower(acl.name) !~* $$^cd$$ and
-	lower(acl.name) !~* $$disk$$ 
+	lower(acl.name) !~* $$disk$$ and
+	acl.name !~* $$ACD$$ 
 )
 and ac.circ_modifier not in ( $$AudioBooks$$,$$CD$$ )
 ) as a

@@ -61,7 +61,7 @@ if($valid)
 	{
 		my $mobutil = new Mobiusutil();
 		my $updatecount=0;
-		my @numbers = (51); #1,2,3,4,5,6,7,8,10,12,25,30,50,75);
+		my @numbers = (100); #1,2,3,4,5,6,7,8,10,12,25,30,50,75);
 		my @circmods = ();
 		my $query = "select code from config.circ_modifier";
 		my @results = @{$dbHandler->query($query)};
