@@ -101,7 +101,12 @@ package DBhandler;
 	my $i=1;
 	foreach(@values)
 	{
-		$q->bind_param($i, $_);
+		my $param = $_;
+		if(lc($param eq 'null'))
+		{
+			$param = undef;
+		}
+		$q->bind_param($i, $param);
 		$i++;
 	}
 	my $ret = $q->execute();
