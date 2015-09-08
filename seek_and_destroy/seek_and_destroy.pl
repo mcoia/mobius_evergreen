@@ -186,11 +186,12 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					cleanMetaRecords();
+					
 					# findInvalidElectronicMARC();
 					# findInvalidAudioBookMARC();
 					# findInvalidDVDMARC();
@@ -2241,7 +2242,7 @@ updateJob("Processing","findPossibleDups  looping results");
 	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
 	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
 	updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
-	print $dbHandler->update($q);	
+	$dbHandler->update($q);
 	updateJob("Processing","findPossibleDups updating scorecache selectively");
 	updateScoreCache(\@st);
 	
@@ -2298,7 +2299,7 @@ updateJob("Processing","findPossibleDups  $query");
 			}
 		}
 	}
-	$query = "
+	my $query = "
 	select bib1,bib2, 
 	\$\$$domainname"."eg/opac/record/\$\$||bib1||\$\$?expand=marchtml\$\$ \"leadlink\",
 \$\$$domainname"."eg/opac/record/\$\$||bib2||\$\$?expand=marchtml\$\$ \"sublink\",
@@ -2307,8 +2308,9 @@ has_holds,
 (select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=sbm.bib2) \"subicon\",
 (select value from metabib.title_field_entry where source=sbm.bib1 limit 1) \"title\"
 from SEEKDESTROY.BIB_MATCH sbm where 
-job=$jobid and
+--job=$jobid and
 bib1 not in(select id from biblio.record_entry where deleted)
+and (bib1 in(155587) or bib2 in(155587))
 order by bib1,bib2
 ";
 	my @results = @{$dbHandler->query($query)};
@@ -2321,7 +2323,7 @@ order by bib1,bib2
 		# Now let's merge!
 		if(!$dryrun)
 		{
-			
+			mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
 		}
 	}
 	$log->addLine(Dumper(\%mergeMap));
@@ -2334,31 +2336,55 @@ sub mergeBibsWithMetarecordHoldsInMind
 	my $leadbib = @_[0];
 	my $subbib = @_[1];
 	my $reason = @_[2];
-	my $metarecord = -1;
-	my @metarecordsinthegroup = ();
+	my $submetarecord = -1;
+	my $leadmetarecord = -1;
+	my $leadmetarecordafterupdate = -1;
+	my @metarecordsinsubgroup = ();
+	my @metarecordsinleadgroup = ();
 	my $leadmarc = 0;
 	my $submarc = 0;
 	
 	# Get the metarecord ID for the leadbib
-	my $query = "select metarecord from metabib.metarecord_source_map where source = $subbib";
+	my $query = "select metarecord,source from metabib.metarecord_source_map where source in($subbib,$leadbib)";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
-		$metarecord = @row[0];
+		my $source = @row[1];
+		if($source == $leadbib)
+		{
+			$leadmetarecord = @row[0];
+		}
+		else
+		{
+			$submetarecord = @row[0];
+		}
 	}
 	
-	# Gather up all the other bibs in the metarecord group
-	my $query = "select source from metabib.metarecord_source_map where metarecord = $metarecord and source != $subbib";
+	# Gather up all the other bibs in the sub metarecord group
+	my $query = "select source from metabib.metarecord_source_map where metarecord = $submetarecord and source != $subbib";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
-		if(@row[0] != $leadbib && @row[0] != $subbib)
+		if(@row[0] != $subbib)
 		{
-			push(@metarecordsinthegroup, @row[0]);
+			push(@metarecordsinsubgroup, @row[0]);
+		}
+	}
+	
+	# Gather up all the other bibs in the lead metarecord group
+	my $query = "select source from metabib.metarecord_source_map where metarecord = $leadmetarecord and source != $leadbib";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		if(@row[0] != $subbib)
+		{
+			push(@metarecordsinleadgroup, @row[0]);
 		}
 	}
 	
@@ -2388,7 +2414,102 @@ sub mergeBibsWithMetarecordHoldsInMind
 	$leadmarc = convertMARCtoXML($leadmarc);
 	
 	moveAllCallNumbers($subbib,$leadbib,$reason);
+	$query = "update biblio.record_entry set marc=\$1 where id=\$2";
+	my @values = ($leadmarc,$leadbib);
+	updateJob("Processing",$query);
+	$dbHandler->updateWithParameters($query,\@values);
 	
+	# Check to see if the lead record was assigned a new metarecord group
+	
+	my $query = "select metarecord from metabib.metarecord_source_map where source in($leadbib) and metarecord != $leadmetarecord";
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};		
+		$leadmetarecordafterupdate = @row[0];
+		$log->addLine("Warning, updating $leadbib caused it to land in another metarecord : $leadmetarecordafterupdate");
+	}
+	
+	$query = "select asset.merge_record_assets($leadbib, $subbib)";
+	updateJob("Processing",$query);
+	$dbHandler->update($query);
+	
+	$query = "delete from metabib.metarecord_source_map where source = $subbib";
+	updateJob("Processing",$query);
+	$dbHandler->update($query);
+	
+	#setup the final destination variable
+	my $finalmetarecord = $leadmetarecord;
+	if(($leadmetarecordafterupdate != -1) && ($leadmetarecordafterupdate != $leadmetarecord) )
+	{
+		$finalmetarecord = $leadmetarecordafterupdate;
+	}
+	
+	my @metarecordHoldMerges = ();
+	if($#metarecordsinsubgroup == -1) # There were no other members in the group, so, delete the metarecord
+	{
+		my @temp = ($submetarecord, $leadmetarecord, $subbib, "Merge lead $leadmetarecord sub $submetarecord");
+		push (@metarecordHoldMerges, \@temp);
+	}
+	if( ($leadmetarecordafterupdate != -1) && ($leadmetarecordafterupdate != $leadmetarecord) && ($#metarecordsinleadgroup == -1) )
+	{ 
+	# The lead bib moved to a new metarecord group AND it's old group has no other members
+		my @temp = ($leadmetarecord, $leadmetarecordafterupdate, $subbib, "Lead moved after update merge lead $leadmetarecordafterupdate sub $leadmetarecord");
+		push (@metarecordHoldMerges, \@temp);
+	}
+	
+	foreach(@metarecordHoldMerges)
+	{
+		my @temp = @{$_};
+		my $sub = @temp[0];
+		my $lead = @temp[1];
+		my $bibid = @temp[2];
+		my $reasoni = @temp[3];
+		$query = "delete from metabib.metarecord_source_map where source = $sub";
+		updateJob("Processing",$query);
+		$dbHandler->update($query);
+		$query = "delete from metabib.metarecord where id = $sub";
+		updateJob("Processing",$query);
+		$dbHandler->update($query);
+		$query = "select id from action.hold_request where target = $sub and hold_type=\$\$M\$\$";
+		my @results = @{$dbHandler->query($query)};
+		updateJob("Processing",$query);
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			recordMetaRecordChange($sub,$lead,"null",$bibid,@row[0],$reasoni);
+			$query = "update action.hold_request set target = $lead where id=".@row[0];
+			updateJob("Processing",$query);
+			$dbHandler->update($query);
+		}
+	}
+	
+	# Fix master_record pointer
+	my $query = "
+	select id,fingerprint,master_record,
+(select min(source) from metabib.metarecord_source_map where metarecord=a.id)
+ from metabib.metarecord a where 
+ master_record not in
+ (select source from metabib.metarecord_source_map where metarecord=a.id  )
+ and a.id in($leadmetarecord,$submetarecord)
+";
+	updateJob("Processing",$query);
+	my @results = @{$dbHandler->query($query)};	
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $metarecord = @row[0];
+		my $fingerprint = @row[1];
+		my $mmmasterrecord = @row[2];
+		my $destmasterrecord =  @row[3];
+		recordMetaRecordChange($metarecord,"null",$fingerprint,$mmmasterrecord,"null","After Merge correcting master_record to $destmasterrecord");
+		$query = "update metabib.metarecord set master_record = $destmasterrecord where id = $metarecord";
+		updateJob("Processing",$query);
+		$dbHandler->update($query);
+	}
 }
 
 sub cleanMetaRecords
