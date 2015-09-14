@@ -186,8 +186,8 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					cleanMetaRecords();
@@ -2207,7 +2207,7 @@ sub findPossibleDups
 		and not deleted
 		and fingerprint != \$\$\$\$
 		group by fingerprint
-		limit 100;
+		--limit 100;
 		";
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
@@ -2308,9 +2308,9 @@ has_holds,
 (select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=sbm.bib2) \"subicon\",
 (select value from metabib.title_field_entry where source=sbm.bib1 limit 1) \"title\"
 from SEEKDESTROY.BIB_MATCH sbm where 
---job=$jobid and
+job=$jobid and
 bib1 not in(select id from biblio.record_entry where deleted)
-and (bib1 in(155587) or bib2 in(155587))
+--and (bib1 in(155587) or bib2 in(155587))
 order by bib1,bib2
 ";
 	my @results = @{$dbHandler->query($query)};
@@ -2326,7 +2326,7 @@ order by bib1,bib2
 			mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
 		}
 	}
-	$log->addLine(Dumper(\%mergeMap));
+	# $log->addLine(Dumper(\%mergeMap));
 	
 	
 }
@@ -2514,8 +2514,6 @@ sub mergeBibsWithMetarecordHoldsInMind
 
 sub cleanMetaRecords
 {
-
-
 	# Delete any references to deleted bibs in the metarecord source map (related holds will be fixed later)
 	my $query = "select metarecord,source from metabib.metarecord_source_map where source in(select id from biblio.record_entry where deleted)";
 	updateJob("Processing",$query);	

@@ -30,7 +30,7 @@ print "Removing email addresses\n";
 my $query = "update actor.usr set email = ''";
 $dbHandler->update($query);
 
-#scramblePatronNames();
+scramblePatronNames();
 scrambleAddresses();
 
 
