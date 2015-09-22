@@ -186,8 +186,8 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					#$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					#$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					cleanMetaRecords();
@@ -4028,7 +4028,7 @@ sub mergeMARC856
 sub convertMARCtoXML
 {
 	my $marc = @_[0];
-	my $thisXML = $marc->as_xml();			
+	my $thisXML =  decode_utf8($marc->as_xml());
 	#this code is borrowed from marc2bre.pl
 	$thisXML =~ s/\n//sog;
 	$thisXML =~ s/^<\?xml.+\?\s*>//go;
@@ -4036,6 +4036,11 @@ sub convertMARCtoXML
 	$thisXML =~ s/\p{Cc}//go;
 	$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
 	$thisXML =~ s/[\x00-\x1f]//go;
+	$thisXML =~ s/^\s+//;
+	$thisXML =~ s/\s+$//;
+	$thisXML =~ s/<record><leader>/<leader>/;
+	$thisXML =~ s/<collection/<record/;	
+	$thisXML =~ s/<\/record><\/collection>/<\/record>/;
 	#end code
 	return $thisXML;
 }

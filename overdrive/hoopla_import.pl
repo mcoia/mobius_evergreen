@@ -71,7 +71,9 @@ use File::stat;
 		}
 		$archivefolder = $conf{"archivefolder"};
 		$importSourceName = $conf{"sourcename"};
+		$importSourceNameDB = $importSourceName;
 		$importSourceNameDB =~ s/\s/\-/g;
+		
 		if(!(-d $archivefolder))
 		{
 			$valid = 0;
@@ -574,7 +576,7 @@ sub decideToDownload
 	my $filename = @_[0];
 	$filename = lc($filename);
 	my $download = 0;
-	if(!$filename =~ m/\.mrc/g)
+	if(! ($filename =~ m/\.mrc/g) )
 	{
 		return 0;
 	}
@@ -984,16 +986,24 @@ sub attemptRemoveBibs
 		}
 		else
 		{
-			my $finalMARCXML = convertMARCtoXML($answer)
+			my $finalMARCXML = convertMARCtoXML($answer);
 			recordBIBMARCChanges($id, $marcxml, $finalMARCXML);
 			my @values = ($finalMARCXML);
-			#$log->addLine($thisXML);
-			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1,tcn_source=\$\$$importSourceNameDB-script $sha1\$\$,source=$bibsourceid WHERE ID=$winnerBibID";
+			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 WHERE ID=$id";
 		updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 			$log->addLine($query);
-			$log->addLine($thisXML);
-			$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$matchnum");
+			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t0");
 			my $res = $dbHandler->updateWithParameters($query,\@values);
+			if($res)
+			{
+				my @temp = ($id, $title);
+				push (@updated, [@temp]);
+			}
+			else
+			{
+				my @copy = ($id,$title,"Error during delete");
+				push (@notworked, [@copy]);
+			}
 			
 		}
 	}
@@ -1019,6 +1029,20 @@ sub decideToDeleteOrRemove9
 		my $ind2 = $thisField->indicator(2);
 		if($ind2 eq '0')
 		{	
+			my @ninposes;
+			my $poses=0;
+			#deleting subfields requires knowledge of what position among all of the subfields they reside.
+			#so we have to record at what positions each of the 9's are ahead of time.
+			foreach($thisField->subfields())
+			{
+				
+				my @f = @{$_};
+				if(@f[0] eq '9')
+				{
+					push (@ninposes, $poses);
+				}
+				$poses++;
+			}
 			my @nines = $thisField->subfield("9");
 			my @delete9s = ();			
 			my $ninePos = 0;
@@ -1036,16 +1060,16 @@ sub decideToDeleteOrRemove9
 				}					
 				if($found)
 				{
-					$otherField->add_subfields('9' => $looking);
-					push(@delete9s, $ninePos);
+					push(@delete9s, @ninposes[$ninePos]);
 				}
 				else
 				{
 					$nonMatch=1;
 					$nonMatchThis856 = 1;
 				}
+				$ninePos++;
 			}
-			if($nonMatchThis856)
+			if(!$nonMatchThis856)
 			{
 				#Just delete the whole field because it only contains these 9's
 				$marc->delete_field($thisField);
@@ -1054,10 +1078,7 @@ sub decideToDeleteOrRemove9
 			{
 				#Some of the 9's do not belong to this group, so we just want to delete ours
 				#and preserve the record
-				foreach($delete9s)
-				{
-					$thisField->delete_subfield(code=> '9', pos => [$_]);
-				}
+				$thisField->delete_subfield(code=> '9', 'pos' => \@delete9s);
 			}
 		}
 		
@@ -1269,7 +1290,7 @@ sub moveHolds
 	my $oldBib = @_[1];
 	my $newBib = @_[2];
 	my $log = @_[3];	
-	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE='T' AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
+	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE=\$\$T\$\$ AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
 	$log->addLine($query);
 	updateJob("Processing","moveHolds  $query");
 	#print $query."\n";

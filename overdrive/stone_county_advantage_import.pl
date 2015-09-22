@@ -576,7 +576,7 @@ sub decideToDownload
 	my $filename = @_[0];
 	$filename = lc($filename);
 	my $download = 1;
-	if(!$filename =~ m/\.mrc/g)
+	if(! ($filename =~ m/\.mrc/g) )
 	{
 		return 0;
 	}
@@ -1290,7 +1290,7 @@ sub moveHolds
 	my $oldBib = @_[1];
 	my $newBib = @_[2];
 	my $log = @_[3];	
-	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE='T' AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
+	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE=\$\$T\$\$ AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
 	$log->addLine($query);
 	updateJob("Processing","moveHolds  $query");
 	#print $query."\n";

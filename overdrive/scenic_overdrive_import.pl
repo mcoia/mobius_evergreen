@@ -34,13 +34,16 @@ use File::stat;
 	exit;
  }
 
- my $mobUtil = new Mobiusutil(); 
- my $conf = $mobUtil->readConfFile($configFile);
+ our $mobUtil = new Mobiusutil(); 
+ our $conf = $mobUtil->readConfFile($configFile);
  
  our $jobid=-1;
  our $log;
- our $addsfolder;
- our $removesfolder;
+ our $archivefolder;
+ our $importSourceName;
+ our $importSourceNameDB;
+ our $dbHandler;
+ our @shortnames;
  
  if($conf)
  {
@@ -52,9 +55,9 @@ use File::stat;
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
-		#$log->truncFile("");
+		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("tempspace","addsfolder","removesfolder","dbhost","db","dbuser","dbpass","port","participants","logfile"); 
+		my @reqs = ("server","login","password","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -66,45 +69,41 @@ use File::stat;
 				$valid = 0;
 			}
 		}
-		$addsfolder = $conf{"addsfolder"};
-		$removesfolder = $conf{"removesfolder"};
-		if(!(-d $addsfolder))
+		$archivefolder = $conf{"archivefolder"};
+		$importSourceName = $conf{"sourcename"};
+		$importSourceNameDB = $importSourceName;
+		$importSourceNameDB =~ s/\s/\-/g;
+		
+		if(!(-d $archivefolder))
 		{
 			$valid = 0;
-			print "Sorry, the addsfolder folder does not exist: $addsfolder\n";
-			$errorMessage = "Sorry, the archive folder does not exist: $addsfolder";
-		}
-		if(!(-d $removesfolder))
-		{
-			$valid = 0;
-			print "Sorry, the removesfolder folder does not exist: $removesfolder\n";
-			$errorMessage = "Sorry, the archive folder does not exist: $removesfolder";
+			print "Sorry, the archive folder does not exist: $archivefolder\n";
+			$errorMessage = "Sorry, the archive folder does not exist: $archivefolder";
 		}
 		#remove trailing slash
-		$addsfolder =~ s/\/$//;
-		$removesfolder =~ s/\/$//;
+		$archivefolder =~ s/\/$//;
 		my $finalImport = 0;
 		my @info;
 		my @infoRemoval;
 		my $count=0;
 		my $countremoval=0;
 		my @files;
-		my $dbHandler;
+		
 		if($valid)
 		{	
 			my @marcOutputRecords;
 			my @marcOutputRecordsRemove;
-			my @shortnames = split(/,/,$conf{"participants"});
+			@shortnames = split(/,/,$conf{"participants"});
 			for my $y(0.. $#shortnames)
 			{				
 				@shortnames[$y]=$mobUtil->trim(@shortnames[$y]);
-			}			
+			}
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
 			setupSchema($dbHandler);
 			
 			# @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc records/hoopla/")};
 			
-			@files = @{getmarc($addsfolder,$removesfolder,$log)};
+			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
 			
 			if(@files[$#files]!=-1)
 			{
@@ -115,14 +114,14 @@ use File::stat;
 				{
 					my $thisfilename = lc($files[$b]);
 					
-					$log->addLogLine("Parsing: ".$files[$b]);
-					my $file = MARC::File::USMARC->in($files[$b]);
+					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
+					my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
 					
 					if(! ($thisfilename =~ m/remove/))
 					{					
 						while ( my $marc = $file->next() ) 
 						{	
-							$marc = add9($marc,\@shortnames);
+							$marc = add9($marc);
 							push(@marcOutputRecords,$marc);
 						}
 						$cnt++;
@@ -174,6 +173,7 @@ use File::stat;
 					$log->addLogLine("Deleting $outputFile");
 					$marcout->deleteFile();
 					$marcoutRemoval->deleteFile();
+					deleteFiles(\@files);
 					$valid = 0;
 					$errorMessage = "Could not establish a connection to the database";
 				}
@@ -181,8 +181,8 @@ use File::stat;
 				{
 					if(($count+$countremoval) > 0)
 					{
-						my $bib_sourceid = getbibsource($dbHandler);
-						$jobid = createNewJob($dbHandler,'processing');
+						my $bib_sourceid = getbibsource();
+						$jobid = createNewJob('processing');
 						if($jobid!=-1)
 						{
 							#print "Bib source id: $bib_sourceid\n";
@@ -204,7 +204,7 @@ use File::stat;
 				}
 				$marcout->deleteFile();
 				$marcoutRemoval->deleteFile();
-				updateJob($dbHandler,"Completed","");
+				updateJob("Completed","");
 			}
 			else
 			{
@@ -322,7 +322,7 @@ use File::stat;
 				my @tolist = ($conf{"alwaysemail"});
 				my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
 				$fileList=~s/\s/\r\n/g;
-				$email->send("Evergreen Utility - Poplar Bluff Ebrary Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
+				$email->send("Evergreen Utility - $importSourceName Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
 				
 			}
 			else
@@ -341,7 +341,7 @@ use File::stat;
 				my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
 				my $reports = gatherOutputReport($log,$dbHandler);
 				$fileList=~s/\s/\r\n/g;
-				$email->send("Evergreen Utility - Poplar Bluff Ebrary Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n$count adds and $countremoval removals from $fileCount file(s)\r\n Duration: $duration
+				$email->send("Evergreen Utility - $importSourceName Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n$count adds and $countremoval removals from $fileCount file(s)\r\n Duration: $duration
 	\r\n\r\nFiles:\r\n$fileList
 Unsuccessful Removals:
 $failedTitleListRemoval
@@ -380,7 +380,7 @@ sub gatherOutputReport
 	my $itemsAssignedRecords='';
 	my $undedupeRecords='';
 	#bib_marc_update table report new bibs
-	my $query = "select count(*) from pbebrary.bib_marc_update where job=$jobid and new_record is true";
+	my $query = "select count(*) from molib2go.bib_marc_update where job=$jobid and new_record is true";
 	my @results = @{$dbHandler->query($query)};	
 	foreach(@results)
 	{
@@ -389,7 +389,7 @@ sub gatherOutputReport
 		$newRecordCount=@row[0];
 	}
 	#bib_marc_update table report non new bibs
-	$query = "select count(*) from pbebrary.bib_marc_update where job=$jobid and new_record is not true";
+	$query = "select count(*) from molib2go.bib_marc_update where job=$jobid and new_record is not true";
 	@results = @{$dbHandler->query($query)};	
 	foreach(@results)
 	{
@@ -399,7 +399,7 @@ sub gatherOutputReport
 	}
 	
 	#bib_merge table report
-	$query = "select leadbib,subbib from pbebrary.bib_merge where job=$jobid";
+	$query = "select leadbib,subbib from molib2go.bib_merge where job=$jobid";
 	@results = @{$dbHandler->query($query)};	
 	my $count=0;	
 	foreach(@results)
@@ -418,7 +418,7 @@ sub gatherOutputReport
 	
 	
 	#item_reassignment table report
-	$query = "select target_bib,prev_bib from pbebrary.item_reassignment where job=$jobid";
+	$query = "select target_bib,prev_bib from molib2go.item_reassignment where job=$jobid";
 	@results = @{$dbHandler->query($query)};	
 	$count=0;	
 	foreach(@results)
@@ -436,7 +436,7 @@ sub gatherOutputReport
 	}
 	
 	#undedupe table report
-	$query = "select undeletedbib,oldleadbib,(select label from asset.call_number where id=a.moved_call_number) from pbebrary.undedupe a where job=$jobid";
+	$query = "select undeletedbib,oldleadbib,(select label from asset.call_number where id=a.moved_call_number) from molib2go.undedupe a where job=$jobid";
 	@results = @{$dbHandler->query($query)};	
 	$count=0;	
 	foreach(@results)
@@ -450,7 +450,7 @@ sub gatherOutputReport
 	{	
 		$undedupeRecords = truncateOutput($undedupeRecords,5000);
 		$undedupeRecords="$count records had physical items and were moved onto a previously deduped bib - The left number is the undeleted deduped bib\r\n
-		The right is the PBebrary bib that had it's items moved onto the undeduped bib.\r\n
+		The right is the molib2go bib that had it's items moved onto the undeduped bib.\r\n
 		We have included the call number as well\r\n".$undedupeRecords;
 		$undedupeRecords."\r\n\r\n\r\n";
 	}
@@ -493,27 +493,81 @@ sub getListOfMARC
 	}
 }
 
+sub deleteFiles
+{
+	my $log = @_[0];
+	my @files = @{@_[1]};
+	foreach(@files)
+	{
+		my $t = new Loghandler("$archivefolder/$_");
+		$log->addLogLine("Deleting $_");
+		$t->deleteFile();
+	}
+}
+
 sub getmarc
 {
-	my $addsfolder = @_[0];		
-	my $removesfolder = @_[1];
+	my $server = @_[0];
+	$server=~ s/http:\/\///gi;
+	$server=~ s/ftp:\/\///gi;
+	
 	my $loops=0;
+	my $login = @_[1];
+	my $password = @_[2];	
+	my $yearstoscrape = @_[3];
+	my $archivefolder = @_[4];
 	my @ret = ();
-	print "Reading: $addsfolder\n";
-	opendir(my $dh, $addsfolder) || die "can't opendir $addsfolder: $!";
-	while (readdir($dh))
+	
+	$log->addLogLine("**********FTP starting -> $server with $login and $password");
+	
+	my $ftp = Net::FTP->new($server, Debug => 0, Passive=> 1)
+	or die $log->addLogLine("Cannot connect to ".$server);
+    $ftp->login($login,$password)
+	or die $log->addLogLine("Cannot login ".$ftp->message);
+	$ftp->cwd('/cpp/mz7/');
+	
+    my @remotefiles = $ftp->ls();
+	foreach(@remotefiles)
 	{
-		if($_ =~ /^\./)
+		my $filename = $_;
+		my $download = decideToDownload($filename);
+		
+		if($download)
 		{
-			#do nothing with this
-		}
-		else
-		{
-			print "$_\n";
-			push(@ret,$addsfolder."/$_");
+			if(-e "$archivefolder/$filename")
+			{
+				my $size = stat("$archivefolder/$filename")->size; #[7];
+				my $rsize = $ftp->size($filename);
+				# print "Local: $size\n";
+				# print "remot: $rsize\n";
+				if($size ne $rsize)
+				{
+					$log->addLine("$archivefolder/$filename differes in size remote $filename");
+					unlink("$archivefolder/$filename");
+				}
+				else
+				{
+					$log->addLine("skipping $filename");
+					$download=0;
+				}
+			}
+			else
+			{
+				$log->addLine("NEW $filename");
+			}
+			if($download)
+			{
+				my $worked = $ftp->get($filename,"$archivefolder/$filename");
+				if($worked)
+				{
+					push (@ret, "$filename");
+				}
+			}
 		}
 	}
-    closedir $dh;
+    $ftp->quit
+	or die $log->addLogLine("Unable to close FTP connection");
+	$log->addLogLine("**********FTP session closed ***************");
 	$log->addLine(Dumper(\@ret));
 	return \@ret;
 }
@@ -522,8 +576,8 @@ sub decideToDownload
 {
 	my $filename = @_[0];
 	$filename = lc($filename);
-	my $download = 0;
-	if(!$filename =~ m/\.mrc/g)
+	my $download = 1;
+	if(! ($filename =~ m/\.mrc/g) )
 	{
 		return 0;
 	}
@@ -547,7 +601,6 @@ sub decideToDownload
 sub add9
 {
 	my $marc = @_[0];
-	my @shortnames = @{@_[1]};
 	my @recID = $marc->field('856');
 	if(@recID)
 	{
@@ -576,7 +629,7 @@ sub add9
 					my @s7 = @recID[$rec]->subfield( '7' );
 					if($#s7==-1)
 					{
-						@recID[$rec]->add_subfields('7'=>'poplarbluffebrary');
+						@recID[$rec]->add_subfields('7'=>$importSourceName);
 					}
 					my @subfields = @recID[$rec]->subfield( '9' );
 					my $shortnameexists=0;
@@ -612,31 +665,31 @@ sub removeOldCallNumberURI
 		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
 	)
 	";
-updateJob($dbHandler,"Processing","$query");
+updateJob("Processing","$query");
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
 		SELECT id from asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	)";
-updateJob($dbHandler,"Processing","$query");
+updateJob("Processing","$query");
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.uri WHERE id not in
 	(
 		SELECT uri FROM asset.uri_call_number_map
 	)";
-updateJob($dbHandler,"Processing","$query");
+updateJob("Processing","$query");
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
-updateJob($dbHandler,"Processing","$query");	
+updateJob("Processing","$query");	
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
-updateJob($dbHandler,"Processing","$query");
+updateJob("Processing","$query");
 	$dbHandler->update($query);
 
 }
@@ -660,7 +713,7 @@ sub recordAssetCopyMove
 	if($#cids>-1)
 	{		
 		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
-		moveAssetCopyToPreviouslyDedupedBib($dbHandler,$oldbib,$overdriveMatchString,$log);		
+		moveAssetCopyToPreviouslyDedupedBib($oldbib,$overdriveMatchString);		
 	}	
 	
 	#Check again after the attempt to undedupe
@@ -677,10 +730,10 @@ sub recordAssetCopyMove
 		print "There were asset.copies on $oldbib even after attempting to put them on a deduped bib\n";
 		$log->addLine("\t$oldbib\tContained physical Items");
 		 $query = "
-		INSERT INTO pbebrary.item_reassignment(copy,prev_bib,target_bib,job)
+		INSERT INTO molib2go.item_reassignment(copy,prev_bib,target_bib,job)
 		VALUES ($_,$oldbib,$newbib,$jobid)";
 		$log->addLine("$query");
-updateJob($dbHandler,"Processing","recordAssetCopyMove  $query");
+updateJob("Processing","recordAssetCopyMove  $query");
 		$dbHandler->update($query);
 	}
 }
@@ -690,11 +743,9 @@ sub recordBIBMARCChanges
 	my $bibID = @_[0];
 	my $oldMARC = @_[1];
 	my $newMARC = @_[2];
-	my $dbHandler = @_[3];
-	my $log = @_[4];
 	
 		 my $query = "
-		INSERT INTO pbebrary.bib_marc_update(record,prev_marc,changed_marc,job)
+		INSERT INTO molib2go.bib_marc_update(record,prev_marc,changed_marc,job)
 		VALUES ($bibID,\$1,\$2,$jobid)";
 		my @values = ($oldMARC,$newMARC);
 		$dbHandler->updateWithParameters($query,\@values);
@@ -707,17 +758,17 @@ sub mergeBIBs
 	my $newbib = @_[1];
 	my $dbHandler = @_[2];
 	my $overdriveMatchString = @_[3];
-updateJob($dbHandler,"Processing","mergeBIBs oldbib: $oldbib newbib=$newbib overdriveMatchString=$overdriveMatchString");
+updateJob("Processing","mergeBIBs oldbib: $oldbib newbib=$newbib overdriveMatchString=$overdriveMatchString");
 	my $log = @_[4];	
 	recordAssetCopyMove($oldbib,$newbib,$dbHandler,$overdriveMatchString,$log);
-	my $query = "INSERT INTO pbebrary.bib_merge(leadbib,subbib,job) VALUES($newbib,$oldbib,$jobid)";
+	my $query = "INSERT INTO molib2go.bib_merge(leadbib,subbib,job) VALUES($newbib,$oldbib,$jobid)";
 	#$log->addLine("MERGE:\t$newbib\t$oldbib");
-updateJob($dbHandler,"Processing","mergeBIBs  $query");	
+updateJob("Processing","mergeBIBs  $query");	
 	$log->addLine($query);
 	$dbHandler->update($query);	
 	#print "About to merge assets\n";
 	$query = "SELECT asset.merge_record_assets($newbib, $oldbib)";
-updateJob($dbHandler,"Processing","mergeBIBs  $query");
+updateJob("Processing","mergeBIBs  $query");
 	$log->addLine($query);
 	$dbHandler->query($query);
 	#print "Merged\n";
@@ -773,7 +824,7 @@ sub removeBibsEvergreen
 	my $loops = 0;
 	my $query;	
 	#print "Working on removeBibsEvergreen\n";
-	updateJob($dbHandler,"Processing","removeBibsEvergreen");
+	updateJob("Processing","removeBibsEvergreen");
 	while ( my $marc = $file->next() ) 
 	{
 		# if($loops < 5)
@@ -820,7 +871,7 @@ sub importMARCintoEvergreen
 	my $overlay = 0;
 	my $query;	
 	#print "Working on importMARCintoEvergreen\n";
-	updateJob($dbHandler,"Processing","importMARCintoEvergreen");
+	updateJob("Processing","importMARCintoEvergreen");
 	
 	while ( my $marc = $file->next() ) 
 	{
@@ -830,9 +881,9 @@ sub importMARCintoEvergreen
 			#my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
 			my $title = getsubfield($marc,'245','a');
 			#print "Importing $title\n";
-updateJob($dbHandler,"Processing","CalcSHA1");
+updateJob("Processing","CalcSHA1");
 			my $sha1 = calcSHA1($marc);
-updateJob($dbHandler,"Processing","updating 245h and 856z");
+updateJob("Processing","updating 245h and 856z");
 			$marc = readyMARCForInsertIntoME($marc);
 			my $bibid=-1;
 			my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
@@ -848,9 +899,9 @@ updateJob($dbHandler,"Processing","updating 245h and 856z");
 			{
 				my $starttime = time;
 				my $max = getEvergreenMax($dbHandler);
-				my $thisXML = convertMARCtoXML($marc,$log);
+				my $thisXML = convertMARCtoXML($marc);
 				my @values = ($thisXML);
-				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$1,null,$bibsourceid,\$\$pbebrary-script $sha1\$\$,null,null)";
+				$query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$1,null,$bibsourceid,\$\$$importSourceNameDB-script $sha1\$\$,null,null)";
 				$log->addLine($query);
 				my $res = $dbHandler->updateWithParameters($query,\@values);
 				#print "$res";
@@ -859,8 +910,8 @@ updateJob($dbHandler,"Processing","updating 245h and 856z");
 				{
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
-					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml");
-					$query = "INSERT INTO pbebrary.bib_marc_update(record,changed_marc,new_record,job) VALUES($newmax,\$1,true,$jobid)";
+					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$query = "INSERT INTO molib2go.bib_marc_update(record,changed_marc,new_record,job) VALUES($newmax,\$1,true,$jobid)";
 					my @values = ($thisXML);
 					$dbHandler->updateWithParameters($query,\@values);
 				}
@@ -897,26 +948,52 @@ sub attemptRemoveBibs
 	{
 		my @attrs = @{$_};	
 		my $id = @attrs[0];
+		my $marcobj = @attrs[1];
 		my $score = @attrs[2];
 		my $marcxml = @attrs[3];
-		my $query = "SELECT ID,BARCODE FROM ASSET.COPY WHERE CALL_NUMBER IN
-		(SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$id) AND NOT DELETED";
-		$log->addLine($query);
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
+		my $answer = decideToDeleteOrRemove9($marcobj);
+		if($answer==1)
 		{
-			my @row = @{$_};
-			my $cid = @row[0];
-			my $cbarcode = @row[1];
-			my @copy = ($id,$cid,$cbarcode);
-			push(@notworked, [@copy]);
-		}
-		if($#results == -1)
-		{
-			removeOldCallNumberURI($id,$dbHandler);
-			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET DELETED=\$\$t\$\$ WHERE ID = \$1";
+			my $query = "SELECT ID,BARCODE FROM ASSET.COPY WHERE CALL_NUMBER IN
+			(SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$id) AND NOT DELETED";
 			$log->addLine($query);
-			my @values = ($id);
+			my @results = @{$dbHandler->query($query)};
+			foreach(@results)
+			{
+				my @row = @{$_};
+				my $cid = @row[0];
+				my $cbarcode = @row[1];
+				my @copy = ($id,$cid,$cbarcode);
+				push(@notworked, [@copy]);
+			}
+			if($#results == -1)
+			{
+				removeOldCallNumberURI($id,$dbHandler);
+				my $query = "UPDATE BIBLIO.RECORD_ENTRY SET DELETED=\$\$t\$\$ WHERE ID = \$1";
+				$log->addLine($query);
+				my @values = ($id);
+				my $res = $dbHandler->updateWithParameters($query,\@values);
+				if($res)
+				{
+					my @temp = ($id, $title);
+					push (@updated, [@temp]);
+				}
+				else
+				{
+					my @copy = ($id,$title,"Error during delete");
+					push (@notworked, [@copy]);
+				}
+			}
+		}
+		else
+		{
+			my $finalMARCXML = convertMARCtoXML($answer);
+			recordBIBMARCChanges($id, $marcxml, $finalMARCXML);
+			my @values = ($finalMARCXML);
+			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 WHERE ID=$id";
+		updateJob("Processing","chooseWinnerAndDeleteRest   $query");
+			$log->addLine($query);
+			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t0");
 			my $res = $dbHandler->updateWithParameters($query,\@values);
 			if($res)
 			{
@@ -928,6 +1005,7 @@ sub attemptRemoveBibs
 				my @copy = ($id,$title,"Error during delete");
 				push (@notworked, [@copy]);
 			}
+			
 		}
 	}
 	my @ret;
@@ -935,6 +1013,84 @@ sub attemptRemoveBibs
 	push @ret, [@notworked];
 	
 	return \@ret;
+}
+
+sub decideToDeleteOrRemove9
+{
+	my $marc = @_[0];
+	my @eight56s = $marc->field("856");
+	my @eights;
+	my $original856 = $#eight56s + 1;
+
+	my %urls;
+	my $nonMatch = 0;
+	foreach(@eight56s)
+	{
+		my $thisField = $_;
+		my $ind2 = $thisField->indicator(2);
+		if($ind2 eq '0')
+		{	
+			my @ninposes;
+			my $poses=0;
+			#deleting subfields requires knowledge of what position among all of the subfields they reside.
+			#so we have to record at what positions each of the 9's are ahead of time.
+			foreach($thisField->subfields())
+			{
+				
+				my @f = @{$_};
+				if(@f[0] eq '9')
+				{
+					push (@ninposes, $poses);
+				}
+				$poses++;
+			}
+			my @nines = $thisField->subfield("9");
+			my @delete9s = ();			
+			my $ninePos = 0;
+			my $nonMatchThis856 = 0;
+			foreach(@nines)
+			{
+				my $looking = $_;
+				my $found = 0;
+				foreach(@shortnames)
+				{
+					if($looking eq $_)
+					{
+						$found=1;
+					}
+				}					
+				if($found)
+				{
+					push(@delete9s, @ninposes[$ninePos]);
+				}
+				else
+				{
+					$nonMatch=1;
+					$nonMatchThis856 = 1;
+				}
+				$ninePos++;
+			}
+			if(!$nonMatchThis856)
+			{
+				#Just delete the whole field because it only contains these 9's
+				$marc->delete_field($thisField);
+			}
+			else
+			{
+				#Some of the 9's do not belong to this group, so we just want to delete ours
+				#and preserve the record
+				$thisField->delete_subfield(code=> '9', 'pos' => \@delete9s);
+			}
+		}
+		
+	}
+	if(!$nonMatch) #all of the 9s on this record belong to this group and no one else, time to delete the record
+	{
+		return 1;
+	}
+	#There were some 9s for other groups, just remove ours and preserve the record
+	return $marc;
+	
 }
 
 
@@ -990,21 +1146,21 @@ sub chooseWinnerAndDeleteRest
 		$i++;
 	}
 	#attempt to move any items on the winning bib that were deduped 6-28-2013
-	moveAssetCopyToPreviouslyDedupedBib($dbHandler,$winnerBibID,$overdriveMatchString,$log);
-	# melt the incoming ebrary 856's retaining the rest of the marc from the DB
-	# At this point, the 9's have been added to the newMarc (data from ebrary)
+	moveAssetCopyToPreviouslyDedupedBib($winnerBibID,$overdriveMatchString);
+	# melt the incoming molib2go 856's retaining the rest of the marc from the DB
+	# At this point, the 9's have been added to the newMarc (data from molib2go)
 	$finalMARC = mergeMARC856($finalMARC, $newMarc, $log);
 	$finalMARC = fixLeader($finalMARC);
-	my $newmarcforrecord = convertMARCtoXML($finalMARC,$log);
-	recordBIBMARCChanges($winnerBibID, $winnerOGMARCxml, $newmarcforrecord, $dbHandler,$log);	
-	my $thisXML = convertMARCtoXML($finalMARC, $log);
+	my $newmarcforrecord = convertMARCtoXML($finalMARC);
+	recordBIBMARCChanges($winnerBibID, $winnerOGMARCxml, $newmarcforrecord);
+	my $thisXML = convertMARCtoXML($finalMARC);
 	my @values = ($thisXML);
 	#$log->addLine($thisXML);
-	my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1,tcn_source=\$\$pbebrary-script $sha1\$\$,source=$bibsourceid WHERE ID=$winnerBibID";
-updateJob($dbHandler,"Processing","chooseWinnerAndDeleteRest   $query");
+	my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1,tcn_source=\$\$$importSourceNameDB-script $sha1\$\$,source=$bibsourceid WHERE ID=$winnerBibID";
+updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	$log->addLine($query);
 	$log->addLine($thisXML);
-	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\t$matchnum");
+	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$matchnum");
 	my $res = $dbHandler->updateWithParameters($query,\@values);
 	#print "$res\n";
 	if($res)
@@ -1026,15 +1182,13 @@ updateJob($dbHandler,"Processing","chooseWinnerAndDeleteRest   $query");
 
 sub moveAssetCopyToPreviouslyDedupedBib
 {
-	my $dbHandler = @_[0];	
-	my $currentBibID = @_[1];
-	my $overdriveMatchString = @_[2];
-	my $log = @_[3];
+	my $currentBibID = @_[0];
+	my $overdriveMatchString = @_[1];
 	my %possibles;
-	#this query will only return previously deleted bibs that do not have the ebrary 001 field ($overdriveMatchString)
+	#this query will only return previously deleted bibs that do not have the molib2go 001 field ($overdriveMatchString)
 	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
 	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid and bre.marc !~ \$\$$overdriveMatchString\$\$";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 	#print $query."\n";
 	my @results = @{$dbHandler->query($query)};
 	my $winner=0;
@@ -1091,7 +1245,7 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 				{
 					$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $winner";
 					$log->addLine($query);
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 					my @results = @{$dbHandler->query($query)};
 					foreach(@results)
 					{	
@@ -1110,20 +1264,20 @@ updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query")
 		}
 		#find all of the eligible call_numbers
 		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{	
 			my @row = @{$_};
 			my $acnid = @row[0];
 			$query = 
-"INSERT INTO pbebrary.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
+"INSERT INTO molib2go.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
 VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
 			$log->addLine($query);
 			$dbHandler->update($query);
 			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
-updateJob($dbHandler,"Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
+updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
 			$log->addLine($query);
 			$dbHandler->update($query);
 		}
@@ -1137,9 +1291,9 @@ sub moveHolds
 	my $oldBib = @_[1];
 	my $newBib = @_[2];
 	my $log = @_[3];	
-	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE='T' AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
+	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE=\$\$T\$\$ AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
 	$log->addLine($query);
-	updateJob($dbHandler,"Processing","moveHolds  $query");
+	updateJob("Processing","moveHolds  $query");
 	#print $query."\n";
 	$dbHandler->update($query);
 }	
@@ -1193,7 +1347,7 @@ sub findRecord
 	my $bibsourceid = @_[3];
 	my $log = @_[4];
 	my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.tcn_source ~ \$\$$sha1\$\$ and bre.source=$bibsourceid and bre.deleted is false";
-updateJob($dbHandler,"Processing","$query");
+updateJob("Processing","$query");
 	my @results = @{$dbHandler->query($query)};
 	my @ret;
 	my $none=1;
@@ -1222,7 +1376,7 @@ updateJob($dbHandler,"Processing","$query");
 		$foundIDs="-1";
 	}
 	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-updateJob($dbHandler,"Processing","$query");
+updateJob("Processing","$query");
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -1239,13 +1393,13 @@ updateJob($dbHandler,"Processing","$query");
 		push (@ret, [@matched001]);	
 		$none=0;
 		$count++;
-	}	
+	}
 	if($none)
 	{
 		return -1;
 	}
 	print "Count matches: $count\n";
-updateJob($dbHandler,"Processing","Count matches: $count");
+updateJob("Processing","Count matches: $count");
 	return \@ret;
 	
 }
@@ -1305,8 +1459,8 @@ sub readyMARCForInsertIntoME
 					}
 					if(!$ignore)
 					{
-						#$thisfield->delete_subfield(code => 'z');					
-						#$thisfield->add_subfields('z'=> "Instantly available on ebrary");
+						$thisfield->delete_subfield(code => 'z');					
+						$thisfield->add_subfields('z'=> "Instantly available on overdrive");
 					}
 				}
 			}
@@ -1469,8 +1623,7 @@ sub getTCN
 
 sub convertMARCtoXML
 {
-	my $marc = @_[0];
-	my $log = @_[1];
+	my $marc = @_[0];	
 	my $thisXML =  decode_utf8($marc->as_xml());				
 	
 	#this code is borrowed from marc2bre.pl
@@ -1492,7 +1645,6 @@ sub convertMARCtoXML
 
 sub getbibsource
 {
-	my $dbHandler = @_[0];
 	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
@@ -1523,13 +1675,12 @@ sub getbibsource
 
 sub createNewJob
 {
-	my $dbHandler = @_[0];
-	my $status = @_[1];
-	my $query = "INSERT INTO pbebrary.job(status) values('$status')";
+	my $status = @_[0];
+	my $query = "INSERT INTO molib2go.job(status) values('$status')";
 	my $results = $dbHandler->update($query);
 	if($results)
 	{
-		$query = "SELECT max( ID ) FROM pbebrary.job";
+		$query = "SELECT max( ID ) FROM molib2go.job";
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{
@@ -1544,12 +1695,31 @@ sub createNewJob
 
 sub updateJob
 {
-	my $dbHandler = @_[0];
-	my $status = @_[1];
-	my $action = @_[2];
-	my $query = "UPDATE pbebrary.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+	my $status = @_[0];
+	my $action = @_[1];
+	my $query = "UPDATE molib2go.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
 	my $results = $dbHandler->update($query);
 	return $results;
+}
+
+sub findPBrecordInME
+{
+	my $dbHandler = @_[0];	
+	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ '\"9\">PB' limit 14";
+	my $query = "select id,marc from biblio.record_entry where marc ~* 'overdrive' AND marc ~* 'ebook' AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!=\$\$##URI##\$\$ and deleted is false)";
+	my @results = @{$dbHandler->query($query)};
+	my @each;
+	my @ret;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $id = @row[0];
+		my $marc = @row[1];
+		@each = ($id,$marc);
+		push(@ret,[@each]);	
+	}
+	return \@ret;
 }
 
 sub findMatchInArchive
@@ -1756,13 +1926,13 @@ sub field_length
 sub setupSchema
 {
 	my $dbHandler = @_[0];
-	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'pbebrary'";
+	my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'molib2go'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
 	{
-		$query = "CREATE SCHEMA pbebrary";
+		$query = "CREATE SCHEMA molib2go";
 		$dbHandler->update($query);	
-		$query = "CREATE TABLE pbebrary.job
+		$query = "CREATE TABLE molib2go.job
 		(
 		id bigserial NOT NULL,
 		start_time timestamp with time zone NOT NULL DEFAULT now(),
@@ -1773,7 +1943,7 @@ sub setupSchema
 		CONSTRAINT job_pkey PRIMARY KEY (id)
 		  )";		  
 		$dbHandler->update($query);
-		$query = "CREATE TABLE pbebrary.item_reassignment(
+		$query = "CREATE TABLE molib2go.item_reassignment(
 		id serial,
 		copy bigint,
 		prev_bib bigint,
@@ -1781,10 +1951,10 @@ sub setupSchema
 		change_time timestamp default now(),
 		job  bigint NOT NULL,
 		CONSTRAINT item_reassignment_fkey FOREIGN KEY (job)
-		REFERENCES pbebrary.job (id) MATCH SIMPLE
+		REFERENCES molib2go.job (id) MATCH SIMPLE
 		)";
 		$dbHandler->update($query);
-		$query = "CREATE TABLE pbebrary.bib_marc_update(
+		$query = "CREATE TABLE molib2go.bib_marc_update(
 		id serial,
 		record bigint,
 		prev_marc text,
@@ -1793,18 +1963,18 @@ sub setupSchema
 		change_time timestamp default now(),
 		job  bigint NOT NULL,
 		CONSTRAINT bib_marc_update_fkey FOREIGN KEY (job)
-		REFERENCES pbebrary.job (id) MATCH SIMPLE)";
+		REFERENCES molib2go.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
-		$query = "CREATE TABLE pbebrary.bib_merge(
+		$query = "CREATE TABLE molib2go.bib_merge(
 		id serial,
 		leadbib bigint,
 		subbib bigint,
 		change_time timestamp default now(),
 		job  bigint NOT NULL,
 		CONSTRAINT bib_merge_fkey FOREIGN KEY (job)
-		REFERENCES pbebrary.job (id) MATCH SIMPLE)";
+		REFERENCES molib2go.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
-		$query = "CREATE TABLE pbebrary.undedupe(
+		$query = "CREATE TABLE molib2go.undedupe(
 		id serial,
 		oldleadbib bigint,
 		undeletedbib bigint,
@@ -1814,9 +1984,9 @@ sub setupSchema
 		change_time timestamp default now(),
 		job  bigint NOT NULL,
 		CONSTRAINT undedupe_fkey FOREIGN KEY (job)
-		REFERENCES pbebrary.job (id) MATCH SIMPLE)";
+		REFERENCES molib2go.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
-		$query = "CREATE TABLE pbebrary.nine_sync(
+		$query = "CREATE TABLE molib2go.nine_sync(
 		id serial,
 		record bigint,
 		nines_synced text,

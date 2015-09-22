@@ -38,6 +38,7 @@ use Digest::SHA1;
  my $conf = $mobUtil->readConfFile($configFile);
  
  our $jobid=-1;
+ our $log;
  
  if($conf)
  {
@@ -48,7 +49,7 @@ use Digest::SHA1;
 		my $fdate = $dt->ymd; 
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
-		my $log = new Loghandler($conf->{"logfile"});
+		$log = new Loghandler($conf->{"logfile"});
 		#$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		my @reqs = ("server","login","password","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
@@ -1031,7 +1032,7 @@ sub moveHolds
 	my $oldBib = @_[1];
 	my $newBib = @_[2];
 	my $log = @_[3];	
-	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE='T' AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
+	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE=\$\$T\$\$ AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
 	$log->addLine($query);
 	updateJob($dbHandler,"Processing","moveHolds  $query");
 	#print $query."\n";

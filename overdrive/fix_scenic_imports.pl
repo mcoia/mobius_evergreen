@@ -112,11 +112,11 @@ use Digest::SHA1;
 					$molibmarc = add9($molibmarc,\@shortnames);
 					$finalMARC = mergeMARC856($molibmarc, $bibmarc, $log);
 					$finalMARC = readyMARCForInsertIntoME($finalMARC);
-					$finalMARC = convertMARCtoXML($finalMARC,$log);
+					$finalMARC = convertMARCtoXML($finalMARC);
 				}
 				else
 				{
-					$finalMARC = convertMARCtoXML($bibmarc,$log);
+					$finalMARC = convertMARCtoXML($bibmarc);
 				}				
 				$query = "UPDATE BIBLIO.RECORD_ENTRY SET MARC=\$1,edit_date=now() WHERE ID=$bibid";
 				my @values = ($finalMARC);
@@ -450,7 +450,6 @@ sub mergeMARC856
 sub convertMARCtoXML
 {
 	my $marc = @_[0];
-	my $log = @_[1];
 	my $thisXML =  decode_utf8($marc->as_xml());				
 	
 	#this code is borrowed from marc2bre.pl

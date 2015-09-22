@@ -17,7 +17,9 @@ use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
 
-
+our $importSourceName;
+our $importSourceNameDB;
+our $log;
  my $configFile = @ARGV[0];
  if(!$configFile)
  {
@@ -37,10 +39,10 @@ use DateTime::Format::Duration;
 		my $fdate = $dt->ymd; 
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
-		my $log = new Loghandler($conf->{"logfile"});
+		$log = new Loghandler($conf->{"logfile"});
 		#$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("tempspace","dbhost","db","dbuser","dbpass","port","participants","logfile"); 
+		my @reqs = ("tempspace","dbhost","db","dbuser","dbpass","port","participants","logfile","sourcename"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -56,6 +58,9 @@ use DateTime::Format::Duration;
 		my $dbHandler;
 		if($valid)
 		{	
+			$importSourceName = $conf{"sourcename"};
+			$importSourceNameDB = $importSourceName.' script';
+			$importSourceNameDB =~ s/\s/\-/g;
 			my @shortnames = split(/,/,$conf{"participants"});
 			for my $y(0.. $#shortnames)
 			{				
@@ -72,7 +77,7 @@ use DateTime::Format::Duration;
 				$marc =~ s/(<leader>.........)./${1}a/;
 				my $marcobject = MARC::Record->new_from_xml($marc);
 				$marcobject = add9($marcobject,\@shortnames);
-				my $thisXML = convertMARCtoXML($marcobject, $log);
+				my $thisXML = convertMARCtoXML($marcobject);
 				my $before = substr($marc,index($marc, '<leader>'));
 				my $after = substr($thisXML,index($thisXML, '<leader>'));
 				if($before ne $after)
@@ -159,7 +164,7 @@ sub decidemolib2go856
 		my $foundmolib7=0;
 		foreach(@s7)
 		{
-			if($_ eq 'molib2go')
+			if($_ eq $importSourceName)
 			{
 				$foundmolib7=1;
 			}
@@ -193,9 +198,9 @@ sub getMolib2goList
 	BIBLIO.RECORD_ENTRY WHERE 
 	DELETED IS FALSE AND 
 	ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL=\$\$##URI##\$\$) 
-	AND MARC ~ '<subfield code=\"7\">molib2go'
-	AND TCN_SOURCE~'molib2go'
+	AND MARC ~ '<subfield code=\"7\">$importSourceName'
 	";
+	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my $found=0;
 	foreach(@results)
@@ -224,6 +229,23 @@ sub add9
 			my $ismolib2go = decidemolib2go856(@recID[$rec]);			
 			if($ismolib2go)
 			{
+				my $thisField = @recID[$rec];
+				my @ninposes;
+				my $poses=0;
+				#deleting subfields requires knowledge of what position among all of the subfields they reside.
+				#so we have to record at what positions each of the 9's are ahead of time.
+				foreach($thisField->subfields())
+				{					
+					my @f = @{$_};
+					if(@f[0] eq '9')
+					{
+						push (@ninposes, $poses);
+					}
+					$poses++;
+				}
+				my @nines = $thisField->subfield("9");
+				my @delete9s = ();
+				
 				for my $t(0.. $#shortnames)
 				{
 					my @s7 = @recID[$rec]->subfield( '7' );
@@ -247,6 +269,7 @@ sub add9
 					}
 				}
 				## clean up 9's that are not in the list
+				my $ninePos = 0;
 				for my $recshortname(0.. $#recordshortnames)
 				{
 					my $thisname = @recordshortnames[$recshortname];
@@ -260,10 +283,15 @@ sub add9
 					}
 					if(!$foundshortname)
 					{
-						@recID[$rec]->delete_subfield(code => '9', match => qr/$thisname/);
-						#print " removing $thisname\n";
+						push(@delete9s, @ninposes[$ninePos]);
 					}
+					$ninePos++;
 				}
+				if($#delete9s > -1)
+				{
+					@recID[$rec]->delete_subfield(code => '9', 'pos' => \@delete9s);
+				}
+						
 			}
 		}
 	}
@@ -312,7 +340,6 @@ sub removeOldCallNumberURI
 sub convertMARCtoXML
 {
 	my $marc = @_[0];
-	my $log = @_[1];
 	my $thisXML =  decode_utf8($marc->as_xml());				
 	
 	#this code is borrowed from marc2bre.pl

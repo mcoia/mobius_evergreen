@@ -1144,7 +1144,7 @@ sub getTCN
 sub convertMARCtoXML
 {
 	my $marc = @_[0];
-	my $thisXML = $marc->as_xml();			
+	my $thisXML =  decode_utf8($marc->as_xml());		
 	#this code is borrowed from marc2bre.pl
 	$thisXML =~ s/\n//sog;
 	$thisXML =~ s/^<\?xml.+\?\s*>//go;
@@ -1152,6 +1152,11 @@ sub convertMARCtoXML
 	$thisXML =~ s/\p{Cc}//go;
 	$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
 	$thisXML =~ s/[\x00-\x1f]//go;
+	$thisXML =~ s/^\s+//;
+	$thisXML =~ s/\s+$//;
+	$thisXML =~ s/<record><leader>/<leader>/;
+	$thisXML =~ s/<collection/<record/;	
+	$thisXML =~ s/<\/record><\/collection>/<\/record>/;
 	#end code
 	return $thisXML;
 }
