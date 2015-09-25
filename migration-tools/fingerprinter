@@ -1,0 +1,876 @@
+#!/usr/bin/perl
+
+# Copyright 2009-2012, Equinox Software, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+use strict;
+use warnings;
+use open ':utf8';
+
+use Getopt::Long;
+use MARC::Batch;
+use Unicode::Normalize;
+use MARC::File::XML ( BinaryEncoding => 'utf-8' );
+use Equinox::Migration::SubfieldMapper;
+
+my $conf  = {}; # configuration hashref
+my $count = 0; my $scount = 0;
+my $start = time;
+$| = 1;
+
+initialize($conf);
+
+open OF, '>', $conf->{output} or die "$0: cannot open output file $conf->{output}: $!\n";
+open XF, '>', $conf->{exception} or die "$0: cannot open exception file $conf->{exception}: $!\n";
+
+for my $file (@ARGV) {
+    print XF "Processing $file\n";
+
+    my $batch = MARC::Batch->new($conf->{marctype}, $file);
+    $batch->strict_off();
+    $batch->warnings_off();
+
+    my $record;
+    while ( 1 ) {
+        eval { $record = $batch->next; };
+        if ($@) {
+            import MARC::File::XML;
+            print "skipping bad record: $@\n";
+            next;
+        }
+        last unless $record;
+        $count++; progress_ticker();
+        my $marc = undef;
+        unless ( defined $record )
+          { dump_exception($marc); next; }
+
+        my $id = $record->field($conf->{tag});
+        unless ($id) {
+            print XF "ERROR: Record $count in $file is missing a ",
+              $conf->{tag}, " field.\n", $record->as_formatted(), "\n=====\n";
+            next;
+        }
+
+        # populate and normalize marc
+        $marc = populate_marc($record, $id);
+        # check for manual exclusion
+        next if this_record_is_excluded($record, $marc);
+        normalize_marc($marc);
+        unless (marc_isvalid($marc))
+          { dump_exception($marc); next; }
+
+        # if everything looks good, score it and dump fingerprints
+        score_marc($marc, $record);
+        dump_fingerprints_score_id($marc);
+        $scount++; progress_ticker();
+    }
+}
+
+print "\nSuccessfully processed:\t$count\n" unless $conf->{quiet};
+
+=head2 populate_marc
+
+Constructs a hash containing the relevant MARC data for a record and
+returns a reference to it.
+
+=cut
+
+sub populate_marc {
+    my ($record, $id) = @_;
+    my %marc = (); $marc{isbns} = [];
+
+    # id, stringified
+    $marc{id} = $id->as_string($conf->{subfield});
+
+    # record_type, bib_lvl
+    $marc{record_type} = substr($record->leader, 6, 1);
+    $marc{bib_lvl}     = substr($record->leader, 7, 1);
+
+    # date1, date2
+    my $my_008 = $record->field('008');
+	my @my_007 = $record->field('007');
+	my $my_006 = $record->field('006');
+    $marc{tag008} = $my_008->as_string() if ($my_008);
+    if (defined $marc{tag008}) {
+        unless (length $marc{tag008} == 40) {
+            $marc{tag008} = $marc{tag008} . ('|' x (40 - length($marc{tag008})));
+            print XF ">> Short 008 padded to ",length($marc{tag008})," at rec $count\n";
+        }
+        $marc{date1} = substr($marc{tag008},7,4) if ($marc{tag008});
+        $marc{date2} = substr($marc{tag008},11,4) if ($marc{tag008}); # UNUSED
+    }
+    unless ($marc{date1} and $marc{date1} =~ /\d{4}/) {
+        my $my_260 = $record->field('260');
+        if ($my_260 and $my_260->subfield('c')) {
+            my $date1 = $my_260->subfield('c');
+            $date1 =~ s/\D//g;
+            if (defined $date1 and $date1 =~ /\d{4}/) {
+                $marc{date1} = $date1;
+                $marc{fudgedate} = 1;
+                print XF ">> using 260c as date1 at rec $count\n";
+            }
+        }
+    }	
+	$marc{tag006} = $my_006->as_string() if ($my_006);
+	$marc{tag007} = \@my_007 if (@my_007);
+	$marc{audioformat}='';
+	$marc{videoformat}='';
+	foreach(@my_007)
+	{
+		if(substr($_->data(),0,1) eq 's' && $marc{audioformat} eq '')
+		{
+			$marc{audioformat} = substr($_->data(),3,1) unless (length $_->data() < 4);
+		}
+		elsif(substr($_->data(),0,1) eq 'v' && $marc{videoformat} eq '')
+		{
+			$marc{videoformat} = substr($_->data(),4,1) unless (length $_->data() < 5);
+		}
+	}
+	#print "$marc{audioformat}\n";
+	#print "$marc{videoformat}\n";
+	
+    # item_form
+	$marc{item_form}='';
+    if ( $marc{record_type} =~ /[gkroef]/ ) { # MAP, VIS
+        $marc{item_form} = substr($marc{tag008},29,1) if ($marc{tag008} && (length $marc{tag008} > 29 ));
+    } else {
+        $marc{item_form} = substr($marc{tag008},23,1) if ($marc{tag008} && (length $marc{tag008} > 23 ));
+    }	
+	#fall through to 006 if 008 doesn't have info for item form
+	if ($marc{item_form} eq '|')
+	{
+		$marc{item_form} = substr($marc{tag006},6,1) if ($marc{tag006} && (length $marc{tag006} > 6 ));
+	}	
+
+    # isbns
+    my @isbns = $record->field('020') if $record->field('020');
+    push @isbns, $record->field('024') if $record->field('024');
+    for my $f ( @isbns ) {
+        push @{ $marc{isbns} }, $1 if ( defined $f->subfield('a') and
+                                        $f->subfield('a')=~/(\S+)/ );
+    }
+
+    # author
+    for my $rec_field (100, 110, 111) {
+        if ($record->field($rec_field)) {
+            $marc{author} = $record->field($rec_field)->subfield('a');
+            last;
+        }
+    }
+
+    # oclc
+    $marc{oclc} = [];
+    push @{ $marc{oclc} }, $record->field('001')->as_string()
+      if ($record->field('001') and $record->field('003') and
+          $record->field('003')->as_string() =~ /OCo{0,1}LC/);
+    for ($record->field('035')) {
+        my $oclc = $_->subfield('a');
+        push @{ $marc{oclc} }, $oclc
+          if (defined $oclc and $oclc =~ /\(OCoLC\)/ and $oclc =~/([0-9]+)/);
+    }
+
+    if ($record->field('999')) {
+        my $koha_bib_id = $record->field('999')->subfield('c');
+        $marc{koha_bib_id} = $koha_bib_id if defined $koha_bib_id and $koha_bib_id =~ /^\d+$/;
+    }
+
+    # "Accompanying material" and check for "copy" (300)
+    if ($record->field('300')) {
+        $marc{accomp} = $record->field('300')->subfield('e');
+        $marc{tag300a} = $record->field('300')->subfield('a');
+    }
+
+    # issn, lccn, title, desc, pages, pub, pubyear, edition
+    $marc{lccn} = $record->field('010')->subfield('a') if $record->field('010');
+    $marc{issn} = $record->field('022')->subfield('a') if $record->field('022');
+    $marc{desc} = $record->field('300')->subfield('a') if $record->field('300');
+    $marc{pages} = $1 if (defined $marc{desc} and $marc{desc} =~ /(\d+)/);
+    $marc{title} = $record->field('245')->subfield('a')
+      if $record->field('245');
+    $marc{title} .= ' ' . $record->field('245')->subfield('b')
+      if ($record->field('245') and 
+          $record->field('245')->subfield('b') and 
+          not $conf->{ignoresubtitle});
+    $marc{edition} = $record->field('250')->subfield('a')
+      if $record->field('250');
+    if ($record->field('260')) {
+        $marc{publisher} = $record->field('260')->subfield('b');
+        $marc{pubyear} = $record->field('260')->subfield('c');
+        $marc{pubyear} =
+          (defined $marc{pubyear} and $marc{pubyear} =~ /(\d{4})/) ? $1 : '';
+    }
+    return \%marc;
+}
+
+
+
+=head2 normalize_marc
+
+Gently massages your data.
+
+=cut
+
+sub normalize_marc {
+    my ($marc) = @_;
+
+    $marc->{record_type }= 'a' if ($marc->{record_type} eq ' ');
+    if ($marc->{title}) {
+        $marc->{title} = NFD($marc->{title});
+        $marc->{title} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{title} = lc($marc->{title});
+        $marc->{title} =~ s/\W+$//go;
+    }
+    if ($marc->{author}) {
+        $marc->{author} = NFD($marc->{author});
+        $marc->{author} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{author} = lc($marc->{author});
+        $marc->{author} =~ s/\W+$//go;
+        if ($marc->{author} =~ /^(\w+)/) {
+            $marc->{author} = $1;
+        }
+    }
+    if ($marc->{publisher}) {
+        $marc->{publisher} = NFD($marc->{publisher});
+        $marc->{publisher} =~ s/[\x{80}-\x{ffff}]//go;
+        $marc->{publisher} = lc($marc->{publisher});
+        $marc->{publisher} =~ s/\W+$//go;
+        if ($marc->{publisher} =~ /^(\w+)/) {
+            $marc->{publisher} = $1;
+        }
+    }
+    return $marc;
+}
+
+
+
+=head2 marc_isvalid
+
+Checks MARC record to see if neccessary fingerprinting data is
+available
+
+=cut
+
+sub marc_isvalid {
+    my ($marc) = @_;
+    return 1 if ($marc->{item_form} and ($marc->{date1} =~ /\d{4}/) and
+                 $marc->{record_type} and $marc->{bib_lvl} and $marc->{title});
+    return 0;
+}
+
+
+=head2 score_marc
+
+Assign a score to the record based on various criteria.
+
+Score is constructed by pushing elements onto a list, via a dispatch
+table.  This allows order of fingerprints in the output file to be
+varied.
+
+=cut
+
+sub score_marc {
+    my ($marc, $record) = @_;
+    my @score = ();
+    my $json = '{';
+
+    #----------------------------------
+    # static criteria scoring
+    #----------------------------------
+    $marc->{misc_score} = 999;
+    $marc->{age_score}  = 999999999999;
+
+    # -1 if 008 has been padded, -2 if it doesn't exist
+    if ($marc->{tag008})
+      { $marc->{misc_score}-- if ($marc->{tag008} =~ /\|$/) }
+    else
+      { $marc->{misc_score} -= 2 }
+    # -1 if date has been pulled from 260
+    $marc->{misc_score}-- if $marc->{fudgedate};
+    # -1 if this is a copy record
+    $marc->{misc_score}--
+      if (defined $marc->{tag300a} and $marc->{tag300a} =~ /copy/i);
+
+    # subtract record id if we want older records to win
+    #$marc->{age_score} -= $marc->{id} unless ($conf->{newwins});
+    # handle arbitrary adjustments
+    $marc->{age_score} = 1;
+    if ($conf->{'arbitrarily-lose-above'}) {
+        $marc->{age_score} = 0
+          if ($marc->{id} >= $conf->{'arbitrarily-lose-above'});
+    }
+    if ($conf->{'arbitrarily-lose-below'}) {
+        $marc->{age_score} = 0
+          if ($marc->{id} <= $conf->{'arbitrarily-lose-below'});
+    }
+
+    #----------------------------------
+    # dynamic calculated scoring
+    #----------------------------------
+    my %scores_code = (
+      oclc    => sub { return $marc->{oclc}[0] ? 1 : 0 },
+      dlc     => sub {
+          if ($record->field('040') and $record->field('040')->subfield('a'))
+            { return scalar($record->subfield( '040', 'a')) =~ /dlc/io ? 1 : 0 }
+          else { return 0 }
+      },
+      num_650 => sub {
+          if ($record->field('650')) {
+              # can't say "scalar $record->field('650')"; MARC::Record
+              # behaves differently in list/scalar contexts
+              my @tags = $record->field('650');
+              return sprintf("%04d", scalar @tags)
+          } else { return '0000' }
+      },
+      num_tags=> sub { return sprintf( '%04d', scalar( $record->fields ) ) },
+      enc_lvl => sub {
+        my $enc = substr($record->leader, 17, 1) || 'u';
+        my %levels = ( ' ' => 9, 1 => 8, 2 => 7,  3  => 6,  4  => 5, 5 => 4,
+                       6   => 3, 7 => 2, 8 => 1, 'u' => 0, 'z' => 0 );
+        return $levels{$enc} || 0;
+    }
+                      );
+
+    #----------------------------------
+    # assemble and store scores
+    #----------------------------------
+    for ( @{ $conf->{dyn_scores} } ) {
+        push @score, $scores_code{$_}->($marc, $record);
+        $json .= $_ . ':' . $score[-1] . ',';
+    }
+    $json .= 'misc:' . $marc->{misc_score} . '}';
+
+    my $compact = join('', $marc->{age_score}, $marc->{misc_score}, @score);
+    $marc->{score} = "$compact\t$json";
+}
+
+=head2 dump_fingerprints
+
+=cut
+
+sub dump_fingerprints {
+    my ($marc) = @_;
+
+    if ($conf->{fingerprints}{baseline}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, 'baseline',
+                      $marc->{item_form}, $marc->{date1}, $marc->{record_type},
+                      $marc->{bib_lvl}, $marc->{title}), "\n";
+    }
+
+    if ($conf->{fingerprints}{oclc} and scalar @{$marc->{oclc} }) {
+        for (@{$marc->{oclc} }) {
+            print OF join("\t", $marc->{score}, $marc->{id}, "oclc",
+                          $marc->{item_form}, $marc->{date1},
+                          $marc->{record_type}, $marc->{bib_lvl},
+                          $marc->{title}, $_, "\n");
+        }
+    }
+
+    if ($conf->{fingerprints}{koha_bib_id} and exists $marc->{koha_bib_id}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, "z_koha_bib_id",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type},
+                      $marc->{bib_lvl}, $marc->{title},
+                      $marc->{koha_bib_id}), "\n";
+    }
+
+    if ($conf->{fingerprints}{isbn}) {
+        if ((scalar @{ $marc->{isbns} } > 0) and $marc->{pages}) {
+            foreach my $isbn ( @{ $marc->{isbns}} ) {
+                print OF join("\t", $marc->{score}, $marc->{id}, "isbn",
+                              $marc->{item_form}, $marc->{date1},
+                              $marc->{record_type},
+                              $marc->{bib_lvl}, $marc->{title},
+                              $isbn, $marc->{pages}), "\n";
+            }
+        }
+    }
+
+    if ($conf->{fingerprints}{edition} and $marc->{edition} and $marc->{author}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, "edition",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{author}, $marc->{edition}), "\n";
+    }
+
+    if ($conf->{fingerprints}{issn} and $marc->{issn}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, "issn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{issn}), "\n";
+    }
+
+    if ($conf->{fingerprints}{lccn} and $marc->{lccn}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, "lccn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{lccn}) ,"\n";
+    }
+
+    if ($conf->{fingerprints}{accomp} and $marc->{accomp}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, "accomp",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{accomp}) ,"\n";
+    }
+
+    if ($conf->{fingerprints}{authpub} and $marc->{author} and
+        $marc->{publisher} and $marc->{pubyear} and $marc->{pages}) {
+        print OF join("\t", $marc->{score}, $marc->{id}, "authpub",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{author},
+                      $marc->{publisher}, $marc->{pubyear},
+                      $marc->{pages}), "\n";
+    }
+}
+
+sub dump_fingerprints_score_id {
+    my ($marc) = @_;
+
+    if ($conf->{fingerprints}{baseline}) {		
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, 'baseline',
+                      $marc->{item_form}, $marc->{date1}, $marc->{record_type},
+                      $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat}, $marc->{title}), "\n";
+    }
+
+    if ($conf->{fingerprints}{oclc} and scalar @{$marc->{oclc} }) {
+        for (@{$marc->{oclc} }) {
+            print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "oclc",
+                          $marc->{item_form}, $marc->{date1},
+                          $marc->{record_type}, $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat},
+                          $marc->{title}, $_, "\n");
+        }
+    }
+
+    if ($conf->{fingerprints}{koha_bib_id} and exists $marc->{koha_bib_id}) {
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "z_koha_bib_id",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type},
+                      $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat}, $marc->{title},
+                      $marc->{koha_bib_id}), "\n";
+    }
+
+    if ($conf->{fingerprints}{isbn}) {
+        if ((scalar @{ $marc->{isbns} } > 0) and $marc->{pages}) {
+            foreach my $isbn ( @{ $marc->{isbns}} ) {
+                print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "isbn",
+                              $marc->{item_form}, $marc->{date1},
+                              $marc->{record_type},
+                              $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat}, $marc->{title},
+                              $isbn, $marc->{pages}), "\n";
+            }
+        }
+    }
+
+    if ($conf->{fingerprints}{edition} and $marc->{edition} and $marc->{author}) {
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "edition",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat},
+                      $marc->{title}, $marc->{author}, $marc->{edition}), "\n";
+    }
+
+    if ($conf->{fingerprints}{issn} and $marc->{issn}) {
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "issn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat},
+                      $marc->{title}, $marc->{issn}), "\n";
+    }
+
+    if ($conf->{fingerprints}{lccn} and $marc->{lccn}) {
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "lccn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat},
+                      $marc->{title}, $marc->{lccn}) ,"\n";
+    }
+
+    if ($conf->{fingerprints}{accomp} and $marc->{accomp}) {
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "accomp",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat},
+                      $marc->{title}, $marc->{accomp}) ,"\n";
+    }
+
+    if ($conf->{fingerprints}{authpub} and $marc->{author} and
+        $marc->{publisher} and $marc->{pubyear} and $marc->{pages}) {
+        print OF join("\t", sortvalfromid($marc->{id}),"json", $marc->{id}, "authpub",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},$marc->{audioformat},$marc->{videoformat},
+                      $marc->{title}, $marc->{author},
+                      $marc->{publisher}, $marc->{pubyear},
+                      $marc->{pages}), "\n";
+    }
+}
+
+sub sortvalfromid
+{
+	my $sortval = shift;
+	while(length($sortval)<17)
+	{
+		$sortval = '0'.$sortval;
+	}
+	return $sortval;
+}
+
+sub dump_fingerprints_hash_score {
+    my ($marc) = @_;
+
+    if ($conf->{fingerprints}{baseline}) {
+		my $string = join("", 'baseline',
+                      $marc->{item_form}, $marc->{date1}, $marc->{record_type},
+                      $marc->{bib_lvl}, $marc->{title});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, 'baseline',
+                      $marc->{item_form}, $marc->{date1}, $marc->{record_type},
+                      $marc->{bib_lvl}, $marc->{title}), "\n";
+    }
+
+    if ($conf->{fingerprints}{oclc} and scalar @{$marc->{oclc} }) {
+        for (@{$marc->{oclc} }) {
+			my $string = join("", "oclc",
+                          $marc->{item_form}, $marc->{date1},
+                          $marc->{record_type}, $marc->{bib_lvl},
+                          $marc->{title}, $_);
+			$string =~ s/[^A-Za-z0-9]//g;
+			$string = sha1_base64($string);
+            print OF join("\t", $string,"json", $marc->{id}, "oclc",
+                          $marc->{item_form}, $marc->{date1},
+                          $marc->{record_type}, $marc->{bib_lvl},
+                          $marc->{title}, $_, "\n");
+        }
+    }
+
+    if ($conf->{fingerprints}{koha_bib_id} and exists $marc->{koha_bib_id}) {
+		my $string = join("", "z_koha_bib_id",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type},
+                      $marc->{bib_lvl}, $marc->{title},
+                      $marc->{koha_bib_id});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, "z_koha_bib_id",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type},
+                      $marc->{bib_lvl}, $marc->{title},
+                      $marc->{koha_bib_id}), "\n";
+    }
+
+    if ($conf->{fingerprints}{isbn}) {
+        if ((scalar @{ $marc->{isbns} } > 0) and $marc->{pages}) {
+            foreach my $isbn ( @{ $marc->{isbns}} ) {
+				my $string = join("", "isbn",
+                              $marc->{item_form}, $marc->{date1},
+                              $marc->{record_type},
+                              $marc->{bib_lvl}, $marc->{title},
+                              $isbn, $marc->{pages});
+				$string =~ s/[^A-Za-z0-9]//g;
+				$string = sha1_base64($string);
+                print OF join("\t", $string,"json", $marc->{id}, "isbn",
+                              $marc->{item_form}, $marc->{date1},
+                              $marc->{record_type},
+                              $marc->{bib_lvl}, $marc->{title},
+                              $isbn, $marc->{pages}), "\n";
+            }
+        }
+    }
+
+    if ($conf->{fingerprints}{edition} and $marc->{edition} and $marc->{author}) {
+		my $string = join("", "edition",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{author}, $marc->{edition});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, "edition",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{author}, $marc->{edition}), "\n";
+    }
+
+    if ($conf->{fingerprints}{issn} and $marc->{issn}) {
+		my $string = join("", "issn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{issn});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, "issn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{issn}), "\n";
+    }
+
+    if ($conf->{fingerprints}{lccn} and $marc->{lccn}) {
+		my $string = join("", "lccn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{lccn});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, "lccn",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{lccn}) ,"\n";
+    }
+
+    if ($conf->{fingerprints}{accomp} and $marc->{accomp}) {
+		my $string = join("", "accomp",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{accomp});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, "accomp",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{accomp}) ,"\n";
+    }
+
+    if ($conf->{fingerprints}{authpub} and $marc->{author} and
+        $marc->{publisher} and $marc->{pubyear} and $marc->{pages}) {
+		my $string = join("", "authpub",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{author},
+                      $marc->{publisher}, $marc->{pubyear},
+                      $marc->{pages});
+		$string =~ s/[^A-Za-z0-9]//g;
+		$string = sha1_base64($string);
+        print OF join("\t", $string,"json", $marc->{id}, "authpub",
+                      $marc->{item_form}, $marc->{date1},
+                      $marc->{record_type}, $marc->{bib_lvl},
+                      $marc->{title}, $marc->{author},
+                      $marc->{publisher}, $marc->{pubyear},
+                      $marc->{pages}), "\n";
+    }
+}
+
+
+
+=head2 dump_exception
+
+Write line of exception report
+
+=cut
+
+sub dump_exception {
+    my ($marc, $msg) = @_;
+    unless (defined $marc) {
+        print XF "Undefined record at line $count; likely bad XML\n";
+        return;
+    }
+
+    print XF "Record ", $marc->{id}, " excluded: ";
+    if (defined $msg) {
+        print XF "$msg\n";
+        return
+    }
+
+    print XF "missing item_form; " unless ($marc->{item_form});
+    unless (defined $marc->{date1})
+      { print XF "missing date1; " }
+    else
+      { print XF "invalid date1: '", $marc->{date1}, "'; "
+          unless ($marc->{date1} =~ /\d{4}/); }
+    print XF "missing record_type; " unless ($marc->{record_type});
+    print XF "missing bib_lvl; " unless ($marc->{bib_lvl});
+    print XF "missing title " unless ($marc->{title});
+    print XF "\n";
+}
+
+
+=head2 this_record_is_excluded
+
+Returns 1 if the record B<is> and 0 if the record B<is not> excluded,
+according to the subfield mapping (generated via the C<--excludelist>
+option).
+
+=cut
+
+sub this_record_is_excluded {
+    my ($rec, $marc) = @_;
+    return 0 unless defined $conf->{excludelist};
+
+    for my $tag (keys %{ $conf->{excludelist}->{tags} }) {
+        for my $sub (keys %{$conf->{excludelist}->{tags}{$tag}}) {
+            my $f = $conf->{excludelist}->field($tag, $sub);
+
+            # if this record doesn't have the right tag/sub, it can't be
+            return 0 unless ($rec->field($tag) and $rec->field($tag)->subfield($sub));
+            # but it does, so if there are no filters to check...
+            unless ($conf->{excludelist}->filters($f))
+              { dump_exception($marc, "exclusion $tag$sub"); return 1 }
+
+            my $sub_contents = $rec->field($tag)->subfield($sub);
+            for my $filter (@{ $conf->{excludelist}->filters($f)}) {
+                if ($sub_contents =~ /$filter/i) {
+                    # filter matches. no fp.
+                    dump_exception($marc, "exclusion $tag$sub '$filter'");
+                    return 1;
+                }
+                # no match, no exclude
+                return 0;
+            }
+        }
+    }
+}
+
+=head2 initialize
+
+Performs boring script initialization. Handles argument parsing,
+mostly.
+
+=cut
+
+sub initialize {
+    my ($c) = @_;
+    my @missing = ();
+
+    # set mode on existing filehandles
+    binmode(STDIN, ':utf8');
+
+    my $rc = GetOptions( $c,
+                         'exception|x=s',
+                         'output|o=s',
+                         'prefix|p=s',
+                         'marctype|m=s',
+                         'subfield|s=s',
+                         'tag|t=s',
+                         'fingerprints=s',
+                         'scores=s',
+                         'arbitrarily-lose-above=i',
+                         'arbitrarily-lose-below=i',
+                         'newwins',
+                         'excludelist=s',
+                         'ignoresubtitle|i',
+                         'quiet|q',
+                         'help|h',
+                       );
+    show_help() unless $rc;
+    show_help() if ($c->{help});
+
+    # check fingerprints list for validity
+    if ($c->{fingerprints}) {
+        my %fps = ();
+        my %valid_fps = ( oclc => 1, isbn => 1, issn => 1, lccn => 1,
+                          edition => 1, accomp => 1, authpub => 1,
+                          baseline => 1, crap => 1,
+                          koha_bib_id => 1,
+                        );
+        for (split /,/, $c->{fingerprints}) {
+            die "Invalid fingerprint '$_'\n" unless $valid_fps{$_};
+            $fps{$_} = 1;
+        }
+        $c->{fingerprints} = \%fps
+    } else {
+        $c->{fingerprints} = {oclc => 1, isbn => 1, edition => 1, issn => 1,
+                              lccn => 1, accomp => 1, authpub => 1};
+    }
+
+    # check scores list for validity
+    if ($c->{scores}) {
+        my %scores = ();
+        my %valid_scores = ( oclc => 1, dlc => 1, num_650 => 1,
+                             num_tags => 1, enc_lvl => 1,
+                           );
+        for (split /,/, $c->{scores}) {
+            die "Invalid score mode '$_'\n" unless $valid_scores{$_};
+            $scores{$_} = 1;
+        }
+        $c->{dyn_scores} = [split /,/, $c->{scores}];
+        $c->{scores} = \%scores;
+    } else {
+        $c->{scores} = {oclc => 1, dlc => 1, num_650 => 1,
+                        num_tags => 1, enc_lvl => 1};
+        $c->{dyn_scores} = [ qw/oclc dlc num_650 num_tags enc_lvl/ ];
+    }
+
+    # set defaults
+    $c->{tag} = 903 unless defined $c->{tag};
+    $c->{subfield} = 'a' unless defined $c->{subfield};
+    $c->{marctype} = 'XML' unless defined $c->{marctype};
+    if ($c->{prefix}) {
+        $c->{output} = join('.',$c->{prefix},'fp');
+        $c->{exception} = join('.',$c->{prefix},'fp','ex');
+    }
+
+    # get SFM object if excludelist was specified
+    if ($c->{excludelist}) {
+        $c->{excludelist} =
+          Equinox::Migration::SubfieldMapper->new( file => $c->{excludelist} );
+    }
+
+    my @keys = keys %{$c};
+    show_help() unless (@ARGV and @keys);
+    for my $key ('tag', 'subfield', 'output', 'exception')
+      { push @missing, $key unless $c->{$key} }
+    if (@missing) {
+        print "Required option: ", join(', ', @missing), " missing!\n";
+        show_help();
+    }
+}
+
+
+=head2 progress_ticker
+
+=cut
+
+sub progress_ticker {
+    return if $conf->{quiet};
+    printf("\r> %d recs seen; %d processed", $count, $scount);
+    printf(" (%d/s)", ($count / (time - $start + 1)))
+      if ($count % 500 == 0);
+}
+
+=head2 show_help
+
+Display usage message when things go wrong
+
+=cut
+
+sub show_help {
+print <<HELP;
+Usage is: $0 [REQUIRED ARGS] [OPTIONS] <filelist>
+Req'd Arguments
+  --output=<FILE>      -o  Output filename
+  --exceptions=<FILE>  -x  Exception report filename
+       or
+  --prefix=<PREFIX>>   -p  Shared prefix for output/exception files. Will
+                           produce PREFIX.fp and PREFIX.fp.ex
+Options
+  --tag=N           -t  Which tag to use (default 903)
+  --subfield=X      -s  Which subfield to use (default 'a')
+  --quiet           -q  Don't write status messages to STDOUT
+  --ignoresubtitle  -i  Ignore 245\$b and construct the title from 245\$a alone.
+
+  --fingerprints=LIST  Fingerprints to generate, comma separated
+                       Default: oclc,isbn,edition,issn,lccn,accomp,authpub
+                       Others:  baseline,koha_bib_id
+  --excludelist=FILE   Name of fingerprints exclusions file
+
+  --scores=LIST  Scores to calculate, comma separated
+                 Default: oclc,dlc,num_650,num_tags,enc_level
+  --newwins      New record IDs score higher (default is old wins)
+  --arbitrarily-lose-above
+  --arbitrarily-lose-below
+  --arbitrarily-decrease-score-by
+      Modify fingerprint scoring of records whose EG id is above or below a
+      given value, inclusive (so 5 is <= 5 or >= 5) such that they lose.
+
+  --marctype=TYPE Defaults to 'XML'
+HELP
+exit 1;
+}

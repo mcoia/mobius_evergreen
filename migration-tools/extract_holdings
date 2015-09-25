@@ -1,0 +1,327 @@
+#!/usr/bin/perl
+
+# Copyright 2009-2012, Equinox Software, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use Equinox::Migration::MapDrivenMARCXMLProc 1.005;
+use Equinox::Migration::MARCXMLSampler;
+
+my $VERSION = '1.001';
+
+=pod
+
+TODO
+
+  * Have detail mode report on number of subfields per datafield
+
+=cut
+
+my $c = initialize();
+$| = 1;
+
+# run samples if we've been asked for them
+run_samples($c) if ($c->{sample} or $c->{samplemap} or $c->{samplestr});
+extract_holdings($c) if ($c->{map});
+print "\n";
+
+#--------------------------
+
+sub extract_holdings {
+    my ($c) = @_;
+    print "Parsing records for extraction:\n";
+    my $m = Equinox::Migration::MapDrivenMARCXMLProc->new( marcfile => $c->{marcfile},
+                                                           mapfile  => $c->{map},
+                                                           verbose  => 1,
+                                                         );
+
+    print "Writing holdings to output file(s)...\n";
+    # open main holdings file
+    open HOLDINGS, '>', ($c->{prefix} . "-HOLDINGS.pg");
+    # create multi files
+    my $multis = $m->get_multis;
+    my %MULTIFILE = ();
+    for my $t ( keys %{$multis} ) {
+        for my $s ( keys %{$multis->{$t}}) 
+          { open my $fh, ">", ($c->{prefix} . "-HOLDINGS-MULT-$t$s.pg"); $MULTIFILE{"$t$s"} = $fh }
+    }
+
+    my $parallel_fields = $m->get_parallel_fields;
+
+    my $i = 0; # record counter
+    my $j = 0; # holdings counter
+
+    while (  $m->{data}{recs}[$i] ) {
+        print HOLDINGS "BEGIN;\n\negid, hseq, " unless $j;
+        my $rec = $m->{data}{recs}[$i];
+        my $k = 0; # holding-within-record pointer
+
+        for my $holdidx ( @{ $rec->{tmap}{ $c->{holdings} } } ) {
+            # for each holdings tag in the record...
+            my $tagid = $rec->{tags}[$holdidx]{tag};
+            $k++;
+
+            my @out = ();            # clear the output buffer
+            push @out, $rec->{egid}; # slug in the egid first thing
+            push @out, $j;           # holding seq goes next
+
+            # grab the unary mappings and slug 'em in
+            for my $sub ( sort keys %{$rec->{tags}[$holdidx]{uni}} ) {
+                push @out, $rec->{tags}[$holdidx]{uni}{$sub};
+                print HOLDINGS "l_", $m->name($tagid, $sub),", " unless $j;
+            }
+
+            # handle holdings multis
+            for my $sub ( sort keys %{$multis->{$tagid}} ) {
+                for my $value ( @{$rec->{tags}[$holdidx]{multi}{$sub}} ) {
+                  my $fh = $MULTIFILE{"$tagid$sub"};
+                  print $fh join("\t", $rec->{egid}, $j, $value), "\n";
+              }
+            }
+
+
+            # now get everything else in the mapping
+            for my $othertag ( sort keys %{$rec->{tmap}} ) {
+                next if $othertag eq $c->{holdings};  # ignoring the holdings, o'course
+                my $test_idx = $rec->{tmap}{$othertag}[0]; # get index into tags struct
+                unless (defined $test_idx) {
+                    push @out, '';
+                    next;
+                }
+
+                # handle parallel fields
+                if (exists($parallel_fields->{$othertag})) {
+                    my $num_fields = $#{ $rec->{tmap}{$othertag} };
+                    my $tag_idx;
+                    if ($holdidx > $num_fields) {
+                        $tag_idx = -1;
+                    } else {
+                        $tag_idx = $rec->{tmap}{$othertag}[$holdidx];
+                    }
+                    for my $sub ( sort keys %{ $parallel_fields->{$othertag } } ) {
+                        push @out, $tag_idx > -1 ? $rec->{tags}[$tag_idx]{parallel}{$sub}->[0] : '';
+                        print HOLDINGS "l_", $m->name($rec->{tags}[$tag_idx]{tag}, $sub), ", " unless $j;
+                    }
+                }
+
+                # handle only first other tag unless it is known to be multi
+                my $limit = 0;
+                if (exists($multis->{$othertag})) {
+                    $limit = $#{ $rec->{tmap}{$othertag} };
+                }
+                foreach my $idx (0..$limit) {
+                    my $tag_idx = $rec->{tmap}{$othertag}[$idx];
+                    for my $sub ( sort keys %{$rec->{tags}[$tag_idx]{uni}} ) {
+                        if ($m->first_only($rec->{tags}[$tag_idx]{tag}, $sub)) {
+                            push @out, ($k == 1) ? $rec->{tags}[$tag_idx]{uni}{$sub} : '';
+                        } else {
+                            push @out, $rec->{tags}[$tag_idx]{uni}{$sub};
+                        }
+                        print HOLDINGS "l_", $m->name($rec->{tags}[$tag_idx]{tag}, $sub), ", " unless $j;
+                    }
+                    next unless exists($multis->{$othertag});
+                    for my $sub ( sort keys %{$multis->{$othertag}} ) {
+                        next if $m->first_only($rec->{tags}[$tag_idx]{tag}, $sub) and ($k > 1);
+                        for my $value ( @{$rec->{tags}[$tag_idx]{multi}{$sub}} ) {
+                            my $fh = $MULTIFILE{"$othertag$sub"};
+                            print $fh normalize_output(join("\t", $rec->{egid}, $j, $value)), "\n";
+                        }
+                    }
+                }
+            }
+
+            # and dump it
+            print HOLDINGS "\n" unless $j;
+            print HOLDINGS normalize_output(join("\t", @out));
+            print HOLDINGS "\n";
+            $j++;
+        }
+        $i++;
+        print "\r$i $j";
+    }
+    print "\n";
+}
+
+#--------------------------
+
+sub run_samples {
+    my ($c) = @_;
+    my $s;
+    print "Parsing records for sampling... ";
+    if ($c->{samplemap}) {
+        $s = Equinox::Migration::MARCXMLSampler->new( marcfile => $c->{marcfile},
+                                                      mapfile  => $c->{samplemap});
+    } elsif ($c->{samplestr}) {
+        $s = Equinox::Migration::MARCXMLSampler->new( marcfile  => $c->{marcfile},
+                                                      mapstring => $c->{samplestr});
+    } else {
+        $s = Equinox::Migration::MARCXMLSampler->new( marcfile => $c->{marcfile} );
+    }
+
+    dump_sample_overview($c, $s) if $c->{sample};
+    dump_sample_detail($c, $s) if ($c->{samplemap} or $c->{samplestr});
+}
+
+sub dump_sample_detail {
+    my ($c, $s) = @_;
+    my $tags = $s->{data}{samp};
+    my $count = $s->{data}{rcnt};
+    my $scnt  = $s->{data}{scnt};
+
+    open DETAIL, '>', ($c->{prefix} . "-HOLDINGS-DETAIL.txt");
+    select DETAIL;
+    for my $tag (sort keys %{ $tags }) {
+        print ">>>>> TAG $tag\n\n";
+        for my $subkey (sort keys %{ $tags->{$tag} }) {
+            my $sub = $tags->{$tag}{$subkey};
+            print "|| $subkey | ", $sub->{value}, " | ", 
+              $sub->{count}, "/", $sub->{tcnt}, " | ", ($sub->{count} > $sub->{tcnt}) ? "MULTI" : "", " ||\n";
+        }
+        print "\n";
+    }
+    close DETAIL;
+    open SCOUNT, '>', ($c->{prefix} . "-HOLDINGS-SUBCOUNTS.txt");
+    select SCOUNT;
+    for my $tag (sort keys %{ $scnt }) {
+        print ">>>>> TAG $tag\n\n";
+        for my $len (sort keys %{ $scnt->{$tag} }) 
+          { print "|| $len | ", $scnt->{$tag}{$len}, " ||\n" }
+        print "\n";
+    }
+    select STDOUT;
+    print "Saved results as ", ($c->{prefix} . "-HOLDINGS-DETAIL.txt"), " and ",
+        ($c->{prefix} . "-HOLDINGS-SUBCOUNTS.txt"), "\n";
+}
+
+sub dump_sample_overview {
+    my ($c, $s) = @_;
+    my $tags = $s->{data}{tags};
+    my $count = $s->{data}{rcnt};
+
+    my @tagsbyname  = sort keys %{$tags};
+    my @tagsbycount = reverse sort { $tags->{$a} <=> $tags->{$b} } keys %{$tags};
+
+    open SAMPLE, '>', ($c->{prefix} . "-HOLDINGS-OVERVIEW.txt");
+    select SAMPLE;
+    print "SAMPLE REPORT FOR ", $c->{prefix},": $count records\n\n";
+    print "FOUND TAGS (BY TAG)           FOUND TAGS (BY COUNT)\n";
+    print "------------------------      --------------------------\n";
+    for my $i (0 .. @tagsbyname - 1) {
+        print $tagsbyname[$i], (" " x (14 - length $tags->{ $tagsbyname[$i] })),
+          $tags->{ $tagsbyname[$i] };
+        print " (", sprintf("%03d", int($tags->{ $tagsbyname[$i] } / $count * 100)), "%)";
+        print "      ";
+        print $tagsbycount[$i], (" " x (16 - length $tags->{ $tagsbycount[$i] })),
+          $tags->{ $tagsbycount[$i] };
+        print " (", sprintf("%03d", int($tags->{ $tagsbycount[$i] } / $count * 100)), "%)\n";
+    }
+    select STDOUT;
+    print "Saved results as ", ($c->{prefix} . "-HOLDINGS-OVERVIEW.txt"), "\n";
+    close SAMPLE;
+}
+
+#--------------------------
+
+sub initialize {
+    my $c = {};
+    my @missing = ();
+
+    # set mode on existing filehandles
+    binmode(STDIN, ':utf8');
+
+    my $rc = GetOptions( $c,
+                         'sample|s',
+                         'samplemap|sm=s',
+                         'samplestr|ss=s',
+                         'marcfile=s',
+                         'map|m=s',
+                         'holdings|h=i',
+                         'copyid|c=s',
+                         'prefix|p=s',
+                         'disable-pg-normalization',
+                         'version|v',
+                         'help',
+                       );
+    show_help() unless $rc;
+    show_help() if ($c->{help});
+    show_help("Nothing to do!")
+      unless ($c->{map} or $c->{sample} or $c->{samplemap} or $c->{samplestr});
+    show_help("map, holdings, and copyid must be specified together!")
+      if ($c->{map} and !($c->{holdings} and $c->{copyid}));
+    show_version() if $c->{version};
+
+    if ($c->{prefix} and !$c->{marcfile}) {
+        $c->{marcfile} = $c->{prefix} . ".clean.marc.xml";
+    }
+
+    my @keys = keys %{$c};
+    for my $key ('prefix', 'marcfile')
+      { push @missing, $key unless $c->{$key} }
+    if (@missing) {
+        print "Required option: ", join(', ', @missing), " missing!\n";
+        show_help();
+    }
+
+    return $c;
+}
+
+sub normalize_output {
+    my $str = shift;
+    $str =~ s!\\!\\\\!g unless $c->{'disable-pg-normalization'};
+    return $str;
+}
+
+sub show_help {
+    my ($msg) = @_;
+    print "\nERROR - $msg\n" if $msg;
+    print <<HELP;
+
+Usage is: extract_holdings --prefix PREFIX --marcfile MARCFILE [ARGUMENTS]
+
+REQUIRED ARGUMENTS
+  --prefix   -p  Prefix string for output filenames
+  --marcfile     MARCXML to use as source data
+                 Defaults to 'PREFIX.clean.marc.xml'
+
+SAMPLING ARGUMENTS
+  --sample    -s   Generate a report of all tags in the MARC data
+  --samplemap -sm  Specify a Equinox::Migration::SimpleTagList map file which
+                   will be used to generate subfield breakdown reports about
+                   specific tags in the MARC data
+  --samplestr -ss  As above, but with a one-liner map specified on the command
+                   line as a string (e.g. '-ss "852 999"')
+
+  If --samplemap and --samplestr are both specified, --samplemap wins.
+
+HOLDINGS EXTRACTION ARGUMENTS
+  --map      -m  Equinox::Migration::SubfieldMapper map file which will be
+                 used to extract holdings data from the input MARC file
+  --holdings -h  Specifies actual holdings tag
+  --copyid   -c  Specifies subfield of holdings with unique copy identifier
+  --disable-pg-normalization  By default, output is normalized so that a Postgres
+                              copy or \\copy can import the data without choking on
+                              backslashes; use this command-line option if
+                              output is not meant to be consumed by psql.
+
+  All three of these must be given together.
+HELP
+    exit;
+}
+
+sub show_version { print "extract_holdings v$VERSION\n"; exit }

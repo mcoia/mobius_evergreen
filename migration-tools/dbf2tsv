@@ -1,0 +1,107 @@
+#!/usr/bin/perl
+
+# Copyright 2009-2012, Equinox Software, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+use strict;
+use warnings;
+
+use XBase;  # or could use DBI and DBD::XBase;
+use Data::Dumper;
+use Getopt::Long;
+use Encode;
+
+my $in = '';
+my $out = '';
+my $help = 0;
+GetOptions('in=s' => \$in, 'out=s' => \$out, 'help' => \$help);
+
+if ($help) { &show_help; }
+
+my @errors; 
+if ($in eq '') { push @errors, 'Input file must be specified ( --in inputfile.dbf )' };
+if ($out eq '') { push @errors, 'Output file must be specified ( --out outputfile.tsv )' };
+if (@errors > 0) { &show_help (@errors); }
+
+open OUT, ">$out" or die $!;
+
+my $table = new XBase $in or die XBase->errstr;
+
+# get list of field names
+my @names = $table->field_names;
+
+# print a header line with field names
+print OUT join ("\t", @names) . "\n";
+
+sub clean {
+  if ( $_ ) { 
+    s/\\/\\\\/g;
+    s/\n/\\n/g; 
+    s/\r/\\r/g; 
+    s/\t/\\t/g; 
+    Encode::encode("utf8", $_) 
+  } else { ''; } # to avoid 'Use of uninitialized value in join'
+}
+
+my $i = 0;
+for (0 .. $table->last_record) {
+    $i++;
+    my ($deleted, @row) = $table->get_record($_);
+    @row = map (&clean, @row); 
+    print OUT join("\t", @row) . "\n" unless $deleted;
+
+}
+
+print STDERR "$i records exported to $out.\n";
+
+
+sub show_help {
+    my ($msg) = @_;
+    print "\nERROR - $msg\n" if $msg;
+    print <<HELP;
+
+dbf2tsv - convert XBase DBF to tab-separated format
+
+Notes:
+
+  * Escapes backslash, newline, carriage return, and tab characters.
+  * Converts to UTF-8.
+
+Usage: 
+
+  dbf2tsv --in inputfile.dbf --out outputfile.tsv
+
+HELP
+    exit;
+}
+
+=pod
+
+=head1 NAME
+
+  dbf2tsv - convert XBase DBF to tab-separated values
+
+=head1 SYNOPSIS
+
+  dbf2tsv --in inputfile.dbf --out outputfile.dbf
+
+=head1 CAVEATS
+
+  Munges data in the following ways:
+
+  * Escapes backslash, newline, carriage return, and tab characters.
+  * Converts to UTF-8.
+=cut

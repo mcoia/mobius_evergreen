@@ -19,7 +19,7 @@ BEGIN
     ON (aua.id = au.mailing_address) 
     WHERE aua.usr != au.id 
     AND au.mailing_address = au.billing_address
-	AND au.home_ou in(select id from actor.org_unit where lower(name)~'sceni')
+	AND au.home_ou in(select id from actor.org_unit where lower(name)~'sulliv')
   LOOP
     INSERT INTO actor.usr_address (valid, within_city_limits, address_type, usr,
       street1, street2, city, county, state, country, post_code, pending, 
@@ -43,7 +43,7 @@ BEGIN
       aua.replaces 
       FROM actor.usr au INNER JOIN actor.usr_address aua 
       ON (aua.id = au.' || type || ') 
-      WHERE aua.usr != au.id AND au.home_ou in(select id from actor.org_unit where lower(name)~''sceni'')'
+      WHERE aua.usr != au.id AND au.home_ou in(select id from actor.org_unit where lower(name)~''sulliv'')'
     LOOP
       INSERT INTO actor.usr_address (valid, within_city_limits, address_type, 
         usr, street1, street2, city, county, state, country, post_code, pending, 

@@ -1,0 +1,183 @@
+#!/usr/bin/perl
+
+# Copyright 2009-2012, Equinox Software, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+
+use strict;
+use warnings;
+use open ':utf8';
+
+use Digest::SHA1 qw(sha1_base64);
+use Getopt::Long;
+
+my $conf  = {}; # configuration hashref
+initialize($conf);
+
+my %fps  = (); # records matching each fingerprint (and the lead)
+my @recs = (); # fingerprints belonging to each record
+my %seen = (); # records we've already seen
+my $lastscore = 0; # previous fingerprint's score
+
+my %subs  = (); # error-checking hashe
+
+open FP, '<', $ARGV[0] or die "Can't open input file: $!\n";
+
+print "Loading and ranking fingerprints\n";
+while (<FP>) {
+    my @fields = split "\t", $_;
+    my $fp = populate_fingerprint(@fields);
+    rank_fingerprint($fp);
+}
+print "Writing matchset to disk\n";
+dump_records();
+
+
+
+sub populate_fingerprint {
+    my @fields = @_;
+    my %fp = (); # zero fingerprint hash each time thru
+
+    # populate fp hash -- first the simple data
+    $fp{compact} = shift @fields;
+    $fp{json}    = shift @fields;
+    $fp{id}      = shift @fields;
+    # then smash everything else together, remove non-Roman characters, and
+    # generate a SHA1 hash to represent it
+    my $stripped = join('', @fields);
+    $stripped   =~ s/[^A-Za-z0-9]//g;
+	
+    $fp{sha1}    = sha1_base64($stripped);
+	# if(($fp{id} eq '1459051')	|| ($fp{id} eq '1094115')|| ($fp{id} eq '213239'))
+	# {
+		# print $fp{id}." - \"$stripped\"\n".sha1_base64($stripped)."\n";
+	# }
+
+    # make sure file is sorted properly
+    if ($lastscore and ($fp{compact} < $lastscore)) {
+        print "Input file is sorted improperly or unsorted.\n";
+        die "Sort descending (sort -r) and rerun this script.\n";
+    }
+    $lastscore = $fp{compact};
+
+    return \%fp;
+}
+
+
+sub rank_fingerprint {
+    my ($fp) = @_;
+
+    my $sha1 = $fp->{sha1};
+    my $id   = $fp->{id};
+
+    # only process records which haven't already been seen
+    #unless (defined $seen{$id}) {
+        unless (defined $fps{$sha1}) {
+            # haven't seen this fp before. create a new listref to hold subs
+            # and stow the hash of the fingerprint that we're lead of
+            $fps{$sha1} = [];
+            push @recs, {id => $id, sha1 => $sha1};
+        } else {
+            # have seen this fp. push record id onto matchlist
+            push @{ $fps{$sha1} }, $id;
+        }
+        $seen{$id} = 1;
+    #}
+}
+
+
+=head2 dump_records
+
+Writes out a 2-column file of lead and subordinate records.
+
+=cut
+
+sub dump_records {
+    my %used = ();
+    open OUT, '>', $conf->{output}
+      or die "Can't open ", $conf->{output}, "$!\n";
+    for my $rec (@recs) {
+        for ( @{ $fps{ $rec->{sha1} } } ) {
+            # check for dupes and die if they exist
+            #die "Collision: dupe sub record $_\n" if $subs{$_};
+			if( not exists ($subs{$_}) ) {
+				#die "Collision: lead in sub list ", $rec->{id}, "\n"
+				#  if $subs{ $rec->{id} };
+				my $lead = $rec->{id};
+				
+				# we don't need to match onto itself
+				next if ($lead eq $_);
+				
+				if ($subs{ $rec->{id} })
+				{
+					print "moving ".$lead." to ".$subs{$rec->{id}}."\n";
+					$lead = $subs{$rec->{id}};
+				}
+				
+				if($_ eq '1459051')
+				{
+					print "looking at ".$rec->{sha1};
+				}
+
+				# we don't want subs below threshold
+				next if ($_ < $conf->{threshold});
+				
+				# we don't need to match onto itself
+				next if ($lead eq $_);
+				
+				# record this sub having this leader
+				$subs{$_} = $lead;
+				
+				# still here? output.
+				print OUT $lead, "\t$_\n"
+			}
+        }
+    }
+}
+
+sub initialize {
+    my ($c) = @_;
+    my @missing = ();
+
+    # set mode on existing filehandles
+    binmode(STDIN, ':utf8');
+
+    my $rc = GetOptions( $c,
+                         'output|o=s',
+                         'threshold|t=i',
+                         'help|h',
+                       );
+    show_help() unless $rc;
+    show_help() if ($c->{help});
+
+    my @keys = keys %{$c};
+    show_help() unless (@ARGV and @keys);
+    for my $key ('output')
+      { push @missing, $key unless $c->{$key} }
+    if (@missing) {
+        print "Required option: ", join(', ', @missing), " missing!\n";
+        show_help();
+    }
+
+    $c->{threshold} = 0 unless $c->{threshold};
+}
+
+sub show_help {
+    print <<HELP;
+Usage is: compress_fingerprints [-t THRESHOLD] -o OUTPUTFILE INPUTFILE
+HELP
+exit;
+}
