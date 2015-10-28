@@ -102,6 +102,7 @@ if(! -e $xmlconf)
 	our @videoSearchPhrases;
 	our @largePrintBookSearchPhrases;
 	our @musicSearchPhrases;
+	our @musicSearchPhrasesAddition;
 	our @playawaySearchPhrases;
 	our @seekdestroyReportFiles =();
 	our %queries;
@@ -141,6 +142,7 @@ if(! -e $xmlconf)
 	@videoSearchPhrases = $conf{"videosearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"videosearchphrases"})} : ();
 	@largePrintBookSearchPhrases = $conf{"largeprintbooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"largeprintbooksearchphrases"})} : ();
 	@musicSearchPhrases = $conf{"musicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"musicsearchphrases"})} : ();
+	@musicSearchPhrasesAddition = $conf{"musicsearchphrasesaddition"} ? @{$mobUtil->makeArrayFromComma($conf{"musicsearchphrasesaddition"})} : ();
 	@playawaySearchPhrases = $conf{"playawaysearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"playawaysearchphrases"})} : ();
 	
 	if ($conf{"logfile"})
@@ -153,7 +155,7 @@ if(! -e $xmlconf)
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		print "Executing job  tail the log for information (".$conf{"logfile"}.")\nDryrun = $dryrun\n";		
-		my @reqs = ("logfile","tempdir","domainname","playawaysearchphrases","musicsearchphrases","largeprintbooksearchphrases","videosearchphrases","microfilmsearchphrases","microfichesearchphrases","audiobooksearchphrases","electronicsearchphrases"); 
+		my @reqs = ("logfile","tempdir","domainname","playawaysearchphrases","musicsearchphrases","musicsearchphrasesaddition","largeprintbooksearchphrases","videosearchphrases","microfilmsearchphrases","microfichesearchphrases","audiobooksearchphrases","electronicsearchphrases"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -190,13 +192,13 @@ if(! -e $xmlconf)
 					#$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					cleanMetaRecords();
+					# cleanMetaRecords();
 					
 					# findInvalidElectronicMARC();
 					# findInvalidAudioBookMARC();
 					# findInvalidDVDMARC();
 					# findInvalidLargePrintMARC();
-					# findInvalidMusicMARC();
+					 findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -206,8 +208,9 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-					findPossibleDups();
+					#findPossibleDups();
 					
+
 					
 					
 					#print "regular cache\n";
@@ -1070,7 +1073,9 @@ sub findInvalidMusicMARC
 	my @additionalSearchQueries = ($queries{"music_additional_search"});
 	my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
 	my $subQueryNotConvert =  $queries{"non_music_bib_not_convert_to_music"};
-	my $convertFunction = "updateMARCSetMusic(\$id,\$marc);";	
+	my $convertFunction = "updateMARCSetMusic(\$id,\$marc);";
+	#combine both lists for gathering up bib canidates
+	my @music = (@musicSearchPhrases, @musicSearchPhrasesAddition);
 	findInvalidMARC(
 	$typeName,
 	$problemPhrase,
@@ -1079,7 +1084,7 @@ sub findInvalidMusicMARC
 	$subQueryConvert,
 	$subQueryNotConvert,
 	$convertFunction,
-	\@musicSearchPhrases
+	\@music
 	);
 }
 
@@ -1095,9 +1100,9 @@ sub findInvalidMARC
 	my @marcSearchPhrases = @{@_[7]};
 	
 	
-	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";	
+	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
 	updateJob("Processing","findInvalidMARC  $query");
-	$dbHandler->update($query);
+	#$dbHandler->update($query);
 	foreach(@marcSearchPhrases)
 	{
 		my $phrase = lc$_;
@@ -1215,7 +1220,7 @@ sub updateProblemBibs
 		my $marc = @row[1];
 
 		my @scorethis = ($id,$marc);
-		my @st = ([@scorethis]);			
+		my @st = ([@scorethis]);
 		updateScoreCache(\@st);
 
 		$query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
@@ -1310,10 +1315,10 @@ sub updateScoreCache
 		$allscores{'microfiche_score'},
 		$allscores{'music_score'},
 		$allscores{'playaway_score'},
-		'$allscores{'winning_score'}',
+		E'$allscores{'winning_score'}',
 		$allscores{'winning_score_score'},
 		$allscores{'winning_score_distance'},
-		'$allscores{'second_place_score'}',
+		E'$allscores{'second_place_score'}',
 		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),\$10
 		)";		
 		my @values = (
@@ -1359,10 +1364,10 @@ sub updateScoreCache
 		microfiche_score=$allscores{'microfiche_score'},
 		music_score=$allscores{'music_score'},
 		playaway_score=$allscores{'playaway_score'},
-		winning_score='$allscores{'winning_score'}',
+		winning_score=E'$allscores{'winning_score'}',
 		winning_score_score=$allscores{'winning_score_score'},
 		winning_score_distance=$allscores{'winning_score_distance'},
-		second_place_score='$allscores{'second_place_score'}',
+		second_place_score=E'$allscores{'second_place_score'}',
 		item_form = \$1,
 		date1 = \$2,
 		record_type = \$3,
@@ -1428,7 +1433,7 @@ sub updateBibCircsScore
 	$allcircs=substr($allcircs,0,-1);
 	my $opacicons='';
 	# get opac icon string
-	$query = "select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=$bibid";
+	$query = "select string_agg(value,\$\$,\$\$) from metabib.record_attr_flat where attr=\$\$icon_format\$\$ and id=$bibid";
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -2191,6 +2196,45 @@ sub updateScoreWithQuery
 sub findPossibleDups
 {
 
+	my @formatAssignmentsBefore = ();
+
+	if(!$dryrun)
+	{
+		# Record the state of the hold copy map
+		my $query = "insert into seekdestroy.before_dedupe_hold_map_count (hold,count,job)
+		(select hold,count(*),$jobid from action.hold_copy_map group by hold)";
+		updateJob("Processing","findPossibleDups  $query");
+		$dbHandler->update($query);
+		
+		# Record the unfilled holds
+		my $query = "insert into seekdestroy.before_dedupe_hold_current_copy_null (hold,job)
+		(select id,$jobid from action.hold_request where 
+		current_copy is null and 
+		cancel_time is null and 
+		not frozen and
+		expire_time is null and
+		capture_time is null)";
+		updateJob("Processing","findPossibleDups  $query");
+		$dbHandler->update($query);
+		
+		# Record the icon format summary
+		$query = "select value ,count(*) \"count\" from metabib.record_attr_flat where attr=\$\$icon_format\$\$ 
+			and id in(select id from biblio.record_entry where not deleted)
+			group by value
+			union
+			select \$\$blank\$\$,count(*) \"count\" from biblio.record_entry where not deleted and id not in(select id from metabib.record_attr_flat where attr=\$\$icon_format\$\$)
+			order by \"count\"";
+		updateJob("Processing","findPossibleDups  $query");
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $out = join(';',@row);
+			$log->addLine($out);
+		}
+		@formatAssignmentsBefore = @results;
+	}
 #
 # Gather up some potential candidates based on EG Fingerprints
 #
@@ -2304,8 +2348,8 @@ updateJob("Processing","findPossibleDups  $query");
 	\$\$$domainname"."eg/opac/record/\$\$||bib1||\$\$?expand=marchtml\$\$ \"leadlink\",
 \$\$$domainname"."eg/opac/record/\$\$||bib2||\$\$?expand=marchtml\$\$ \"sublink\",
 has_holds,
-(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=sbm.bib1) \"leadicon\",
-(select string_agg(value,',') from metabib.record_attr_flat where attr='icon_format' and id=sbm.bib2) \"subicon\",
+(select string_agg(value,\$\$,\$\$) from metabib.record_attr_flat where attr=\$\$icon_format\$\$ and id=sbm.bib1) \"leadicon\",
+(select string_agg(value,\$\$,\$\$) from metabib.record_attr_flat where attr=\$\$icon_format\$\$ and id=sbm.bib2) \"subicon\",
 (select value from metabib.title_field_entry where source=sbm.bib1 limit 1) \"title\"
 from SEEKDESTROY.BIB_MATCH sbm where 
 job=$jobid and
@@ -2323,12 +2367,91 @@ order by bib1,bib2
 		# Now let's merge!
 		if(!$dryrun)
 		{
-			mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
+			if( (@row[5] ne 'dvd') && (@row[5] ne 'blu-ray') && (@row[5] ne 'vhs') && (@row[5] ne 'serial') )
+			{
+				mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
+			}
+			else
+			{
+				$log->addLine("Not merging and skipping because it is video/serial format");
+			}
 		}
 	}
-	# $log->addLine(Dumper(\%mergeMap));
 	
-	
+	if(!$dryrun)
+	{
+		# Compare and contrast the before and after		
+		$query = "select ahcm.hold, ahcm.count, sbdhmc.count,sbdhmc.count - ahcm.count
+		from (select hold,count(*) from action.hold_copy_map group by hold)as ahcm,
+		seekdestroy.before_dedupe_hold_map_count sbdhmc
+		where
+		sbdhmc.job=$jobid and
+		sbdhmc.hold=ahcm.hold and
+		sbdhmc.count - ahcm.count !=0";
+		updateJob("Processing","findPossibleDups  $query");
+		my @results = @{$dbHandler->query($query)};
+		if($#results > -1)
+		{
+			$log->addLine("These holds had their copy pool change");
+		}
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $out = join(';',@row);
+			$log->addLine($out);
+		}
+		
+		
+		my $query = "select ahr.id, ahr.current_copy
+					from 
+					action.hold_request ahr,
+					seekdestroy.before_dedupe_hold_current_copy_null sbdhccn
+					where
+					sbdhccn.hold=ahr.id and
+					current_copy is not null and 
+					cancel_time is null and 
+					not frozen and
+					expire_time is null and
+					capture_time is null ";
+		updateJob("Processing","findPossibleDups  $query");
+		my @results = @{$dbHandler->query($query)};
+		if($#results > -1)
+		{
+			$log->addLine("These holds were previously unfilled");
+		}
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $out = join(';',@row);
+			$log->addLine($out);
+		}
+		
+		# Record the icon format summary
+		$query = "select value ,count(*) \"count\" from metabib.record_attr_flat where attr=\$\$icon_format\$\$ 
+			and id in(select id from biblio.record_entry where not deleted)
+			group by value
+			union
+			select \$\$blank\$\$,count(*) \"count\" from biblio.record_entry where not deleted and id not in(select id from metabib.record_attr_flat where attr=\$\$icon_format\$\$)
+			order by \"count\"";
+		updateJob("Processing","findPossibleDups  $query");
+		my @results = @{$dbHandler->query($query)};
+		$log->addLine("The following are the changes to the format totals after the dedupe.\nFormat;Before;After");
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			foreach(@formatAssignmentsBefore)
+			{
+				my @prev = @{$_};
+				if(@prev[0] eq @row[0])
+				{
+					$log->addLine( @prev[0].";".@prev[1].";".@row[1]);
+				}
+			}
+		}
+	}
 }
 
 sub mergeBibsWithMetarecordHoldsInMind
@@ -3001,7 +3124,7 @@ updateJob("Processing","undeleteBIB  $query");
 			#take the last tail off
 			$tcn_value=substr($tcn_value,0,-1);
 			#finally, undelete the bib making it available for the asset.call_number
-			$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$bib";
+			$query = "update biblio.record_entry set deleted=\$\$f\$\$,tcn_source=\$\$un-deduped\$\$,tcn_value = \$\$$tcn_value\$\$  where id=$bib";
 			if(!$dryrun)
 			{
 				$dbHandler->update($query);
@@ -3308,6 +3431,7 @@ sub determineMusicScore
 	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@two45);
 	my $score=0;
+	my @allmusicphrases = (@musicSearchPhrases,@musicSearchPhrasesAddition);
 	
 	foreach(@two45)
 	{
@@ -3316,7 +3440,7 @@ sub determineMusicScore
 		foreach(@subs)
 		{
 			my $subf = lc($_);
-			foreach(@musicSearchPhrases)
+			foreach(@allmusicphrases)
 			{
 				#if the phrases are found in the 245h, they are worth 5 each
 				my $phrase=lc($_);
@@ -3343,6 +3467,8 @@ sub determineMusicScore
 			}
 		}
 	}
+	my $listone;
+	my $listtwo;
 	foreach(@musicSearchPhrases)
 	{
 		my $phrase = lc$_;
@@ -3351,7 +3477,26 @@ sub determineMusicScore
 		{
 			$score++;
 			#$log->addLine("$phrase + 1 points elsewhere");
+			$listone=1;
 		}
+	}
+	
+	foreach(@musicSearchPhrasesAddition)
+	{
+		my $phrase = lc$_;
+		
+		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
+		{
+			$score++;
+			#$log->addLine("$phrase + 1 points elsewhere");
+			$listtwo=1;
+		}
+	}
+	
+	#must contain a phrase from both lists
+	if(!($listone && $listtwo))
+	{
+		return 0;
 	}
 	
 	# The 505 contains track listing
@@ -4485,6 +4630,25 @@ sub setupSchema
 		CONSTRAINT metarecord_change_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
+		
+		$query = "CREATE TABLE seekdestroy.before_dedupe_hold_map_count(
+		id serial,
+		hold bigint,
+		count bigint,
+		job bigint NOT NULL,
+		CONSTRAINT before_dedupe_hold_map_count_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		
+		$query = "CREATE TABLE seekdestroy.before_dedupe_hold_current_copy_null(
+		id serial,
+		hold bigint,
+		job bigint NOT NULL,
+		CONSTRAINT before_dedupe_hold_current_copy_null_fkey FOREIGN KEY (job)
+		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+		$dbHandler->update($query);
+		
+		
 	}
 }
 

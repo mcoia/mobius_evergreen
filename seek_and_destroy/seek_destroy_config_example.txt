@@ -5,7 +5,9 @@ microfichesearchphrases = microfiche
 largeprintbooksearchphrases = Large type books,Large print,lg print,SightSaving,lg. print,lg prt.,lg. prt.,Thorndike Press,centerpoint,center point
 microfilmsearchphrases = microfilm
 videosearchphrases = dvd,video recording,video format,videorecording,videodisc,interview with the producer,original TV promo,Special features,screenplay
-musicsearchphrases = music,sound record,soundrecord,sound dis,Compact dis,song,Piano,Jazz,Saxophone,Symphony,Orchestra,vocals,sound track,soundtrack,instrumentals,guitar,perform,composer
+#Music is different. We require a hit in both lists in order to make it a positive hit
+musicsearchphrases = sound dis,Compact dis,audio
+musicsearchphrasesaddition = sound record,soundrecord,music,song,Piano,Jazz,Saxophone,Symphony,Orchestra,vocals,sound track,soundtrack,instrumentals,guitar,perform,composer
 playawaysearchphrases = playaway,play away,headphones,head phones,earphones,ear phones,player,findaway
 audio_book_score_when_audiobooks_dont_belong = 6
 electronic_score_when_bib_is_considered_electronic = 6

@@ -1,9 +1,0 @@
-#
-#
-# ~~ is the equal sign! (because there are equal signs in the queries we can't delimit by that)
-#	
-# FULL queries need to have an additional variable $recordSearch. This is so that the code can do
-# count(*) ahead of time so it knows when to stop searching.
-# The software will append RECORD_ID > X AND RECORD_ID < Y - Repeat for the population for the DB
-
-evergreen_library_full~~SELECT $recordSearch FROM BIBLIO.RECORD_ENTRY WHERE DELETED IS FALSE AND ID>0;

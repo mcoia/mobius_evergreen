@@ -18,6 +18,10 @@ my $xmlconf = "/openils/conf/opensrf.xml";
 
 our $mobUtil = new Mobiusutil();
 our $dbHandler;	
+our $log = @ARGV[0];
+
+$log = new Loghandler($log);
+$log->truncFile("");
 	
 my $dt = DateTime->now(time_zone => "local"); 
 my $fdate = $dt->ymd; 
@@ -26,163 +30,123 @@ my $dateString = "$fdate $ftime";
 my %dbconf = %{getDBconnects($xmlconf)};
 $dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
 
-print "Removing email addresses\n";
-my $query = "update actor.usr set email = ''";
-$dbHandler->update($query);
 
-scramblePatronNames();
-scrambleAddresses();
+# add sullivan as a working location for all of the scenic staff user accounts:
 
+# insert into permission.usr_work_ou_map usr,work_ou
+# (
+# select distinct usr,179 from permission.usr_work_ou_map where usr in(
+# select id from actor.usr where home_ou in(select id from actor.org_unit where lower(name)~'sceni')
+# and profile in(select id from permission.grp_tree where parent=3 union select id from permission.grp_tree where id=3)
+# ) and work_ou not in(select id from actor.org_unit where lower(name)~'sulliv')
+# )
 
-sub scramblePatronNames
-{
-	print "Gathering Patron DB count\n";
-
-	my $query = "select count(*) from actor.usr";
+	my $query = "
+	select id,home_ou,upper(first_given_name),upper(family_name),dob,(select barcode from actor.card where usr=au.id and active limit 1) from actor.usr au where
+lower(first_given_name||family_name||dob) in(
+select lower(first_given_name||family_name||dob)
+from
+(
+select home_ou,first_given_name,family_name,dob,count(*) from actor.usr where
+lower(first_given_name||family_name||dob) in(
+(
+select lower(first_given_name||family_name||dob) from 
+(
+select lower(first_given_name) \"first_given_name\",lower(family_name) \"family_name\",dob,count(*) 
+	from actor.usr where 
+	home_ou in(select id from actor.org_unit where lower(name)~'sulliv' or lower(name)~'sceni') and
+	lower(first_given_name) !='sullivan' 
+	group by lower(first_given_name),lower(family_name),dob having count(*)>1
+	) as a
+	)
+	)
+	group by home_ou,first_given_name,family_name,dob
+	having count(*)=1
+) as b
+)
+AND upper(first_given_name) !='DEBBIE' AND upper(family_name)!='LUCHENBILL'
+and home_ou in(select id from actor.org_unit where lower(name)~'sulliv' or lower(name)~'sceni')
+	order by lower(first_given_name),lower(family_name),dob,home_ou desc";
 	my @results = @{$dbHandler->query($query)};
-
-	my $row = @results[0];
-	my @row = @{$row};
-	my $total = @row[0];
-
-	my $current = 1;
-	my $thisid = 1;
-	my $offset = 0;
-	my $query = "select id,first_given_name,second_given_name,family_name from actor.usr order by id limit 1 offset $offset";
-	my @results = @{$dbHandler->query($query)};
-	my @thisset = ();
-	if ($#results > -1)
+	my %map;
+	my %barcodemap;
+	my %namemap;
+	my $prevpat = '';
+	$log->addLine($#results." Results");
+	foreach(@results)
 	{
-		foreach(@results)
+		my $row = $_;
+		my @row = @{$row};
+		my $patronsig = @row[2].@row[3].@row[4];
+		if( ($patronsig ne $prevpat) && ($prevpat ne '') )
 		{
-			my $row = $_;
-			my @row = @{$row};
-			@thisset = (@row[1],@row[2],@row[3]);
-			$thisid = @row[0];
-		}
-	}
-	else
-	{
-		$thisid=0;
-	}
-	while ($thisid > 0)
-	{	
-		$offset++;
-		print "$current / $total\t";
-		print "$thisid,".@thisset[0].",".@thisset[1].",".@thisset[2]."\t";
-		my $query = "
-	update actor.usr au set first_given_name = coalesce((select first_given_name from actor.usr where id=(select floor(random()*((select max(id) from actor.usr)+1)-1) where au.id=au.id)),'random'),
-	family_name = coalesce((select family_name from actor.usr where id=(select floor(random()*((select max(id) from actor.usr)+1)-1) where au.id=au.id)),'random'),
-	second_given_name = coalesce((select second_given_name from actor.usr where id=(select floor(random()*((select max(id) from actor.usr)+1)-1) where au.id=au.id)),'random')
-	where au.id = $thisid
-	";
-		$dbHandler->update($query);
-		my $query = "select id,first_given_name,second_given_name,family_name from actor.usr where id=$thisid";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			my @ranresults = (@row[1],@row[2],@row[3]);
-			print @ranresults[0].",".@ranresults[1].",".@ranresults[2]."\n";
-		}
-		
-		my $query = "select id,first_given_name,second_given_name,family_name from actor.usr order by id limit 1 offset $offset";
-		my @results = @{$dbHandler->query($query)};
-		if ($#results > -1)
-		{
-			foreach(@results)
+			#$log->addLine("($patronsig ne $prevpat)");
+			if($map{179})  #just make sure that sullivan has a patron in the group, otherwise what are we doing here?
 			{
-				my $row = $_;
-				my @row = @{$row};
-				@thisset = (@row[1],@row[2],@row[3]);
-				$thisid = @row[0];	
+				my $master = -1;
+				my $masterbarcode = -1;
+				my @merges;
+				while ((my $ou, my $patronida ) = each(%map))
+				{
+					foreach(@{$patronida})
+					{
+						my $patronid = $_;
+						if($ou != 179)
+						{
+							if($master == -1)
+							{
+								$master = $patronid;
+							}
+							else  # weird - Means that there are multiple scenic patrons in this group
+							{
+								$log->addLine("$patronid;$ou;$master;".$barcodemap{$patronid}.";".$barcodemap{$master}.";".$namemap{$patronid}.";".$namemap{$master}.";Multiple Scenic patrons");
+								# Lets not merge scenic accounts together for this project.
+								#push @merges, $patronid;
+							}
+						}
+						else
+						{
+							push @merges, $patronid;
+						}
+					}
+				}
+				if($master > -1)
+				{
+					foreach(@merges)
+					{
+						$log->addLine("$_;;$master;".$barcodemap{$_}.";".$barcodemap{$master}.";".$namemap{$_}.";".$namemap{$master});
+						$query = "select actor.usr_merge($_,$master,true,true,true);";
+						print $dbHandler->update($query);
+						$log->addLine($query);
+					}
+				}
+				else
+				{
+					$log->addLine("Master was never set".Dumper(@merges));
+				}
 			}
+			else{$log->addLine("Sullivan doesnt have a patron here!");}
+			$log->addLine("Clearing Map");
+			%map = ();
+			$prevpat = $patronsig;
+		}
+		if($prevpat eq ''){$prevpat = $patronsig;}
+		
+		$log->addLine("Pushing ".@row[0]."  ".@row[1]);
+		if(ref $map{@row[1]} eq 'ARRAY')
+		{
+			push $map{@row[1]},@row[0];
 		}
 		else
 		{
-			$thisid=0;
+			my @temp = (@row[0]);
+			$map{@row[1]} = \@temp;
 		}
-		$current++;
+		$barcodemap{@row[0]} = @row[5];
+		$namemap{@row[0]} = @row[2]." ".@row[3];
+		
 	}
 	print "Done\n";
-}
-
-sub scrambleAddresses
-{
-	print "Gathering Address DB Counts\n";
-
-	my $query = "select count(*) from actor.usr_address";
-	my @results = @{$dbHandler->query($query)};
-
-	my $row = @results[0];
-	my @row = @{$row};
-	my $total = @row[0];
-
-	my $current = 1;
-	my $thisid = 1;
-	my $offset = 0;
-	my $query = "select id,street1,street2,city,state,post_code from actor.usr_address order by id limit 1 offset $offset";
-	my @results = @{$dbHandler->query($query)};
-	my @thisset = ();
-	if ($#results > -1)
-	{
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			@thisset = (@row[1],@row[2],@row[3],@row[4],@row[5]);
-			$thisid = @row[0];
-		}
-	}
-	else
-	{
-		$thisid=0;
-	}
-	while ($thisid != 0)
-	{	
-		$offset++;
-		print "$current / $total\t";
-		print "$thisid,".@thisset[0].",".@thisset[1].",".@thisset[2].",".@thisset[3].",".@thisset[4]."\t";
-		my $query = "
-	update actor.usr_address au set 
-	street1 = coalesce((select street1 from actor.usr_address where id=(select floor(random()*((select max(id) from actor.usr_address)+1)-1) where au.id=au.id)),'random'),
-	street2 = coalesce((select street2 from actor.usr_address where id=(select floor(random()*((select max(id) from actor.usr_address)+1)-1) where au.id=au.id)),'random'),
-	city = coalesce((select city from actor.usr_address where id=(select floor(random()*((select max(id) from actor.usr_address)+1)-1) where au.id=au.id)),'random'),
-	state = coalesce((select state from actor.usr_address where id=(select floor(random()*((select max(id) from actor.usr_address)+1)-1) where au.id=au.id)),'random'),
-	post_code = coalesce((select post_code from actor.usr_address where id=(select floor(random()*((select max(id) from actor.usr_address)+1)-1) where au.id=au.id)),'random')
-	where au.id = $thisid
-	";
-		$dbHandler->update($query);
-		my $query = "select id,street1,street2,city,state,post_code from actor.usr_address where id=$thisid";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			my @ranresults = (@row[1],@row[2],@row[3],@row[4],@row[5]);
-			print @ranresults[0].",".@ranresults[1].",".@ranresults[2].",".@ranresults[3].",".@ranresults[4]."\n";
-		}
-		
-		my $query = "select id,street1,street2,city,state,post_code from actor.usr_address order by id limit 1 offset $offset";
-		my @results = @{$dbHandler->query($query)};
-		if ($#results > -1)
-		{
-			foreach(@results)
-			{
-				my $row = $_;
-				my @row = @{$row};
-				@thisset = (@row[1],@row[2],@row[3],@row[4],@row[5]);
-				$thisid = @row[0];	
-			}
-		}
-		else
-		{
-			$thisid=0;
-		}
-		$current++;
-	}
-}
 
 
 sub getDBconnects
