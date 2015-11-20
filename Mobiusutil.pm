@@ -1132,7 +1132,7 @@ sub makeCommaFromArray
 	my $ret="";
 	my @letters = ('a','b','c','d','e','f','g','h','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z');
 	my $letterl = $#letters;
-	my @sym = ('[','!','#',')','(');
+	my @sym = ('@','#','$');
 	my $syml = $#sym;
 	my @both = ([@letters],[@sym]);
 	while($i<$length)

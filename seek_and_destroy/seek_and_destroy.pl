@@ -192,13 +192,13 @@ if(! -e $xmlconf)
 					#$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					# cleanMetaRecords();
+					 cleanMetaRecords();
 					
 					# findInvalidElectronicMARC();
 					# findInvalidAudioBookMARC();
 					# findInvalidDVDMARC();
 					# findInvalidLargePrintMARC();
-					 findInvalidMusicMARC();
+					# findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -208,7 +208,7 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-					#findPossibleDups();
+					findPossibleDups();
 					
 
 					
@@ -2921,11 +2921,11 @@ order by counts.count,mmsm.source
 
 sub recordMetaRecordChange
 {
-	my $affectedmetarecord = @_[0];
-	my $alternatmetarecord = @_[1];
+	my $affectedmetarecord = @_[0]|| 'null';
+	my $alternatmetarecord = @_[1] || 'null';
 	my $fingerprint = @_[2];
-	my $bibid = @_[3];
-	my $holdid = @_[4];
+	my $bibid = @_[3] || 'null';
+	my $holdid = @_[4] || 'null';
 	my $extra = @_[5];
 	my $query = "INSERT INTO seekdestroy.metarecord_change(
 		metarecord,
@@ -2935,9 +2935,9 @@ sub recordMetaRecordChange
 		holdid,
 		extra,
 		job)
-		values (\$1,\$2,\$3,\$4,\$5,\$6,\$7)
+		values ($affectedmetarecord,\$\$$fingerprint\$\$,$alternatmetarecord,$bibid,$holdid,\$\$$extra\$\$,$jobid)
 		";
-	my @values = ($affectedmetarecord,$fingerprint,$alternatmetarecord,$bibid,$holdid,$extra,$jobid);	
+	my @values = ();	
 	#updateJob("Processing","recordMetaRecordChange  $query");
 	$dbHandler->updateWithParameters($query,\@values);
 }
