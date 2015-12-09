@@ -326,6 +326,7 @@ and record not in
 and record not in (select record from seekdestroy.bib_score where circ_mods ~$$Books$$ and opac_icon=$$book$$)
 and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$ and second_place_score~$$music_score$$)
 and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ and second_place_score~$$music$$ and (lower(copy_locations)~$$cd$$ or lower(copy_locations)~$$music$$ or lower(call_labels)~$$cd$$ or lower(call_labels)~$$music$$))
+and record not in ( select record from seekdestroy.bib_score where opac_icon~$$dvd$$)
 and not circ_mods~$$Kit$$
 and not winning_score~$$audioBookScore$$
 and winning_score_score!=0
@@ -475,6 +476,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
  and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~$$dvd$$ or lower(circ_mods)~$$dvd$$ or lower(copy_locations)~$$dvd$$))
  and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$noncirculating$$ )
+ and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$video$$ or lower(circ_mods)~$$dvd$$ or lower(circ_mods)~$$reference$$ or lower(circ_mods)~$$vhs$$)
  and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
  and winning_score = $$music_score$$
  and winning_score_score!=0
@@ -506,6 +508,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
  and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~$$dvd$$ or lower(circ_mods)~$$dvd$$ or lower(copy_locations)~$$dvd$$))
  and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$noncirculating$$ )
+ and record not in ( select record from seekdestroy.bib_score where lower(circ_mods)~$$video$$ or lower(circ_mods)~$$dvd$$ or lower(circ_mods)~$$reference$$ or lower(circ_mods)~$$vhs$$)
  and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
  and winning_score = $$music_score$$
  and winning_score_score!=0
@@ -518,7 +521,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score where opac_icon~$$audiobook$$)
  and winning_score = $$music_score$$
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
-and winning_score_score>1
+and winning_score_score>2
 ;
  
  
@@ -733,6 +736,8 @@ AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
 ACL.ID=AC.LOCATION AND
+NOT ACN.DELETED AND
+NOT AC.DELETED AND
 (
 ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ lp$$ OR LOWER(LABEL)~$$^lp$$ OR LOWER(LABEL)~$$large$$ OR LOWER(LABEL)~$$lg$$ OR LOWER(LABEL)~$$sight$$) )
 OR
@@ -750,7 +755,6 @@ BRE.ID IN
 	SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
 );
 
-
 #
 # Find Items that do not show signs of being large print but are attached to large print bibs
 #
@@ -760,6 +764,8 @@ AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
 ACL.ID=AC.LOCATION AND
+NOT ACN.DELETED AND
+NOT AC.DELETED AND
 (
 ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)!~$$ lp$$ AND LOWER(LABEL)!~$$^lp$$ AND LOWER(LABEL)!~$$large$$ AND LOWER(LABEL)!~$$lg$$ AND LOWER(LABEL)!~$$sight$$ AND LOWER(LABEL)!~$$s\.s\.$$) )
 AND
@@ -1067,3 +1073,34 @@ ACN.ID=AC.CALL_NUMBER AND
 ACL.ID=AC.LOCATION AND
 BRE.DELETED AND
 NOT AC.DELETED;
+
+#
+# Find Items that are attached to Electronic bibs
+#
+electronic_book_with_physical_items_attached_for_report~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+AOU.ID=AC.CIRC_LIB AND
+BRE.ID=ACN.RECORD AND
+ACN.ID=AC.CALL_NUMBER AND
+ACL.ID=AC.LOCATION AND
+NOT BRE.DELETED AND
+NOT AC.DELETED AND
+lower(BRE.marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$ AND
+BRE.id in
+(
+select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
+)
+and 
+(
+	BRE.marc ~ $$tag="008">.......................[oqs]$$
+	or
+	BRE.marc ~ $$tag="006">......[oqs]$$
+)
+and
+(
+	BRE.marc ~ $$<leader>......[at]$$
+)
+and
+(
+	BRE.marc ~ $$<leader>.......[acdm]$$
+);

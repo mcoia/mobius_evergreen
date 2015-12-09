@@ -188,17 +188,17 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					#$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					#$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					 cleanMetaRecords();
+					 # cleanMetaRecords();
 					
-					# findInvalidElectronicMARC();
-					# findInvalidAudioBookMARC();
-					# findInvalidDVDMARC();
-					# findInvalidLargePrintMARC();
-					# findInvalidMusicMARC();
+					 # findInvalidElectronicMARC();
+					 # findInvalidAudioBookMARC();
+					 # findInvalidDVDMARC();
+					 # findInvalidLargePrintMARC();
+					  findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -208,12 +208,7 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-					findPossibleDups();
-					
-
-					
-					
-					#print "regular cache\n";
+					#findPossibleDups();
 					
 					
 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(
@@ -253,7 +248,7 @@ if(! -e $xmlconf)
 			#$jobid=2;
 			
 			my @tolist = ($conf{"alwaysemail"});
-			if(0)#length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
+			if(length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
 			{
 				my $email = new email($conf{"fromemail"},\@tolist,$valid,1,\%conf);
 				my @reports = @{reportResults()};
@@ -300,6 +295,7 @@ sub reportResults
 	my $largePrintItemsOnNonLargePrintBibs='';
 	my $nonLargePrintItemsOnLargePrintBibs='';
 	my $itemsAttachedToDeletedBibs='';
+	my $itemsAttachedToElectronicBibs='';
 	my $DVDItemsOnNonDVDBibs='';
 	my $nonDVDItemsOnDVDBibs='';
 	my $AudiobookItemsOnNonAudiobookBibs='';
@@ -534,8 +530,22 @@ sub reportResults
 		push(@attachments,$baseTemp."items_attached_to_deleted_bibs.csv");
 	}
 	
+	# Items attached to Electronic bibs
+	$query =  $queries{"electronic_book_with_physical_items_attached_for_report"};
+	updateJob("Processing","reportResults $query");
+	@results = @{$dbHandler->query($query)};	
+	if($#results>-1)
+	{
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Items attached to Electronic Bibs.");
+		$itemsAttachedToElectronicBibs="$summary\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."electronic_book_with_physical_items_attached.csv");
+		push(@attachments,$baseTemp."electronic_book_with_physical_items_attached.csv");
+	}
 	
-	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobooksPossbileEAudiobooks.$itemsAttachedToDeletedBibs.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$nonDVDItemsOnDVDBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
+	
+	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobooksPossbileEAudiobooks.$itemsAttachedToDeletedBibs.$itemsAttachedToElectronicBibs.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$nonDVDItemsOnDVDBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
 	#print $ret;
 	my @returns = ($ret,\@attachments);
 	return \@returns;
@@ -1102,7 +1112,7 @@ sub findInvalidMARC
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
 	updateJob("Processing","findInvalidMARC  $query");
-	#$dbHandler->update($query);
+	$dbHandler->update($query);
 	foreach(@marcSearchPhrases)
 	{
 		my $phrase = lc$_;
@@ -3767,6 +3777,22 @@ sub determineVideoScore
 	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@two45);
 	my $score=0;
+	if($textmarc =~ m/music from the motion picture/g)
+	{
+		return 0;
+	}
+	if($textmarc =~ m/music from the movie/g)
+	{
+		return 0;
+	}
+	if($textmarc =~ m/motion picture music/g)
+	{
+		return 0;
+	}
+	if($textmarc =~ m/playaway/g  ||  $textmarc =~ m/findaway/g)
+	{
+		return 0;
+	}
 	#$log->addLine(lc$textmarc);
 	foreach(@two45)
 	{
