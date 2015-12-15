@@ -16,9 +16,6 @@ use Getopt::Long;
 
 my $logFile='';
 my $xmlconf = "/openils/conf/opensrf.xml";
-our $daysrepeat=0;
-our $debug=0;
-our $reindex=0;
 
 
 
