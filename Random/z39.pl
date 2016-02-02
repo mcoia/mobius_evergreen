@@ -61,7 +61,7 @@ if($valid)
 	{
 		my $mobutil = new Mobiusutil();
 		#my @res = @{$mobutil->getMarcFromZ3950("towers.searchmobius.org:210/INNOPAC",'@attr 1=4 harry potter',$log)};
-		my @res = @{$mobutil->getMarcFromZ3950("205.247.101.11:210/INNOPAC",'@attr 1=4 "harry potter"',$log)};
+		my @res = @{$mobutil->getMarcFromZ3950("192.168.12.152:211/KANSAS",'@attr 1=4 "harry potter"',$log)};
 		$log->addLine(Dumper(\@res));
 	}
 }

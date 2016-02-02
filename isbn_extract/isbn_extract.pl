@@ -50,6 +50,7 @@ if(! -e $xmlconf)
 	our %conf;
 	our $baseTemp;
 	our $libraryname;
+	our $fullDB;
 	
   
  if($conf)
@@ -87,6 +88,7 @@ if(! -e $xmlconf)
 			$baseTemp =~ s/\/$//;
 			$baseTemp.='/';
 			$libraryname = $mobUtil->trim($conf{"libraryname"});
+			$fullDB = $conf{'fullDB'} if($conf{'fullDB'});
 			my $subject = $mobUtil->trim($conf{"emailsubjectline"});
 			
 			my $displayname = $mobUtil->trim($conf{"displayname"});
@@ -161,6 +163,23 @@ record not in(select id from biblio.record_entry where deleted)
 ) as a
 where length(isbn) in(10,13)
 order by 1";
+
+	if($fullDB)
+	{
+		$query = "
+	select distinct isbn from
+(
+select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value from metabib.real_full_rec where 
+(
+record in
+(
+select id from biblio.record_entry where not deleted
+)
+)
+) as a
+where length(isbn) in(10,13)
+order by 1";
+	}
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	

@@ -43,12 +43,13 @@ if(! -e $xmlconf)
 	our $mobUtil = new Mobiusutil();  
 	our $log;
 	our $dbHandler;	
-    our @updatetypes = ('newitems','recentreturned','last14daytopcirc');
+    our @updatetypes = ('newitems','recentreturned','last14daytopcirc','shelvinglocation');
 	
-	# These are the 3 types:
+	# These are the 4 types:
 	# Newly cataloged items (regardless of age of bib)  (newitems)
 	# Recently returned (last 100 items returned)   (recentreturned)
 	# Last 14 days, top 100 circulated titles (last14daytopcirc)
+	# Newest items on shelving locations (shelvinglocation shelfname1,shelfname2,shelfname3,...,...)
 
 	
 my $dt = DateTime->now(time_zone => "local"); 
@@ -62,8 +63,13 @@ $log->addLogLine(" ---------------- Script Starting ---------------- ");
 my %dbconf = %{getDBconnects($xmlconf)};
 $dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});		
 			
-my $query = "SELECT ID,(SELECT PARENT_OU FROM ACTOR.ORG_UNIT WHERE ID=(SELECT HOME_OU FROM ACTOR.USR WHERE ID=A.OWNER)),DESCRIPTION FROM CONTAINER.BIBLIO_RECORD_ENTRY_BUCKET A WHERE DESCRIPTION IN(";
-foreach(@updatetypes){ $query.="'$_',";}
+my $query = "SELECT 
+ID,
+(SELECT PARENT_OU FROM ACTOR.ORG_UNIT WHERE ID=(SELECT HOME_OU FROM ACTOR.USR WHERE ID=A.OWNER)),
+SPLIT_PART(DESCRIPTION,\$\$ \$\$,1),
+regexp_replace(DESCRIPTION,\$\$^[^\\s]*\\s\$\$,\$\$\$\$) FROM CONTAINER.BIBLIO_RECORD_ENTRY_BUCKET A 
+WHERE SPLIT_PART(DESCRIPTION,\$\$ \$\$,1) IN(";
+foreach(@updatetypes){ $query.="\$\$$_\$\$,";}
 $query = substr($query,0,-1).")";
 
 $log->addLine($query);
@@ -75,6 +81,9 @@ foreach(@results)
 	my $bucketID=@row[0];
 	my $scope=@row[1];
 	my $des=@row[2];
+	my $des2=@row[3];
+	my @shelves=();
+	@shelves = split(',',$des2) if( length($des2)>1);	
 	my $ous = getOUs($scope);
 	my $inserts="";
 	if($des eq 'newitems')
@@ -87,7 +96,11 @@ foreach(@results)
 	}
 	elsif($des eq 'last14daytopcirc')
 	{
-		$inserts = updatebag14daytopcirc($bucketID,$ous);				
+		$inserts = updatebag14daytopcirc($bucketID,$ous);
+	}
+	elsif($des eq 'shelvinglocation')
+	{
+		$inserts = updatebagshelvinglocation($bucketID,$ous,\@shelves);
 	}
 	if(length($inserts) > 0)
 	{
@@ -135,6 +148,7 @@ CREATE_DATE::DATE DESC LIMIT 300
 GROUP BY B.\"REC\"
 ) AS C
 where C.\"THEDATE\" IS NOT NULL
+AND C.\"REC\" IS NOT NULL
 ORDER BY C.\"THEDATE\" DESC
 LIMIT 100
 ";
@@ -192,7 +206,7 @@ LIMIT 100";
 		my @row = @{$row};
 		if(length($mobUtil->trim(@row[0])) >0)
 		{
-			$inserts.="($id,".@row[0]."),";		
+			$inserts.="($id,".@row[0]."),";
 		}
 	}
 	return $inserts;
@@ -238,7 +252,62 @@ LIMIT 100
 		my @row = @{$row};
 		if(length($mobUtil->trim(@row[0])) >0)
 		{
-			$inserts.="($id,".@row[0]."),";		
+			$inserts.="($id,".@row[0]."),";
+		}
+	}
+	return $inserts;
+}
+
+
+sub updatebagshelvinglocation
+{
+	my $id = @_[0];
+	my $ous = @_[1];
+	my @shelves = @{@_[2]};
+	my $query = "
+	 SELECT * FROM 
+(
+ SELECT DISTINCT B.\"REC\",
+ MAX(B.\"IDATE\") \"THEDATE\"
+  FROM
+(
+SELECT (SELECT RECORD FROM ASSET.CALL_NUMBER WHERE ID=A.CALL_NUMBER AND RECORD>0 AND RECORD IS NOT NULL
+-- REMOVE SERIALS
+AND RECORD IN(SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE 
+	ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE OWNING_LIB IN($ous))
+	AND
+	marc !~ \$\$<leader>.......[bs]\$\$
+)
+
+) \"REC\",CREATE_DATE::DATE \"IDATE\" FROM ASSET.COPY  A WHERE CIRC_LIB IN($ous)
+AND LOCATION IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE OWNING_LIB IN($ous) AND OPAC_VISIBLE AND HOLDABLE AND CIRCULATE AND NAME IN( \$\$theshelvinglocationlist\$\$ )) AND OPAC_VISIBLE AND HOLDABLE AND CIRCULATE AND ID != -1::BIGINT
+ORDER BY
+CREATE_DATE::DATE DESC LIMIT 300
+) AS B
+GROUP BY B.\"REC\"
+) AS C
+where C.\"THEDATE\" IS NOT NULL
+AND C.\"REC\" IS NOT NULL
+ORDER BY C.\"THEDATE\" DESC
+LIMIT 100
+";
+
+	my $shelflistforquery = '';
+	foreach(@shelves){ $shelflistforquery.="$_\$\$,\$\$";}
+	$shelflistforquery = substr($shelflistforquery,0,-5);
+	$query =~s/theshelvinglocationlist/$shelflistforquery/g;
+
+	
+	$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my $inserts = "";
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		if(length($mobUtil->trim(@row[0])) >0)
+		{
+			$inserts.="($id,".@row[0]."),";
 		}
 	}
 	return $inserts;
