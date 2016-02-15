@@ -40,6 +40,8 @@ package DBhandler;
  
  use String::Multibyte;
  
+ our @columnNames;
+ 
  
  sub new   #dbname,host,login,password,port
  {
@@ -132,6 +134,7 @@ package DBhandler;
 
 	my $query = $conn->prepare($querystring);
 	$query->execute();
+	@columnNames = @{$query->{NAME}};
 	my %ar;
 	#mb_internal_encoding("UTF-8");
 	while (my $row = $query->fetchrow_arrayref())
@@ -246,6 +249,11 @@ package DBhandler;
 	undef($querystring);
 	return \@ret;
 	
+ }
+ 
+ sub getColumnNames
+ {
+	return \@columnNames;
  }
  
  sub copyinput
