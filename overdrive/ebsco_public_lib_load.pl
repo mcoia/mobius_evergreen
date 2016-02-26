@@ -537,6 +537,20 @@ sub getOCLCFTPPassword
 		while ($alreadyUsed)
 		{
 			$newpass = $mobUtil->generateRandomString(8);
+			my @chars = split('',$newpass);
+			my $containsNumber=0;
+			$log->addLine("testing $newpass");
+			for(@chars)
+			{
+				if($mobUtil->is_integer($_))
+				{
+					$containsNumber = 1;
+				}
+			}
+			if(!$containsNumber)
+			{
+				next;
+			}
 			$alreadyUsed = 0;
 			foreach(@oldpasswords)
 			{
@@ -550,6 +564,7 @@ sub getOCLCFTPPassword
 				$log->addLine("Found one that's not already used: $newpass");
 				my $ftp = Net::FTP->new($server, Debug => 1, Passive=> 1)
 				or die $log->addLogLine("Cannot connect to ".$server);
+				print $login,$password."/".$newpass."/".$newpass."\n";
 				$log->addLine($login,$password."/".$newpass."/".$newpass);
 				if($ftp->login($login,$password."/".$newpass."/".$newpass))
 				{
@@ -607,7 +622,9 @@ sub getmarc
 				my $rsize = $ftp->size($filename);
 				# print "Local: $size\n";
 				# print "remot: $rsize\n";
-				if($size ne $rsize)
+				# OCLC's FTP server does not convey the file size!
+				# Just going to assume that the files are identical based on name
+				if(0)#$size ne $rsize)
 				{
 					$log->addLine("$archivefolder/$filename differes in size remote $filename");
 					unlink("$archivefolder/$filename");
@@ -642,6 +659,12 @@ sub getmarc
 
 sub decideToDownload
 {
+	my $filename = @_[0];
+	$filename = lc($filename);
+	if(! ($filename =~ m/\.pub/g) )
+	{
+		return 0;
+	}
 	return 1;
 }
 

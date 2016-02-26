@@ -21,6 +21,7 @@ our $sierralogin;
 our $sierrapass;
 our $sierralocationcodes;
 our $loginvestigationoutput;
+our $sample;
 our @columns;
 our @allRows;
 
@@ -34,6 +35,7 @@ GetOptions (
 "sierralogin=s" => \$sierralogin,
 "sierrapass=s" => \$sierrapass,
 "sierralocationcodes=s" => \$sierralocationcodes,
+"sample=s" => \$sample
 )
 or die("Error in command line arguments\nYou can specify
 --logfile configfilename (required)
@@ -44,6 +46,7 @@ or die("Error in command line arguments\nYou can specify
 --sierrapass DB password
 --sierralocationcodes sierra location codes regex accepted (comma separated)
 --schema (eg. m_slmpl)
+--sample (number of rows to fetch eg --sample 100)
 \n");
 
 if(! -e $xmlconf)
@@ -79,11 +82,10 @@ if(!$schema)
 	my $patronlocationcodes = $sierralocationcodes;
 	$patronlocationcodes =~ s/LOCATION_CODE/home_library_code/g;
 	#get patrons
-	# print "Gathering Patrons....";
-	# my $query = "
-		# select * from sierra_view.patron_view where ($patronlocationcodes) limit 100
-	# ";
-	# setupEGTable($query,"patron_view");
+	my $query = "
+		select * from sierra_view.patron_view where ($patronlocationcodes) 
+	";
+	setupEGTable($query,"patron_view");
 	
 	#get patron addresses	
 	my $query = "
@@ -91,17 +93,67 @@ if(!$schema)
 		patron_record_id in
 		(
 		select id from sierra_view.patron_view where ($patronlocationcodes)
-		) limit 100
+		) 
 	";
 	setupEGTable($query,"patron_record_address");
-	exit;
+	
+	#get patron names	
+	my $query = "
+		select * from sierra_view.patron_record_fullname where 
+		patron_record_id in
+		(
+		select id from sierra_view.patron_view where ($patronlocationcodes)
+		) 
+	";
+	setupEGTable($query,"patron_record_fullname");
+	
+	#get patron phone numbers	
+	my $query = "
+		select * from sierra_view.patron_record_phone where 
+		patron_record_id in
+		(
+		select id from sierra_view.patron_view where ($patronlocationcodes)
+		) 
+	";
+	setupEGTable($query,"patron_record_phone");
+	
+	#get patron checkouts
+	my $query = "
+		select * from sierra_view.checkout where 
+		patron_record_id in
+		(
+		select id from sierra_view.patron_view where ($patronlocationcodes)
+		) 
+	";
+	setupEGTable($query,"checkout");
+	
+	#get patron fines
+	my $query = "
+		select * from sierra_view.fine where 
+		patron_record_id in
+		(
+		select id from sierra_view.patron_view where ($patronlocationcodes)
+		) 
+	";
+	setupEGTable($query,"fine");
+	
+	#get patron fines paid
+	my $query = "
+		select * from sierra_view.fines_paid where 
+		patron_record_metadata_id in
+		(
+		select id from sierra_view.patron_view where ($patronlocationcodes)
+		) 
+	";
+	setupEGTable($query,"fines_paid");
 	
 	#get bibs
 	my $query = "select * from sierra_view.bib_view where id in
 	(
 		SELECT BIB_RECORD_ID FROM SIERRA_VIEW.BIB_RECORD_LOCATION WHERE 
 		($sierralocationcodes)
-	)";
+	)
+	";
 	setupEGTable($query,"bib_view");
 	
 	#get items
@@ -116,7 +168,7 @@ if(!$schema)
 				($sierralocationcodes)
 			)
 		)
-	)
+	) 
 	";
 	setupEGTable($query,"item_view");
 	
@@ -143,11 +195,12 @@ sub setupEGTable
 	my $query = @_[0];
 	my $tablename = @_[1];
 	
+	$query.="\nlimit $sample" if($sample);	
 	print "Gathering $tablename....";
 	$log->addLine($query);
 	my @allRows = @{$sierradbHandler->query($query)};
 	my @cols = @{$sierradbHandler->getColumnNames()};
-	print $#results." rows\n";
+	print $#allRows." rows\n";
 	
 	
 	#drop the table
