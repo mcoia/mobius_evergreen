@@ -188,8 +188,8 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					 # cleanMetaRecords();
@@ -198,7 +198,7 @@ if(! -e $xmlconf)
 					 # findInvalidAudioBookMARC();
 					 # findInvalidDVDMARC();
 					 # findInvalidLargePrintMARC();
-					  findInvalidMusicMARC();
+					 # findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -296,8 +296,7 @@ sub reportResults
 	my $nonLargePrintItemsOnLargePrintBibs='';
 	my $itemsAttachedToDeletedBibs='';
 	my $itemsAttachedToElectronicBibs='';
-	my $DVDItemsOnNonDVDBibs='';
-	my $nonDVDItemsOnDVDBibs='';
+	my $videoItemsOnNonvideoBibs='';
 	my $AudiobookItemsOnNonAudiobookBibs='';
 	my $AudiobooksPossbileEAudiobooks='';
 	my @attachments=();
@@ -457,33 +456,47 @@ sub reportResults
 	}
 	
 	
-	#DVD Items attached to non DVD bibs
-	$query =  $queries{"DVD_items_on_non_DVD_bibs"};
+	#mismatch DVD
+	$query =  $queries{"questionable_dvd_bib_to_item"};
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Video items attached to non-video bibs");
-		$DVDItemsOnNonDVDBibs="$summary\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: DVD items/bibs mismatched");
+		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Video_items_on_non_Video_bibs.csv");
-		push(@attachments,$baseTemp."Video_items_on_non_Video_bibs.csv");
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_dvd_bib_to_item.csv");
+		push(@attachments,$baseTemp."questionable_dvd_bib_to_item.csv");
 	}
 
 	
-	#Non DVD Items attached to DVD bibs
-	$query =  $queries{"non_DVD_items_on_DVD_bibs"};
+	#mismatch VHS
+	$query =  $queries{"questionable_vhs_bib_to_item"};
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};
 	if($#results>-1)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Non-video items attached to video bibs");
-		$nonDVDItemsOnDVDBibs="$summary\r\n\r\n\r\n";
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: VHS items/bibs mismatched");
+		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
 		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
 		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."non_Video_items_on_Video_bibs.csv");
-		push(@attachments,$baseTemp."non_Video_items_on_Video_bibs.csv");
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_vhs_bib_to_item.csv");
+		push(@attachments,$baseTemp."questionable_vhs_bib_to_item.csv");
+	}
+	
+	#mismatch all video formats
+	$query =  $queries{"questionable_video_bib_to_item"};
+	updateJob("Processing","reportResults $query");
+	@results = @{$dbHandler->query($query)};
+	if($#results>-1)
+	{
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: All video formats items/bibs mismatched");
+		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_video_bib_to_item.csv");
+		push(@attachments,$baseTemp."questionable_video_bib_to_item.csv");
 	}
 	
 	
@@ -545,7 +558,7 @@ sub reportResults
 	}
 	
 	
-	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobooksPossbileEAudiobooks.$itemsAttachedToDeletedBibs.$itemsAttachedToElectronicBibs.$AudiobookItemsOnNonAudiobookBibs.$DVDItemsOnNonDVDBibs.$nonDVDItemsOnDVDBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
+	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobooksPossbileEAudiobooks.$itemsAttachedToDeletedBibs.$itemsAttachedToElectronicBibs.$AudiobookItemsOnNonAudiobookBibs.$videoItemsOnNonvideoBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
 	#print $ret;
 	my @returns = ($ret,\@attachments);
 	return \@returns;

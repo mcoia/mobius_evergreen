@@ -103,7 +103,7 @@ use Cwd;
 			setupSchema($dbHandler);
 			
 			# @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc records/ebrary/")};
-			# @files = ("ME-2230-1015-eBook-20150801a_remove.mrc");
+			# @files = ("importtest.mrc");
 			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"yearstoscrape"},$archivefolder,$log)};
 			if(@files[$#files]!=-1)
 			{
@@ -720,6 +720,15 @@ sub add9
 					}
 				}
 			}
+			my @urls = @recID[$rec]->subfield( 'u' );
+			foreach(@urls)
+			{
+				my $finalURL = $_;
+				#$log->addLine("URL is $finalURL");
+				$finalURL = '/eg/opac/referringurl?intendedurl='.$finalURL.'&authtype=url,uid' if $finalURL !=~ m/referringurl\?intendedurl/;
+				#$log->addLine("Now its $finalURL");
+				@recID[$rec]->update( 'u' => $finalURL );
+			}
 		}
 	}
 	return $marc;
@@ -980,7 +989,7 @@ updateJob("Processing","updating 245h and 856z");
 				{
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
-					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?locg=157;expand=marchtml");
 					$query = "INSERT INTO molib2go.bib_marc_update(record,changed_marc,new_record,job) VALUES($newmax,\$1,true,$jobid)";
 					my @values = ($thisXML);
 					$dbHandler->updateWithParameters($query,\@values);
@@ -1063,7 +1072,7 @@ sub attemptRemoveBibs
 			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 WHERE ID=$id";
 		updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 			$log->addLine($query);
-			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t0");
+			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?locg=4;expand=marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?locg=157;expand=marchtml\t0");
 			my $res = $dbHandler->updateWithParameters($query,\@values);
 			if($res)
 			{
@@ -1230,7 +1239,7 @@ sub chooseWinnerAndDeleteRest
 updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	$log->addLine($query);
 	$log->addLine($thisXML);
-	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$matchnum");
+	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?locg=4;expand=marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?locg=157;expand=marchtml\t$matchnum");
 	my $res = $dbHandler->updateWithParameters($query,\@values);
 	#print "$res\n";
 	if($res)
@@ -1559,7 +1568,7 @@ sub mergeMARC856
 		my $u = $thisField->subfield("u");
 		my $z = $thisField->subfield("z");
 		my $s7 = $thisField->subfield("7");
-		
+		$log->addLine($u);
 		if($u) #needs to be defined because its the key
 		{
 			if(!$urls{$u})
@@ -1570,9 +1579,11 @@ sub mergeMARC856
 					$thisField->delete_subfields('z');
 				}
 				$urls{$u} = $thisField;
+				#$log->addLine("Not already in array");
 			}
 			else
 			{
+				#$log->addLine("Already in array");
 				my @nines = $thisField->subfield("9");
 				my $otherField = $urls{$u};
 				my @otherNines = $otherField->subfield("9");

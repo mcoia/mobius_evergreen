@@ -758,7 +758,7 @@ BRE.ID IN
 #
 # Find Items that do not show signs of being large print but are attached to large print bibs
 #
- non_large_print_items_on_large_print_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+non_large_print_items_on_large_print_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
 from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
@@ -781,12 +781,150 @@ BRE.ID IN
 	WHERE A."FORMAT"~$$lpbook$$
 );
 
-
+#
+# Find DVD MISMATCHES
+#
+questionable_dvd_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+AOU.ID=AC.CIRC_LIB AND
+BRE.ID=ACN.RECORD AND
+ACN.ID=AC.CALL_NUMBER AND
+ACL.ID=AC.LOCATION AND
+NOT ACN.DELETED AND
+NOT AC.DELETED AND
+BRE.ID>0 AND
+(
+ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ dvd$$ OR LOWER(LABEL)~$$^dvd$$) )
+OR
+ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$ dvd$$ OR LOWER(NAME)~$$^dvd$$) )
+OR
+lower(ac.circ_modifier) ~* $$ dvd$$ OR
+lower(ac.circ_modifier) ~* $$^dvd$$
+)
+AND
+BRE.ID IN
+(
+	SELECT A.ID FROM
+	(
+	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
+	) AS A
+	WHERE A."FORMAT"!~$$dvd$$
+	UNION
+	SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
+)
+UNION
+select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+AOU.ID=AC.CIRC_LIB AND
+BRE.ID=ACN.RECORD AND
+ACN.ID=AC.CALL_NUMBER AND
+ACL.ID=AC.LOCATION AND
+NOT ACN.DELETED AND
+NOT AC.DELETED AND
+BRE.ID>0 AND
+(
+	lower(acn.label) !~* $$ dvd$$ and
+	lower(acn.label) !~* $$^dvd$$ and
+	lower(acn.label) !~* $$movie$$ and
+	lower(acn.label) !~* $$video$$
+)
+and
+(
+	lower(acl.name) !~* $$ dvd$$ and
+	lower(acl.name) !~* $$^dvd$$ and
+	lower(acl.name) !~* $$movie$$ and
+	lower(acl.name) !~* $$video$$
+)
+and
+(
+	lower(ac.circ_modifier) !~* $$ dvd$$ and
+	lower(ac.circ_modifier) !~* $$^dvd$$ and
+	lower(ac.circ_modifier) !~* $$movie$$ and
+	lower(ac.circ_modifier) !~* $$video$$
+)
+AND
+BRE.ID IN
+(
+	SELECT A.ID FROM
+	(
+	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
+	) AS A
+	WHERE A."FORMAT"~$$dvd$$
+)
+order by 1;
 
 #
-# Find Items that show signs of being DVD but are attached to non DVD bibs
+# Find VHS mismatches
 #
- DVD_items_on_non_DVD_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+questionable_vhs_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+AOU.ID=AC.CIRC_LIB AND
+BRE.ID=ACN.RECORD AND
+ACN.ID=AC.CALL_NUMBER AND
+ACL.ID=AC.LOCATION AND
+NOT ACN.DELETED AND
+NOT AC.DELETED AND
+BRE.ID>0 AND
+(
+ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$vhs$$) )
+OR
+ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$vhs$$) )
+OR
+lower(ac.circ_modifier) ~* $$vhs$$
+)
+AND
+BRE.ID IN
+(
+	SELECT A.ID FROM
+	(
+	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
+	) AS A
+	WHERE A."FORMAT"!~$$vhs$$
+	UNION
+	SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
+) 
+UNION
+select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+AOU.ID=AC.CIRC_LIB AND
+BRE.ID=ACN.RECORD AND
+ACN.ID=AC.CALL_NUMBER AND
+ACL.ID=AC.LOCATION AND
+NOT ACN.DELETED AND
+NOT AC.DELETED AND
+BRE.ID>0 AND
+(
+	lower(acn.label) !~* $$movie$$ and
+	lower(acn.label) !~* $$vhs$$ and
+	lower(acn.label) !~* $$video$$
+)
+and
+(
+	lower(acl.name) !~* $$movie$$ and
+	lower(acl.name) !~* $$vhs$$ and
+	lower(acl.name) !~* $$video$$
+)
+and
+(
+	lower(ac.circ_modifier) !~* $$movie$$ and
+	lower(ac.circ_modifier) !~* $$vhs$$ and
+	lower(ac.circ_modifier) !~* $$video$$
+)
+AND
+BRE.ID IN
+(
+	SELECT A.ID FROM
+	(
+	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
+	) AS A
+	WHERE A."FORMAT"~$$vhs$$
+)
+order by 1;
+
+#
+# Find Questionable video format mismatches
+#
+questionable_video_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
 from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
@@ -816,13 +954,9 @@ BRE.ID IN
 	WHERE A."FORMAT"!~$$dvd$$ AND A."FORMAT"!~$$vhs$$ AND A."FORMAT"!~$$blu$$
 	UNION
 	SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-) order by BRE.id;
- 
-  
-#
-# Find Items that may not be DVD but are attached to DVD bibs
-#
-non_DVD_items_on_DVD_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
+) 
+UNION
+select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
 from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
@@ -863,110 +997,7 @@ BRE.ID IN
 	) AS A
 	WHERE A."FORMAT"~$$dvd$$ or A."FORMAT"~$$blu$$ or A."FORMAT"~$$vhs$$
 )
-order by BRE.id;
- 
-#
-# Find Items that are probably AUDIOBOOKs but are attached to non Audiobook bibs
-#
- Audiobook_items_on_non_Audiobook_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
-(
-	lower(acn.label) ~* $$cass$$ or
-	lower(acn.label) ~* $$aud$$ or
-	lower(acn.label) ~* $$disc$$ or
-	lower(acn.label) ~* $$mus$$ or
-	lower(acn.label) ~* $$ cd$$ or
-	lower(acn.label) ~* $$^cd$$ or
-	lower(acn.label) ~* $$disk$$
-or
-	lower(acl.name) ~* $$cas$$ or
-	lower(acl.name) ~* $$aud$$ or
-	lower(acl.name) ~* $$disc$$ or
-	lower(acl.name) ~* $$mus$$ or
-	lower(acl.name) ~* $$ cd$$ or
-	lower(acl.name) ~* $$^cd$$ or
-	lower(acl.name) ~* $$disk$$ 
-)
-and
-ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
-(
-(
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$music$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$casaudiobook$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$casmusic$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cassette$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cd$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdaudiobook$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdmusic$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$playaway$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$kit$$
-)
-OR
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) IS NULL
-)
-ORDER BY BRE.id,ACN.LABEL
-;
-
-
-#
-# Find Items that are probably* NOT AUDIOBOOK but are attached to Audiobook bibs
-#
-non_Audiobook_items_on_Audiobook_bibs~~select a.id,a.barcode,a.label,a.icon,a.name from
-(
-select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) as "icon",AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
-bre.marc ~ $$<leader>......i$$ and
-(
-	lower(acn.label) !~* $$cas$$ and
-	lower(acn.label) !~* $$aud$$ and
-	lower(acn.label) !~* $$disc$$ and
-	lower(acn.label) !~* $$mus$$ and
-	lower(acn.label) !~* $$ cd$$ and
-	lower(acn.label) !~* $$^cd$$ and
-	lower(acn.label) !~* $$disk$$
-)
-and
-(
-	lower(acl.name) !~* $$cas$$ and
-	lower(acl.name) !~* $$aud$$ and
-	lower(acl.name) !~* $$disc$$ and
-	lower(acl.name) !~* $$mus$$ and
-	lower(acl.name) !~* $$ cd$$ and
-	lower(acl.name) !~* $$^cd$$ and
-	lower(acl.name) !~* $$disk$$ 
-)
-and ac.circ_modifier not in ( $$AudioBooks$$,$$CD$$ )
-) as a
-#This takes super duper long, so lets not and say we did
--- where
--- (
--- 	a."icon"~ $$music$$ or
--- 	a."icon"~ $$kit$$ or
--- 	a."icon"~ $$casaudiobook$$ or
--- 	a."icon"~ $$casmusic$$ or
--- 	a."icon"~ $$cassette$$ or
--- 	a."icon"~ $$cd$$ or
--- 	a."icon"~ $$cdaudiobook$$ or
--- 	a."icon"~ $$cdmusic$$ or
--- 	a."icon" is null
--- )
-order by a.id,a.label;
-
-
+order by 1;
  
 #
 # Find Items that are probably* NOT AUDIOBOOK but are attached to Audiobook bibs
