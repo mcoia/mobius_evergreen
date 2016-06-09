@@ -188,17 +188,17 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					 $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					 $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					 # cleanMetaRecords();
 					
-					 # findInvalidElectronicMARC();
-					 # findInvalidAudioBookMARC();
+					  findInvalidElectronicMARC();
+					  findInvalidAudioBookMARC();
 					 # findInvalidDVDMARC();
-					 # findInvalidLargePrintMARC();
-					 # findInvalidMusicMARC();
+					  findInvalidLargePrintMARC();
+					  findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -855,6 +855,38 @@ sub updateMARCSetCDAudioBook
 	updateMARC($xmlresult,$bibid,'false','Correcting for Audiobook in the leader/007 rem 008_23');
 }
 
+sub determineWhichVideoFormat
+{
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	my $function = "updateMARCSetDVD(\$bibid,\$marc)";
+	my $query = "select circ_mods,copy_locations,call_labels from seekdestroy.bib_score where record=$bibid";
+	my @results = @{$dbHandler->query($query)};
+	my $dvd=0;
+	my $vhs=0;
+	my $blu=0;
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $flatmarc = $marcob->as_formatted;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $score=@row[0].@row[1].@row[2].$flatmarc
+		my @sp = split('dvd',lc($score));
+		$dvd=$#sp;
+		@sp = split('bluray',lc($score));
+		$blu = $#sp;
+		@sp = split('blu-ray',lc($score));
+		$blu += $#sp;
+		@sp = split('vhs',lc($score));
+		$vhs = $#sp;
+		
+	}
+	
+}
+
 sub updateMARCSetDVD
 {	
 	my $bibid = @_[0];	
@@ -898,6 +930,96 @@ sub updateMARCSetDVD
 	$xmlresult = fingerprintScriptMARC($xmlresult,'D V D');
 	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
 	updateMARC($xmlresult,$bibid,'false','Correcting for DVD in the leader/007 rem 008_23');
+}
+
+sub updateMARCSetBluray
+{	
+	my $bibid = @_[0];	
+	my $marc = @_[1];
+	$marc = setMARCForm($marc,' ');
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
+	my $altered=0;
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print $z07->data()."\n";
+			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'v',1);
+			$replacement=$mobUtil->insertDataIntoColumn($replacement,'s',5);
+			#print "$replacement\n";			
+			$z07->update($replacement);
+			$marcob->insert_fields_ordered($z07);
+			$altered=1;
+		}
+		elsif(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print "removed video 007\n";
+		}
+	}
+	if(!$altered)
+	{
+		my $z07 = MARC::Field->new( '007', 'vd csaizq' );
+		#print "inserted new 007\n".$z07->data()."\n";
+		$marcob->insert_fields_ordered($z07);
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = fingerprintScriptMARC($xmlresult,'B L U R A Y');
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
+	updateMARC($xmlresult,$bibid,'false','Correcting for Bluray in the leader/007 rem 008_23');
+}
+
+sub updateMARCSetVHS
+{	
+	my $bibid = @_[0];	
+	my $marc = @_[1];
+	$marc = setMARCForm($marc,' ');
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
+	my $altered=0;
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print $z07->data()."\n";
+			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'v',1);
+			$replacement=$mobUtil->insertDataIntoColumn($replacement,'b',5);
+			#print "$replacement\n";			
+			$z07->update($replacement);
+			$marcob->insert_fields_ordered($z07);
+			$altered=1;
+		}
+		elsif(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print "removed video 007\n";
+		}
+	}
+	if(!$altered)
+	{
+		my $z07 = MARC::Field->new( '007', 'vf cbahou' );
+		#print "inserted new 007\n".$z07->data()."\n";
+		$marcob->insert_fields_ordered($z07);
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = fingerprintScriptMARC($xmlresult,'V H S');
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
+	updateMARC($xmlresult,$bibid,'false','Correcting for VHS in the leader/007 rem 008_23');
 }
 
 sub updateMARCSetLargePrint
@@ -1048,7 +1170,7 @@ sub findInvalidDVDMARC
 	$log->addLogLine("Starting findInvalidDVDMARC.....");
 	my $typeName = "video";
 	my $problemPhrase = "MARC with video phrases but incomplete marc";
-	my $phraseQuery = $queries{"non_dvd_bib_convert_to_dvd"};
+	my $phraseQuery = $queries{"dvd_search_phrase"};
 	my @additionalSearchQueries = ($queries{"dvd_additional_search"});
 	my $subQueryConvert = $queries{"non_dvd_bib_convert_to_dvd"};
 	my $subQueryNotConvert =  $queries{"non_dvd_bib_not_convert_to_dvd"};

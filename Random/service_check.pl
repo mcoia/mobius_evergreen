@@ -1,6 +1,16 @@
 #!/usr/bin/perl
 
 
+# Testing Evergreen services
+# Blake GH
+# MOBIUS
+
+
+# placing holds via OpenSRF Examples from Dyrcona
+# http://git.evergreen-ils.org/?p=working/NCIPServer.git;a=blob;f=lib/NCIP/ILS/Evergreen.pm;h=85aa4407536e8d86c8ca551ee4831e460f9b5f71;hb=b7d7ab764a76b07fd2a853c504813ccc076b5aba
+# sub place_hold {
+
+
 use strict; 
 #use warnings;
 #no strict 'refs';
@@ -16,6 +26,7 @@ use OpenILS::Utils::Cronscript;
 use OpenILS::Utils::Fieldmapper;
 use OpenILS::Utils::CStoreEditor qw/:funcs/;
 use OpenILS::Const qw(:const);
+use OpenILS::Utils::Configure;
 use OpenSRF::AppSession;
 use OpenSRF::EX qw(:try);
 use Encode;
@@ -44,16 +55,10 @@ our $verbose = 0;
 our $onlytest;
 our %testBattery =
 (
-PatronEdit => \&foo,
+PatronEdit => \&PatronEdit,
 Circulation => \&Circulation,
 CopyHold => \&CopyHold,
-VolumeHold => \&VolumeHold,
-PartHold => \&PartHold,
-TitleHold => \&TitleHold,
-MetarecordHold => \&MetarecordHold,
-DeleteHold => \&DeleteHold,
-Renew => \&Renew,
-Checkin => \&Checkin,
+Autogen => \&Autogen,
 CreateReport => \&CreateReport,
 OPACSearch => \&OPACSearch,
 SIPLogin => \&SIPLogin
@@ -107,6 +112,8 @@ for my $i (0..$#reqs)
 	}
 }
 
+my $error = 0;
+
 if($valid)
 {
 	$conf{"dbhost"} = $server if length($server)>0;
@@ -128,18 +135,19 @@ if($valid)
 		$log->addLogLine("Setup user in DB and grabbing auth token from it");
 		$result = setupUser();
 		print "0\n" unless $result;
-		print "Unable to setup test!\n" unless ($result && !$verbose);
-		exit unless $result;
+		print "fail!\n" unless ($result && !$verbose);
+		exit 1 unless $result;
+		
 		
 		while ( (my $key, my $testFunction) = each %testBattery )
 		{
 			next if($onlytest && ($onlytest ne $key) );
 			$log->addLogLine("Testing $testFunction");
 			clockStart();
-			print $testBattery{$key}->();
+			$result = $testBattery{$key}->();
 			my $time = clockEnd();
 			$log->addLogLine("result $result - $time $testFunction");
-			$result=0;
+			$error=1 unless $result eq '0';
 		}
 		system "cp /openils/var/log/osrfsys.log /mnt/evergreen/";
 	}
@@ -147,6 +155,8 @@ if($valid)
 
 $log->addLogLine(" ---------------- Script Ending ---------------- ");
 
+print $error."\n";
+exit $error;
 
 # This is pretty much required in order to start OpenSRF testing. So, this will test the staff client's
 # ability to login at the same time
@@ -192,9 +202,9 @@ sub PatronEdit
 		$r = OpenSRF::AppSession->create('open-ils.actor')->request('open-ils.actor.patron.update', $authtoken, $r); #->gather(1);
 		my $query = "select id from actor.usr where usrname=E'$authusername' and day_phone = \$\$$random\$\$";
 		my @results = @{$dbHandler->query($query)};
-		return 1 if($#results == 0)
+		return 0 if($#results == 0) # 1 result is array position 0
 	}
-	return 0;
+	return 1;
 }
 
 sub Circulation
@@ -202,12 +212,12 @@ sub Circulation
 	my $r = getIDForThisPatron();
 	if(!(ref($r) eq 'HASH')) # HASH will return if the patron is not found, otherwise an integer
 	{
-		print "heading over to getAvailableItem\n";
-		my $item = getAvailableItem($r);
+		my @item = @{getAvailableItem($r)};
+		my $itembarcode = @item[0];
 		my $numbercircs = getCircTotal();
 		my %args = (
 		patron => $r,
-		barcode => $item,
+		barcode => $itembarcode,
 		permit_override => 1
 		);
 		$r = OpenSRF::AppSession->create('open-ils.circ')->request('open-ils.circ.checkout.full.override', $authtoken, \%args)->gather(1);
@@ -215,14 +225,14 @@ sub Circulation
 		
 		if(getCircTotal() > $numbercircs)
 		{
-			$log->addLine("Doing Checkin $item");
-			my %args = (barcode => $item);
+			$log->addLine("Doing Checkin $itembarcode");
+			my %args = (barcode => $itembarcode);
 			my $r = OpenSRF::AppSession->create('open-ils.circ')->request('open-ils.circ.checkin', $authtoken, \%args)->gather(1);
 			# $log->addLogLine(Dumper($r));
-			return 1;
+			return 0;
 		}
 	}
-	return 0;
+	return 1;
 }
 
 sub CopyHold
@@ -230,31 +240,51 @@ sub CopyHold
 	my $r = getIDForThisPatron();
 	if(!(ref($r) eq 'HASH')) # HASH will return if the patron is not found, otherwise an integer
 	{
-		print "heading over to getAvailableItem\n";
-		my $month = $dt->month + 1 >12 ? 1 : $dt->month + 1;
-		my $duedate = $dt->year.'/'.$month.'/'.$dt->day;
+		my $patronid=$r;
+		my @item = @{getAvailableItem($r)};
+		my $item = @item[0];
+		my $numberholds = getHoldTotal();
 		
-		my $item = getAvailableItem($r);
-		my $numbercircs = getCircTotal();
 		my %args = (
-		patron => $r,
-		barcode => $item,
-		permit_override => 1
+		pickup_lib => $testOU,
+		selection_ou => $testOU,
+		depth => 2,
+		patronid => $patronid,
+		target => @item[1],
+		hold_type => 'C'
 		);
-		$r = OpenSRF::AppSession->create('open-ils.circ')->request('open-ils.circ.checkout.full.override', $authtoken, \%args)->gather(1);
-		#$log->addLogLine(Dumper($r));
+		$r = OpenSRF::AppSession->create('open-ils.circ')->request('open-ils.circ.holds.test_and_create.batch.override', $authtoken, \%args, [@item[1]])->gather(1);
+		$log->addLogLine(Dumper($r));
 		
-		if(getCircTotal() > $numbercircs)
+		if(getHoldTotal() > $numberholds)
 		{
-			$log->addLine("Doing Checkin $item");
-			my %args = (barcode => $item);
-			my $r = OpenSRF::AppSession->create('open-ils.circ')->request('open-ils.circ.checkin', $authtoken, \%args)->gather(1);
-			# $log->addLogLine(Dumper($r));
-			return 1;
+			my $query = "update action.hold_request set cancel_time=now() where cancel_time is null and usr=$patronid";
+			$log->addLine("$query");
+			$dbHandler->update($query);
+			return 0;
 		}
 	}
-	return 0;
-	
+	return 1;
+}
+
+sub Autogen
+{
+	my $ret = 0;
+	system "mkdir $tempspace/autogen";
+	my $file = "autogentest.js";
+	OpenILS::Utils::Configure::org_tree_js($tempspace."/autogen/", $file);
+	my $originalFile = new Loghandler("/openils/var/web/opac/common/js/en-US/OrgTree.js");
+	my $newFile = new Loghandler($tempspace."/autogen/"."en-US/$file");
+	my @oldlines = @{$originalFile->readFile()};
+	my @newlines = @{$newFile->readFile()};
+	for my $i(0..$#oldlines)
+	{
+		$log->addLine(@oldlines[$i]."\n".@newlines[$i]);
+		$ret = 1 if( @oldlines[$i] ne @newlines[$i] );
+	}
+	# lets cleanup
+	system "rm -Rf $tempspace/autogen";
+	return $ret;
 }
 
 sub clockStart
@@ -287,6 +317,13 @@ sub getCircTotal()
 	return $#results;
 }
 
+sub getHoldTotal()
+{
+	my $query = "select id from action.hold_request where usr = (select id from actor.usr where usrname=E'$authusername')";
+	my @results = @{$dbHandler->query($query)};
+	return $#results;
+}
+
 # Not used
 sub createNewConfig
 {
@@ -310,12 +347,15 @@ sub getAvailableItem
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	my $found = 0;
+	my $itemid = '';
+	my $itembarcode = '';
 	for (my $i..$#results)
 	{
 		my @row = @{@results[$i]};
 		if(@row[1] eq '0') # available status
 		{
 			$found = @row[0];
+			$itemid = @row[2];
 			last;
 		}
 	}
@@ -323,9 +363,10 @@ sub getAvailableItem
 	{
 		# save us a trip to the db
 		my @lastrow = @{@results[$#results]} unless $#results == -1;
-		my $itemid = $#results > -1 ? @lastrow[0] : -1;
-		$log->addLine("itemid = $itemid");
-		if($itemid == -1) # go ahead and create a dummy item
+		$itembarcode = $#results > -1 ? @lastrow[0] : -1;
+		$itemid = $#results > -1 ? @lastrow[2] : -1;
+		$log->addLine("itembarcode = $itembarcode");
+		if($itembarcode == -1) # go ahead and create a dummy item
 		{
 			my $query = "insert into asset.call_number(creator,editor,label,owning_lib,record) values ($userid,$userid,E'mobiustest',$testOU,
 			
@@ -361,20 +402,21 @@ sub getAvailableItem
 			VALUES ($testOU,E'$userid',$callnumber,E'$userid',2,2,E'$randombarcode',E'mobius-test',E'mobius-test',false)";
 			$log->addLine($query);
 			$dbHandler->update($query);
-			$query = "select barcode from asset.copy where id in(select max(id) from asset.copy where circ_lib=$testOU and status=0 and not deleted and call_number=$callnumber)";
+			$query = "select barcode,id from asset.copy where id in(select max(id) from asset.copy where circ_lib=$testOU and status=0 and not deleted and call_number=$callnumber)";
 			my @results = @{$dbHandler->query($query)};
 			my @row = @{@results[0]};			
-			$itemid = @row[0];
+			$itembarcode = @row[0];
+			$itemid = @row[1];
 		}
 		# Let's do a checkin
-		$log->addLine("Doing Checkin $itemid");
-		my %args = (barcode => $itemid);
+		$log->addLine("Doing Checkin $itembarcode");
+		my %args = (barcode => $itembarcode);
 		my $r = OpenSRF::AppSession->create('open-ils.circ')->request
 			('open-ils.circ.checkin', $authtoken, \%args)->gather(1);
-		$found = $itemid;
+		$found = $itembarcode;
 	}
-	
-	return $found;
+	my @found = ($found, $itemid);
+	return \@found;
 	
 }
 

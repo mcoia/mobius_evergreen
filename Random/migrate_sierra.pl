@@ -127,7 +127,7 @@ if(!$schema)
 	";
 	setupEGTable($query,"checkout");
 	
-	#get patron fines
+	# get patron fines
 	my $query = "
 		select * from sierra_view.fine where 
 		patron_record_id in
@@ -185,6 +185,58 @@ if(!$schema)
 		)
 	";
 	setupEGTable($query,"bib_record_item_record_link");
+	
+	#get patron types
+	my $query = "
+		select * from sierra_view.ptype_property_myuser
+	";
+	setupEGTable($query,"ptype_property_myuser");
+	
+	#get patron types
+	my $query = "
+		select * from sierra_view.user_defined_pcode1_myuser
+	";
+	setupEGTable($query,"user_defined_pcode1_myuser");
+	
+	#get patron types
+	my $query = "
+		select * from sierra_view.user_defined_pcode2_myuser
+	";
+	setupEGTable($query,"user_defined_pcode2_myuser");
+	
+	#get patron types
+	my $query = "
+		select * from sierra_view.user_defined_pcode3_myuser
+	";
+	setupEGTable($query,"user_defined_pcode3_myuser");
+	
+	#get patron messages
+	my $query = "
+		select * from sierra_view.varfield_view where record_type_code='p' and
+		record_id in
+		(
+			select id from sierra_view.patron_view where ($patronlocationcodes)
+		)
+	";
+	setupEGTable($query,"patron_varfield_view");
+	
+	#get item extra
+	my $query = "
+		select * from sierra_view.varfield_view where record_type_code='i' and varfield_type_code='y' and
+		record_id in
+		(
+			select item_record_id from sierra_view.bib_record_item_record_link where bib_record_id
+			in
+			(
+				select id from sierra_view.bib_view where id in
+				(
+					SELECT BIB_RECORD_ID FROM SIERRA_VIEW.BIB_RECORD_LOCATION WHERE 
+					($sierralocationcodes)
+				)
+			)
+		)
+	";
+	setupEGTable($query,"item_varfield_view");
 	
 	
 	$log->addLogLine(" ---------------- Script End ---------------- ");
