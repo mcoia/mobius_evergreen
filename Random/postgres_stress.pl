@@ -9,6 +9,7 @@ use XML::TreeBuilder;
 use Getopt::Long;
 use DBhandler;
 use REST::Client;
+use bignum ( p => -10 );
 
 
 our $wordnikapikey='';
@@ -51,9 +52,9 @@ if(!$logFile)
 	
 	$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
 	$log->addLogLine("gathering up 25 words at 4 letters each");
-	my @short = @{getWords(5125,4)};
+	my @short = @{getWords(1200,4)};
 	$log->addLogLine("gathering up 25 words at 7 letters each");
-	my @long = @{getWords(5125,7)};
+	my @long = @{getWords(1200,7)};
 	$log->addLine(Dumper(\@short));
 	$log->addLine(Dumper(\@long));
 	
@@ -85,6 +86,8 @@ if(!$logFile)
 		searchQuery($_);
 		my %duration = %{clockEnd()};
 		my $seconds = $duration{seconds} + ( $duration{minutes} * 60 );
+		my $nanoseconds = $duration{nanoseconds};
+		$seconds+= ($nanoseconds / 1000000000); #1 billion nanoseconds in 1 second
 		# print $seconds."\n";
 		push(@longwordstime, $seconds);
 	}

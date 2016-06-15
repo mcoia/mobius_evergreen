@@ -188,15 +188,15 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					 $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					 $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					 # $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					 # $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					 # cleanMetaRecords();
 					
 					  findInvalidElectronicMARC();
 					  findInvalidAudioBookMARC();
-					 # findInvalidDVDMARC();
+					  findInvalidDVDMARC();
 					  findInvalidLargePrintMARC();
 					  findInvalidMusicMARC();
 					
@@ -209,16 +209,10 @@ if(! -e $xmlconf)
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
 					#findPossibleDups();
-					
-					
-# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(
-# 11981,
-# 192740,
-# 706748,
-# 881384,
-# 1094288,
-# 1227200
-# )");					
+					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1441032")->[0];
+# determineWhichVideoFormat(1441032,$results->[0]);
+# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(1439993)");
+# exit;
 					# updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from 
 # (
 # select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
@@ -873,7 +867,7 @@ sub determineWhichVideoFormat
 	{
 		my $row = $_;
 		my @row = @{$row};
-		my $score=@row[0].@row[1].@row[2].$flatmarc
+		my $score=@row[0].@row[1].@row[2].$flatmarc;
 		my @sp = split('dvd',lc($score));
 		$dvd=$#sp;
 		@sp = split('bluray',lc($score));
@@ -882,9 +876,23 @@ sub determineWhichVideoFormat
 		$blu += $#sp;
 		@sp = split('vhs',lc($score));
 		$vhs = $#sp;
-		
 	}
-	
+	$log->addLine("video score $bibid , $dvd, $blu, $vhs");
+	if( ($dvd >= $blu) && ($dvd >= $vhs) )
+	{
+		$log->addLine("Choosing DVD for $bibid");
+		updateMARCSetDVD($bibid,$marc);
+	}
+	elsif( ($blu >= $dvd) && ($blu >= $vhs) )
+	{
+		$log->addLine("Choosing BLURAY for $bibid");
+		updateMARCSetBluray($bibid,$marc);
+	}
+	else
+	{
+		$log->addLine("Choosing VHS for $bibid");
+		updateMARCSetVHS($bibid,$marc);
+	}
 }
 
 sub updateMARCSetDVD
@@ -1174,7 +1182,7 @@ sub findInvalidDVDMARC
 	my @additionalSearchQueries = ($queries{"dvd_additional_search"});
 	my $subQueryConvert = $queries{"non_dvd_bib_convert_to_dvd"};
 	my $subQueryNotConvert =  $queries{"non_dvd_bib_not_convert_to_dvd"};
-	my $convertFunction = "updateMARCSetDVD(\$id,\$marc);";
+	my $convertFunction = "determineWhichVideoFormat(\$id,\$marc);";
 	findInvalidMARC(
 	$typeName,
 	$problemPhrase,
@@ -3576,7 +3584,8 @@ sub determineMusicScore
 	my $textmarc = lc($marc->as_formatted());
 	$marc->insert_fields_ordered(@two45);
 	my $score=0;
-	my @allmusicphrases = (@musicSearchPhrases,@musicSearchPhrasesAddition);
+	my $listone;
+	my $listtwo;
 	
 	foreach(@two45)
 	{
@@ -3585,14 +3594,26 @@ sub determineMusicScore
 		foreach(@subs)
 		{
 			my $subf = lc($_);
-			foreach(@allmusicphrases)
+			foreach(@musicSearchPhrases)
 			{
 				#if the phrases are found in the 245h, they are worth 5 each
 				my $phrase=lc($_);
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
-					#$log->addLine("$phrase + 5 points 245h");
+					$log->addLine("$phrase + 5 points 245h");
+					$listone=1;
+				}
+			}
+			foreach(@musicSearchPhrasesAddition)
+			{
+				#if the phrases are found in the 245h, they are worth 5 each
+				my $phrase=lc($_);
+				if($subf =~ m/$phrase/g)
+				{
+					$score+=5;
+					$log->addLine("$phrase + 5 points 245h");
+					$listtwo=1;
 				}
 			}
 			if($subf =~ m/a novel/g)
@@ -3612,8 +3633,7 @@ sub determineMusicScore
 			}
 		}
 	}
-	my $listone;
-	my $listtwo;
+
 	foreach(@musicSearchPhrases)
 	{
 		my $phrase = lc$_;
@@ -3621,7 +3641,7 @@ sub determineMusicScore
 		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
-			#$log->addLine("$phrase + 1 points elsewhere");
+			$log->addLine("$phrase + 1 points elsewhere");
 			$listone=1;
 		}
 	}
@@ -3633,7 +3653,7 @@ sub determineMusicScore
 		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
-			#$log->addLine("$phrase + 1 points elsewhere");
+			$log->addLine("$phrase + 1 points elsewhere");
 			$listtwo=1;
 		}
 	}
@@ -3641,6 +3661,7 @@ sub determineMusicScore
 	#must contain a phrase from both lists
 	if(!($listone && $listtwo))
 	{
+		$log->addLine("Phrases were not found in both lists");
 		return 0;
 	}
 	

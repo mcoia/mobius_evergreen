@@ -6,7 +6,7 @@ largeprintbooksearchphrases = Large type books,Large print,lg print,SightSaving,
 microfilmsearchphrases = microfilm
 videosearchphrases = dvd,video recording,video format,videorecording,videodisc,interview with the producer,original TV promo,Special features,screenplay
 #Music is different. We require a hit in both lists in order to make it a positive hit
-musicsearchphrases = sound dis,Compact dis,audio
+musicsearchphrases = sound,Compact dis,audio
 musicsearchphrasesaddition = sound record,soundrecord,music,song,Piano,Jazz,Saxophone,Symphony,Orchestra,vocals,sound track,soundtrack,instrumentals,guitar,perform,composer
 playawaysearchphrases = playaway,play away,headphones,head phones,earphones,ear phones,player,findaway
 audio_book_score_when_audiobooks_dont_belong = 6
