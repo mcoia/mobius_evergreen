@@ -193,12 +193,22 @@ if(! -e $xmlconf)
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					 # cleanMetaRecords();
+					 
+					 
+					my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
+					my $subQueryConvert = $queries{"non_audiobook_bib_convert_to_audiobook"};
+					$subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
+					updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)"); 
+					my $problemPhrase = "MARC with music phrases but incomplete marc";
+					my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
+					$subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
+					updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
 					
-					  findInvalidElectronicMARC();
-					  findInvalidAudioBookMARC();
-					  findInvalidDVDMARC();
-					  findInvalidLargePrintMARC();
-					  findInvalidMusicMARC();
+					  # findInvalidElectronicMARC();
+					   findInvalidAudioBookMARC();
+					  # findInvalidDVDMARC();
+					  # findInvalidLargePrintMARC();
+					   findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -209,10 +219,10 @@ if(! -e $xmlconf)
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
 					#findPossibleDups();
-					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1441032")->[0];
-# determineWhichVideoFormat(1441032,$results->[0]);
-# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(1439993)");
-# exit;
+					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
+# determineWhichVideoFormat(1362462,$results->[0]);
+ # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(244015)"); 
+ # exit;
 					# updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from 
 # (
 # select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
@@ -1299,13 +1309,14 @@ sub findInvalidMARC
 		my @row = @{$_};
 		my $id = @row[1];
 		my $marc = @row[24];
+		my $t902 = @row[0];
 		my @line=@{$_};
 		@line[24]='';
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
 		if(!$dryrun)
 		{
-			eval($convertFunction);
+			eval($convertFunction) if (!(lc($t902) =~ m/mz7a/))/;
 		}
 	}
 	
@@ -3601,7 +3612,7 @@ sub determineMusicScore
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
-					$log->addLine("$phrase + 5 points 245h");
+					# $log->addLine("$phrase + 5 points 245h");
 					$listone=1;
 				}
 			}
@@ -3612,7 +3623,7 @@ sub determineMusicScore
 				if($subf =~ m/$phrase/g)
 				{
 					$score+=5;
-					$log->addLine("$phrase + 5 points 245h");
+					# $log->addLine("$phrase + 5 points 245h");
 					$listtwo=1;
 				}
 			}
@@ -3641,7 +3652,7 @@ sub determineMusicScore
 		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
-			$log->addLine("$phrase + 1 points elsewhere");
+			# $log->addLine("$phrase + 1 points elsewhere");
 			$listone=1;
 		}
 	}
@@ -3653,7 +3664,7 @@ sub determineMusicScore
 		if($textmarc =~ m/$phrase/g) # Found at least 1 match on that phrase
 		{
 			$score++;
-			$log->addLine("$phrase + 1 points elsewhere");
+			# $log->addLine("$phrase + 1 points elsewhere");
 			$listtwo=1;
 		}
 	}
@@ -3661,7 +3672,7 @@ sub determineMusicScore
 	#must contain a phrase from both lists
 	if(!($listone && $listtwo))
 	{
-		$log->addLine("Phrases were not found in both lists");
+		# $log->addLine("Phrases were not found in both lists");
 		return 0;
 	}
 	

@@ -1,6 +1,24 @@
 #!/usr/bin/perl
+
+# Copyright 2016 MOBIUS
+# Author: Blake GH
+
 # 
- 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+# 
+
  use Loghandler;
  use Mobiusutil;
  use Data::Dumper;
@@ -26,7 +44,7 @@
 	
 		$log = new Loghandler($conf->{"logfile"});
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("sslconfpath","sitesenabledpath","letsencryptgitrepopath","machinestoupdate","pathtosharedcerts");
+		my @reqs = ("sslconfpath","sitesavailablepath","letsencryptgitrepopath","machinestoupdate","pathtosharedcerts","pathtosharedvirtualhosts","destinationssldir","emailaddress","rootdomain");
 		my $valid = 1;
 		for my $i (0..$#reqs)
 		{
@@ -40,16 +58,57 @@
 		if($valid)
 		{
 			# make sure that we have these packages
-			$log->addLine("apt-get install -y git ansible");
-			print "apt-get install -y git ansible\n";
-			# system("apt-get install -y git ansible");
+			$log->addLine("apt-get install -y git");
+			print "apt-get install -y git\n";
+			system("apt-get install -y git");
 			
-			#sslconf();
+			sslconf();
 			
-			# checkoutletsencrypt();
+			checkoutletsencrypt();
 			
 			getcerts();
 			
+			my @machines = split(' ', $conf{"machinestoupdate"});
+			
+			
+			# put ssl.conf into place
+			foreach(@machines)
+			{
+				print "rsync -av --delete ".$conf->{"sslconfpath"}." $_:".$conf->{"sslconfpath"}."\n";
+				$log->addLine("rsync -av --delete ".$conf->{"sslconfpath"}." $_:".$conf->{"sslconfpath"});
+				system("rsync -av --delete ".$conf->{"sslconfpath"}." $_:".$conf->{"sslconfpath"});
+			}
+			
+			# copy all of the certs to the shared directory
+			print "cp -Rf /etc/letsencrypt/archive/* ".$conf->{"pathtosharedcerts"}."/"."\n";
+			$log->addLine("cp -Rf /etc/letsencrypt/archive/* ".$conf->{"pathtosharedcerts"}."/");
+			system("cp -Rf /etc/letsencrypt/archive/* ".$conf->{"pathtosharedcerts"}."/");
+			
+			# copy all of the certs to the local apache directory
+			print "cp -Rf /etc/letsencrypt/archive/* ".$conf->{"destinationssldir"}."/"."\n";
+			$log->addLine("cp -Rf /etc/letsencrypt/archive/* ".$conf->{"destinationssldir"}."/");
+			system("cp -Rf /etc/letsencrypt/archive/* ".$conf->{"destinationssldir"}."/");
+			
+			# copy all of the certs to each of the bricks
+			foreach(@machines)
+			{
+				print "rsync -av --delete /etc/letsencrypt/archive/* $_:".$conf->{"destinationssldir"}."\n";
+				$log->addLine("rsync -av --delete /etc/letsencrypt/archive/* $_:".$conf->{"destinationssldir"});
+				system("rsync -av --delete /etc/letsencrypt/archive/* $_:".$conf->{"destinationssldir"});
+			}
+			
+			# copy all of the apache configs to local sites-available
+			print "cp -Rf ".$conf->{"pathtosharedvirtualhosts"}."/* ".$conf->{"sitesavailablepath"}."/"."\n";
+			$log->addLine("cp -Rf ".$conf->{"pathtosharedvirtualhosts"}."/* ".$conf->{"sitesavailablepath"}."/");
+			system("cp -Rf ".$conf->{"pathtosharedvirtualhosts"}."/* ".$conf->{"sitesavailablepath"}."/");
+			
+			# copy all of the apache configs to remote sites-available
+			foreach(@machines)
+			{
+				print "rsync -av --delete ".$conf->{"pathtosharedvirtualhosts"}."/* $_:".$conf->{"sitesavailablepath"}."\n";
+				$log->addLine("rsync -av --delete ".$conf->{"pathtosharedvirtualhosts"}."/* $_:".$conf->{"sitesavailablepath"});
+				system("rsync -av --delete ".$conf->{"pathtosharedvirtualhosts"}."/* $_:".$conf->{"sitesavailablepath"});
+			}
 			
 		}
 		$log->addLogLine(" ---------------- Script Ending ---------------- ");
@@ -64,10 +123,10 @@
 sub sslconf
 {
 	# Deal with making ssl config changes and get an A rating
-	if(!(-e $conf->{"pathtosharedcerts"} . '/ssl.conf'))
+	if(!(-e $conf->{"pathtosharedcerts"} . '/ssl_original.conf'))
 	{
-		$log->addLine("cp " . $conf->{"sslconfpath"} . " " . $conf->{"sslconfpath"} . '/ssl.conf');
-		system("cp " . $conf->{"sslconfpath"} . " " . $conf->{"pathtosharedcerts"} . '/ssl.conf');
+		$log->addLine("cp " . $conf->{"sslconfpath"} . " " . $conf->{"sslconfpath"} . '/ssl_original.conf');
+		system("cp " . $conf->{"sslconfpath"} . " " . $conf->{"pathtosharedcerts"} . '/ssl_original.conf');
 	}
 	my $sslconf = new Loghandler($conf->{"sslconfpath"});
 	my @lines = @{$sslconf->readFile};
@@ -109,8 +168,84 @@ sub sslconf
 		}
 		$output.=$line;
 	}
-	my $temp = new Loghandler($conf->{"pathtosharedcerts"} . "/test.conf");
-$temp->truncFile($output);
+	$sslconf->truncFile($output);
+	my $temp = new Loghandler($conf->{"pathtosharedcerts"} . '/ssl.conf');
+	$temp->truncFile($output);
+	undef $sslconf;
+	undef $temp;
+}
+
+sub virtualHostConf
+{
+	my $confFile = @_[0];
+	my %certFiles = %{@_[1]};
+	my $confFileName = substr($confFile,rindex($confFile, '/')+1);
+	
+	my $confr = new Loghandler($confFile);
+	my @lines = @{$confr->readFile};
+	my $output = '';
+	#my %filenames = ("cert" => \@a,"chain" => \@b,"fullchain" => \@c,"privkey" => \@d );
+	
+	my $sslBlock = 
+	"
+SSLProtocol all -SSLv3 -SSLv2
+SSLHonorCipherOrder On
+SSLCipherSuite HIGH:!aNULL:!eNULL:!kECDH:!aDH:!RC4:!3DES:!CAMELLIA:!MD5:!PSK:!SRP:!KRB5:@STRENGTH
+SSLCertificateFile ".$certFiles{"cert"}->[1]."
+SSLCertificateChainFile ".$certFiles{"fullchain"}->[1]."
+SSLCertificateChainFile ".$certFiles{"chain"}->[1]."
+SSLCertificateKeyFile ".$certFiles{"privkey"}->[1]."
+";
+	
+	my %configchanges = 
+	(
+		"SSLProtocol" => $certFiles{"cert"}->[1],
+		"SSLHonorCipherOrder" => $certFiles{"cert"}->[1],
+		"SSLCipherSuite" => $certFiles{"cert"}->[1],
+		"SSLCertificateFile" => $certFiles{"cert"}->[1],
+		"SSLCertificateChainFile" => $certFiles{"fullchain"}->[1],
+		"SSLCertificateKeyFile" => $certFiles{"privkey"}->[1]
+	);
+	my %foundconfs;
+	$inside443Clause = 0;
+	foreach my $line (@lines)
+	{
+		if( !($line =~ m/^[\s]*#/) )
+		{
+			if($inside443Clause)
+			{
+				while ((my $internal, my $value ) = each(%configchanges))
+				{
+					if ($line =~ m/^[\s]*$internal/)
+					{
+						# remove the line because we are going to make our own block
+						#print "removing $internal\n";
+						$line='';
+					}
+				}
+			}
+			elsif($line =~ m/^[\s]*<VirtualHost \*:443>/)
+			{
+				$inside443Clause = 1;
+			}
+			
+			if($line =~ m/^[\s]*<\/VirtualHost>/)
+			{
+				if($inside443Clause)
+				{
+					#print "writing\n";
+					$output.=$sslBlock;
+					$line =~ s/^[\s]*(<\/VirtualHost>)/$1/g;
+				}
+				$inside443Clause = 0;
+			}
+		}
+		
+		$output.=$line if $line ne "\n";
+	}
+	my $temp = new Loghandler($conf->{"pathtosharedvirtualhosts"} . "/$confFileName");
+	$temp->deleteFile();
+	$temp->truncFile($output);
 }
 
 sub checkoutletsencrypt
@@ -129,7 +264,7 @@ sub checkoutletsencrypt
 
 sub getcerts
 {
-	my @files = @{getFiles($conf{"sitesenabledpath"})};
+	my @files = @{getFiles($conf{"sitesavailablepath"})};
 	
 	# go ahead and renew if needs be
 	print $conf{"letsencryptgitrepopath"}."/letsencrypt-auto renew\n";
@@ -141,6 +276,7 @@ sub getcerts
 	{
 		my $fileread = new Loghandler($file);
 		my @lines = @{$fileread->readFile};
+		undef $fileread;
 		my $output = '';
 		my $insideSSLClause = 0;
 		my $serverName = '';
@@ -156,8 +292,9 @@ sub getcerts
 						$serverName =~ s/(.*)ServerName([^\:]*).*/$2/g;
 						$serverName = $mobUtil->trim($serverName);
 						print "'".$serverName."'\n";
-						#my %certs = %{generateCert($serverName)};
-						my %certs = %{generateCert('devpolk.missourievergreen.org')};
+						my %certs = %{generateCert($serverName)};
+						#my %certs = %{generateCert('devpolk.missourievergreen.org')};
+						virtualHostConf($file,\%certs);
 					}
 				}
 				elsif($line =~ m/^[\s]*<VirtualHost \*:443>/)
@@ -170,25 +307,26 @@ sub getcerts
 					$insideSSLClause = 0;
 				}
 			}
-			$output.=$line;
+			 
+			$output.=$line if $line ne "\n";
 		}
-		my $temp = new Loghandler($conf->{"pathtosharedcerts"} . "/egconf.conf");
-		$temp->truncFile($output);
-		exit;
 	}
 }
 
 sub generateCert
 {
 	my $domainName = @_[0];
+	$domainName = $conf{"rootdomain"} if $domainName eq 'localhost';
 	# see if this domain name already has a cert, if not make one
 	if( !(-d "/etc/letsencrypt/archive/$domainName") )
 	{
-		print $conf{"letsencryptgitrepopath"}."/letsencrypt-auto certonly --standalone -d $domainName"."\n";
-		$log->addLine($conf{"letsencryptgitrepopath"}."/letsencrypt-auto certonly --standalone -d $domainName");
-		system($conf{"letsencryptgitrepopath"}."/letsencrypt-auto certonly --standalone -d $domainName");
+		
+		print "/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName"."\n";
+		$log->addLine("/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos  -d $domainName");
+		system("/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName");
 	}
 	my %ret;
+	print "/etc/letsencrypt/archive/$domainName\n";
 	my @certfiles = @{getFiles("/etc/letsencrypt/archive/$domainName")};
 	my @a = (0,'');
 	my @b = (0,'');
@@ -207,15 +345,19 @@ sub generateCert
 				$thisFileName =~ s/^$internal(.*)\..../$1/g;
 				# Compare that to previous versions on the array, bigger numbers win (presumably newer certs)
 				if($filenames{$internal}[0] < $thisFileName)
-				{				
+				{
 					$filenames{$internal}[0] = $thisFileName;
-					$filenames{$internal}[1] = $file;
+					my $thisWholeName = substr($file,rindex($file, '/')+1);
+					my $path = $file;
+					$path = $conf{"destinationssldir"}."/$domainName/$thisWholeName";
+					$filenames{$internal}[1] = $path;
 				}
 			}
 		}
 	}
 	
-	$log->addLine(Dumper(\%filenames));
+	# $log->addLine(Dumper(\%filenames));
+	return \%filenames;
 }
 
 sub getFiles
