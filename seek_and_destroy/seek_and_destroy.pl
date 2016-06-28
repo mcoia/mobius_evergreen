@@ -188,27 +188,27 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					 # $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					 # $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
 					 # cleanMetaRecords();
 					 
 					 
-					my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
-					my $subQueryConvert = $queries{"non_audiobook_bib_convert_to_audiobook"};
-					$subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
-					updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)"); 
-					my $problemPhrase = "MARC with music phrases but incomplete marc";
-					my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
-					$subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
-					updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
+					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
+					# my $subQueryConvert = $queries{"non_audiobook_bib_convert_to_audiobook"};
+					# $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
+					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)"); 
+					# my $problemPhrase = "MARC with music phrases but incomplete marc";
+					# my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
+					# $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
+					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
 					
-					  # findInvalidElectronicMARC();
-					   findInvalidAudioBookMARC();
-					  # findInvalidDVDMARC();
-					  # findInvalidLargePrintMARC();
-					   findInvalidMusicMARC();
+					findInvalidElectronicMARC();
+					findInvalidAudioBookMARC();
+					findInvalidDVDMARC();
+					findInvalidLargePrintMARC();
+					findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -1264,7 +1264,7 @@ sub findInvalidMARC
 	
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
-	updateJob("Processing","findInvalidMARC  $query");
+	# updateJob("Processing","findInvalidMARC  $query");
 	$dbHandler->update($query);
 	foreach(@marcSearchPhrases)
 	{
@@ -1312,11 +1312,11 @@ sub findInvalidMARC
 		my $t902 = @row[0];
 		my @line=@{$_};
 		@line[24]='';
-		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
-		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n" if (!(lc($t902) =~ m/mz7a/));
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n" if (!(lc($t902) =~ m/mz7a/));
 		if(!$dryrun)
 		{
-			eval($convertFunction) if (!(lc($t902) =~ m/mz7a/))/;
+			eval($convertFunction) if (!(lc($t902) =~ m/mz7a/));
 		}
 	}
 	
