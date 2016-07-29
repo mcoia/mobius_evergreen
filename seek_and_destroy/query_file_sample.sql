@@ -130,6 +130,7 @@ and record not in(select record from seekdestroy.bib_score where circ_mods =$$Bo
 and record not in(select record from seekdestroy.bib_score where opac_icon = $$kit$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon = $$casaudiobook$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
+and record not in(select record from seekdestroy.bib_score where (lower(call_labels)~$$music$$ or lower(copy_locations)~$$music$$ ) )
 and record not in(select record from seekdestroy.bib_score where 
 	winning_score_score=1 and 
 	(circ_mods!~*$$CD$$ and circ_mods!~*$$AudioBooks$$ and circ_mods!~*$$Media$$ and circ_mods!~*$$Kit$$ and circ_mods!~*$$Music$$ and circ_mods is null) and	
@@ -164,6 +165,7 @@ and record not in(select record from seekdestroy.bib_score where circ_mods =$$Bo
 and record not in(select record from seekdestroy.bib_score where opac_icon = $$kit$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon = $$casaudiobook$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
+and record not in(select record from seekdestroy.bib_score where (lower(call_labels)~$$music$$ or lower(copy_locations)~$$music$$ ) )
 and record not in(select record from seekdestroy.bib_score where 
 	winning_score_score=1 and 
 	(circ_mods!~*$$CD$$ and circ_mods!~*$$AudioBooks$$ and circ_mods!~*$$Media$$ and circ_mods!~*$$Kit$$ and circ_mods!~*$$Music$$ and circ_mods is null) and	

@@ -204,11 +204,11 @@ if(! -e $xmlconf)
 					# $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
 					
-					findInvalidElectronicMARC();
-					findInvalidAudioBookMARC();
-					findInvalidDVDMARC();
-					findInvalidLargePrintMARC();
-					findInvalidMusicMARC();
+					# findInvalidElectronicMARC();
+					# findInvalidAudioBookMARC();
+					# findInvalidDVDMARC();
+					# findInvalidLargePrintMARC();
+					# findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
 					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
@@ -218,7 +218,7 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-					#findPossibleDups();
+					findPossibleDups();
 					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
 # determineWhichVideoFormat(1362462,$results->[0]);
  # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(244015)"); 
@@ -418,7 +418,7 @@ sub reportResults
 	#Possible Electronic
 	$query =  $queries{"possible_electronic"};
 	$query = "select	
-	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
+	tag902,
 	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
@@ -814,6 +814,84 @@ sub updateMARCSetElectronic
 	updateMARC($xmlresult,$bibid,'false','Correcting for Electronic in the 008/006');
 }
 
+sub determineWhichAudioBookFormat
+{
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	my $query = "select circ_mods,copy_locations,call_labels from seekdestroy.bib_score where record=$bibid";
+	my @results = @{$dbHandler->query($query)};
+	my $cass=0;
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $flatmarc = $marcob->as_formatted;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $score=@row[0].@row[1].@row[2].$flatmarc;
+		my @sp = split('cassette',lc($score));
+		$cass = $#sp;
+	}
+	# $log->addLine("cassette score $bibid , $cass");
+	if ($cass > 0)
+	{
+		# $log->addLine("Going to audiocassette");
+		updateMARCSetCassetteAudiobook($bibid,$marc);
+	}
+	else
+	{
+		# $log->addLine("Going to audiocd");
+		updateMARCSetCDAudioBook($bibid,$marc);
+	}
+}
+
+sub updateMARCSetCassetteAudiobook
+{	
+	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+	$marc = setMARCForm($marc,' ');
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+	my $marcr = populate_marc($marcob);	
+	my %marcr = %{normalize_marc($marcr)};    
+	my $replacement;
+	my $altered=0;
+	foreach(@{$marcr{tag007}})
+	{		
+		if(substr($_->data(),0,1) eq 's')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print $z07->data()."\n";
+			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'s',1);
+			$replacement=$mobUtil->insertDataIntoColumn($replacement,'l',4);
+			#print "$replacement\n";			
+			$z07->update($replacement);
+			$marcob->insert_fields_ordered($z07);
+			$altered=1;
+		}
+		elsif(substr($_->data(),0,1) eq 'v')
+		{
+			my $z07 = $_;
+			$marcob->delete_field($z07);
+			#print "removed video 007\n";
+		}
+	}
+	if(!$altered)
+	{
+		my $z07 = MARC::Field->new( '007', 'sd lsngnnmmned' );
+		#print "inserted new 007\n".$z07->data()."\n";
+		$marcob->insert_fields_ordered($z07);
+	}
+	my $xmlresult = convertMARCtoXML($marcob);
+	$xmlresult = fingerprintScriptMARC($xmlresult,'C A S A u d i o b o o k');
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'i');
+	updateMARC($xmlresult,$bibid,'false','Correcting for Cassette Audiobook in the leader/007 rem 008_23');
+}
+
 sub updateMARCSetCDAudioBook
 {	
 	my $bibid = @_[0];
@@ -854,16 +932,15 @@ sub updateMARCSetCDAudioBook
 		$marcob->insert_fields_ordered($z07);
 	}
 	my $xmlresult = convertMARCtoXML($marcob);
-	$xmlresult = fingerprintScriptMARC($xmlresult,'A u d i o b o o k');
+	$xmlresult = fingerprintScriptMARC($xmlresult,'C D A u d i o b o o k');
 	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'i');
-	updateMARC($xmlresult,$bibid,'false','Correcting for Audiobook in the leader/007 rem 008_23');
+	updateMARC($xmlresult,$bibid,'false','Correcting for CD Audiobook in the leader/007 rem 008_23');
 }
 
 sub determineWhichVideoFormat
 {
 	my $bibid = @_[0];
 	my $marc = @_[1];
-	my $function = "updateMARCSetDVD(\$bibid,\$marc)";
 	my $query = "select circ_mods,copy_locations,call_labels from seekdestroy.bib_score where record=$bibid";
 	my @results = @{$dbHandler->query($query)};
 	my $dvd=0;
@@ -1170,7 +1247,7 @@ sub findInvalidAudioBookMARC
 	my @additionalSearchQueries = ($queries{"audiobook_additional_search"});
 	my $subQueryConvert = $queries{"non_audiobook_bib_convert_to_audiobook"};
 	my $subQueryNotConvert =  $queries{"non_audiobook_bib_not_convert_to_audiobook"};
-	my $convertFunction = "updateMARCSetCDAudioBook(\$id,\$marc);";		
+	my $convertFunction = "determineWhichAudioBookFormat(\$id,\$marc);";		
 	findInvalidMARC(
 	$typeName,
 	$problemPhrase,
@@ -1264,7 +1341,7 @@ sub findInvalidMARC
 	
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
-	# updateJob("Processing","findInvalidMARC  $query");
+	updateJob("Processing","findInvalidMARC  $query");
 	$dbHandler->update($query);
 	foreach(@marcSearchPhrases)
 	{
@@ -1288,7 +1365,7 @@ sub findInvalidMARC
 	my $output='';
 	my $toCSV = "";
 	my $query = "select 
-	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
+	tag902,
 	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
@@ -1307,16 +1384,16 @@ sub findInvalidMARC
 	foreach(@results)
 	{
 		my @row = @{$_};
-		my $id = @row[1];
+		my $id = @row[2];
 		my $marc = @row[24];
 		my $t902 = @row[0];
 		my @line=@{$_};
 		@line[24]='';
-		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n" if (!(lc($t902) =~ m/mz7a/));
-		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n" if (!(lc($t902) =~ m/mz7a/));
+		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n" if ( !(lc($t902) =~ m/mz7a/) && !(lc($t902) =~ m/gd5/) );
+		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n"  if ( !(lc($t902) =~ m/mz7a/) && !(lc($t902) =~ m/gd5/) );
 		if(!$dryrun)
 		{
-			eval($convertFunction) if (!(lc($t902) =~ m/mz7a/));
+			eval($convertFunction) if ( !(lc($t902) =~ m/mz7a/) && !(lc($t902) =~ m/gd5/) );
 		}
 	}
 	
@@ -1469,7 +1546,8 @@ sub updateScoreCache
 		audioformat,
 		videoformat,
 		eg_fingerprint,
-		sd_alt_fingerprint) 
+		sd_alt_fingerprint,
+		tag902) 
 		VALUES($bibid,$score,
 		$allscores{'electricScore'},
 		$allscores{'audioBookScore'},
@@ -1483,7 +1561,7 @@ sub updateScoreCache
 		$allscores{'winning_score_score'},
 		$allscores{'winning_score_distance'},
 		E'$allscores{'second_place_score'}',
-		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),\$10
+		\$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),\$10,\$11
 		)";		
 		my @values = (
 		$fingerprints{item_form},
@@ -1495,7 +1573,8 @@ sub updateScoreCache
 		$fingerprints{baseline},
 		$fingerprints{audioformat},
 		$fingerprints{videoformat},
-		$fingerprints{alternate}
+		$fingerprints{alternate},
+		$fingerprints{tag902}
 		);
 		#$log->addLine($query);
 		#$log->addLine(Dumper(\@values));
@@ -1542,7 +1621,8 @@ sub updateScoreCache
 		audioformat = \$8,
 		audioformat = \$9,
 		eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),
-		sd_alt_fingerprint = \$10
+		sd_alt_fingerprint = \$10,
+		tag902 = \$11
 		WHERE ID=$bibscoreid";
 		my @values = (
 		$fingerprints{item_form},
@@ -1554,7 +1634,8 @@ sub updateScoreCache
 		$fingerprints{baseline},
 		$fingerprints{audioformat},
 		$fingerprints{videoformat},
-		$fingerprints{alternate}
+		$fingerprints{alternate},
+		$fingerprints{tag902}
 		);
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircsScore($bibid);
@@ -4428,11 +4509,12 @@ sub getFingerprints
 	$fingerprints{author} = $marc{author};
 	$fingerprints{audioformat} = $marc{audioformat};
 	$fingerprints{videoformat} = $marc{videoformat};
+	$fingerprints{tag902} = $marc{tag902};
 	#print Dumper(%fingerprints);
 	return \%fingerprints;
 }
 
-#This is borrowed from fingerprinter and altered a bit for the item form
+#This is borrowed from fingerprinter and altered a bit
 sub populate_marc {
     my $record = @_[0];
     my %marc = (); $marc{isbns} = [];
@@ -4444,6 +4526,7 @@ sub populate_marc {
     # date1, date2
     my $my_008 = $record->field('008');
 	my @my_007 = $record->field('007');
+	my @my_902 = $record->field('902');
 	my $my_006 = $record->field('006');
     $marc{tag008} = $my_008->as_string() if ($my_008);
     if (defined $marc{tag008}) {
@@ -4484,6 +4567,16 @@ sub populate_marc {
 			$marc{videoformat} = substr($_->data(),4,1) unless (length $_->data() < 5);
 		}
 	}
+	$marc{tag902} = '';
+	foreach(@my_902)
+	{
+		my @subfields = $_->subfield('a');
+		foreach(@subfields)
+		{
+			$marc{tag902} .= $_.' ';
+		}
+	}
+	$marc{tag902} = substr($marc{tag902},0,-1);
 	#print "$marc{audioformat}\n";
 	#print "$marc{videoformat}\n";
 	
@@ -4707,7 +4800,8 @@ sub setupSchema
 		copy_locations text DEFAULT ''::text,
 		opac_icon text DEFAULT ''::text,
 		eg_fingerprint text,
-		sd_alt_fingerprint text
+		sd_alt_fingerprint text,
+		tag902 text
 		)";		
 		$dbHandler->update($query);		
 		$query = "CREATE TABLE seekdestroy.bib_merge(
