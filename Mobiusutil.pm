@@ -1125,7 +1125,7 @@ sub makeCommaFromArray
 	
  }
  
- sub generateRandomString
+sub generateRandomString
 {
 	my $length = @_[1];
 	my $i=0;
