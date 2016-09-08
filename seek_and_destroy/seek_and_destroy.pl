@@ -192,7 +192,7 @@ if(! -e $xmlconf)
 					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					 # cleanMetaRecords();
+					 cleanMetaRecords();
 					 
 					 
 					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
@@ -2541,6 +2541,8 @@ updateJob("Processing","findPossibleDups  looping results");
 		select idp from(
 		select sd_alt_fingerprint||opac_icon \"idp\",count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
 		and record not in(select id from biblio.record_entry where deleted)
+		-- need to remove any bibs with poplarbluff's special digital collection - should not be merged
+		and record not in(select id from biblio.record_entry where not deleted and lower(marc)~'\/\/poplarbluff.org')
 		group by sd_alt_fingerprint||opac_icon having count(*) > 1) as a 
 		)
 		and record not in(select id from biblio.record_entry where deleted)
@@ -2612,13 +2614,20 @@ order by bib1,bib2
 		# Now let's merge!
 		if(!$dryrun)
 		{
-			if( (@row[5] ne 'dvd') && (@row[5] ne 'blu-ray') && (@row[5] ne 'vhs') && (@row[5] ne 'serial') )
+			if(@row[5] eq @row[6]) #triple check the format, no merging if they are different
 			{
-				mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
+				if( (@row[5] ne 'dvd') && (@row[5] ne 'blu-ray') && (@row[5] ne 'vhs') && (@row[5] ne 'serial') )
+				{
+					mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
+				}
+				else
+				{
+					$log->addLine("Not merging and skipping because it is video/serial format");
+				}
 			}
 			else
 			{
-				$log->addLine("Not merging and skipping because it is video/serial format");
+				$log->addLine("Not merging - differing format");
 			}
 		}
 	}
