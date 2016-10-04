@@ -71,7 +71,7 @@ if($valid)
 		my $query = "
 		
 		insert into actor.usr_standing_penalty (org_unit,usr,standing_penalty)
-select au.home_ou,au.id, pgpt.penalty from actor.usr au,
+select pgpt.org_unit,au.id, pgpt.penalty from actor.usr au,
 config.standing_penalty csp,
 permission.grp_penalty_threshold pgpt,
 (select usr,sum(balance_owed) \"balance_owed\" from money.materialized_billable_xact_summary where balance_owed>0 group by usr) mmbxs
@@ -93,7 +93,7 @@ usr in
 select au.id from actor.usr au,
 config.standing_penalty csp,
 permission.grp_penalty_threshold pgpt,
-(select usr,sum(balance_owed) \"balance_owed\" from money.materialized_billable_xact_summary where balance_owed>0 group by usr) mmbxs
+(select usr,balance_owed \"balance_owed\" from money.usr_summary) mmbxs
  where 
 (au.home_ou = pgpt.org_unit or au.home_ou in((select id from actor.org_unit where parent_ou=pgpt.org_unit)))and
 pgpt.penalty=csp.id and

@@ -188,11 +188,11 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					 cleanMetaRecords();
+					# cleanMetaRecords();
 					 
 					 
 					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
@@ -2590,20 +2590,43 @@ updateJob("Processing","findPossibleDups  $query");
 			}
 		}
 	}
-	my $query = "
-	select bib1,bib2, 
-	\$\$$domainname"."eg/opac/record/\$\$||bib1||\$\$?expand=marchtml\$\$ \"leadlink\",
-\$\$$domainname"."eg/opac/record/\$\$||bib2||\$\$?expand=marchtml\$\$ \"sublink\",
+	my $query = '
+select bib1,bib2, 
+$$'.$domainname.'eg/opac/record/$$||bib1||$$?expand=marchtml$$ "leadlink",
+$$'.$domainname.'eg/opac/record/$$||bib2||$$?expand=marchtml$$ "sublink",
 has_holds,
-(select string_agg(value,\$\$,\$\$) from metabib.record_attr_flat where attr=\$\$icon_format\$\$ and id=sbm.bib1) \"leadicon\",
-(select string_agg(value,\$\$,\$\$) from metabib.record_attr_flat where attr=\$\$icon_format\$\$ and id=sbm.bib2) \"subicon\",
-(select value from metabib.title_field_entry where source=sbm.bib1 limit 1) \"title\"
-from SEEKDESTROY.BIB_MATCH sbm where 
-job=$jobid and
-bib1 not in(select id from biblio.record_entry where deleted)
---and (bib1 in(155587) or bib2 in(155587))
+(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib1) "leadicon",
+(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib2) "subicon",
+string_agg(distinct aou_bib1.shortname,','),
+string_agg(distinct aou_bib2.shortname,','),
+(select value from metabib.title_field_entry where source=sbm.bib1 limit 1) "title"
+from SEEKDESTROY.BIB_MATCH sbm,
+actor.org_unit aou_bib1,
+actor.org_unit aou_bib2,
+asset.call_number acn_bib1,
+asset.call_number acn_bib2
+where 
+aou_bib1.id=acn_bib1.owning_lib and
+acn_bib1.record=sbm.bib1 and
+aou_bib2.id=acn_bib2.owning_lib and
+acn_bib2.record=sbm.bib2 and
+
+bib1 not in(select id from biblio.record_entry where deleted) and
+bib2 not in(select id from biblio.record_entry where deleted) and
+job='.$jobid.'
+group by 
+bib1,bib2, 
+$$'.$domainname.'eg/opac/record/$$||bib1||$$?expand=marchtml$$,
+$$'.$domainname.'eg/opac/record/$$||bib2||$$?expand=marchtml$$,
+has_holds,
+(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib1),
+(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib2),
+(select value from metabib.title_field_entry where source=sbm.bib1 limit 1)
+
 order by bib1,bib2
-";
+	
+	';
+	
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
