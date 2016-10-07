@@ -2,7 +2,6 @@
 /* maybe also a 'skin' var */
 
 function bbInit(bb) {
-	var cgi	= new CGI();	
 	if(!bb) { return; }
 	var req = new Request(FLESH_PUBLIC_CONTAINER, 'biblio', bb);
 	req.callback( bbShow );
