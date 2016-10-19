@@ -95,7 +95,7 @@ function mycarousel_getItemHTML(item)
 	var url = document.URL;
 	var res = url.split("/"); 
 	var total = ''+res[0]+'/'+res[1]+'/'+res[2]+'/';	
-    return '<a target="_top" href="'+total+'eg/opac/record/' + item.bibid + '"><img src="'+total+'opac/extras/ac/jacket/medium/r/' + item.bibid + '" width="96" onerror="this.src=\'https://catalog.tadl.org/opac/images/blank.png\'" height="150" alt="' + item.title + '" /><br />' + item.title + '</a>';
+    return '<a target="_top" href="'+total+'eg/opac/record/' + item.bibid + '"><img src="'+total+'opac/extras/ac/jacket/medium/r/' + item.bibid + '" width="96" onerror="this.src=\'/opac/images/blank.png\'" height="150" alt="' + item.title + '" /><br />' + item.title + '</a>';
 };
 
 

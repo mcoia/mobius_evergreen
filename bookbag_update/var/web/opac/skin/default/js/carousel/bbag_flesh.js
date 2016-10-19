@@ -2,16 +2,20 @@
 /* maybe also a 'skin' var */
 
 function bbInit(bb) {
-	var cgi	= new CGI();	
 	if(!bb) { return; }
-	var req = new Request(FLESH_PUBLIC_CONTAINER, 'biblio', bb);
-	req.callback( bbShow );
-	req.send();
+	new OpenSRF.ClientSession('open-ils.actor').request({
+		method: 'open-ils.actor.container.public.flesh',
+		params: ['biblio', bb],
+		async: true,
+		oncomplete: bbShow
+	}).send();
 }
 
 function bbShow(r) {
 
-	var bb = r.getResultObject();	
+	var resp = r.recv();
+	if (!resp) { return; }
+	var bb = resp.content();
 	if(!bb || !bb.pub()) { return; }
 	var thisid = bb.id();	
 	bb_total[thisid]=bb.items().length;
@@ -29,19 +33,23 @@ function bbShow(r) {
 
 function bbShowItem( template, item ) {
 	var row = template.cloneNode(true);
+	var tlink = $n(row, 'title');
+	var alink = $n(row, 'author');	
 
-	var req = new Request( FETCH_RMODS, item.target_biblio_record_entry() );
-	req.request.tlink = $n(row, 'title');
-	req.request.alink = $n(row, 'author');	
-
-	req.callback( function(r) { 
-		var rec = r.getResultObject();
-		buildTitleDetailLink(rec, r.tlink); 
-		r.tlink.setAttribute('href', ''+rec.doc_id());
-		r.alink.appendChild(text(rec.author()));
-	});
-
-	req.send();
+	new OpenSRF.ClientSession('open-ils.search').request({
+		method: 'open-ils.search.biblio.record.mods_slim.retrieve',
+		params: [item.target_biblio_record_entry()],
+		aysnc: true,
+		oncomplete: function(r) {
+			var resp = r.recv();
+			if (!resp) { return; }
+			var rec = resp.content();
+			buildTitleDetailLink(rec, tlink); 
+			tlink.setAttribute('href', ''+rec.doc_id());
+			alink.appendChild(text(rec.author()));
+		}
+	}).send();
+		
 	return row;
 }
 
