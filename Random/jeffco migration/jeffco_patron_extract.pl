@@ -30,6 +30,8 @@ use Getopt::Long;
 	our %queries;
 	our $baseTemp = "/mnt/evergreen/tmp";
 	our @writeMARC = ();
+	
+	our $holdcount=0;
 
 	my $dt = DateTime->now(time_zone => "local"); 
 	my $fdate = $dt->ymd; 
@@ -49,26 +51,35 @@ use Getopt::Long;
 	my %columns = ();
 	while ( (my $user, my $userdata) = each(%{$data}))
 	{
-		foreach(@{$userdata})
+		if(ref($userdata) eq 'ARRAY')
 		{
-			my %s;
-			my $all = xmlLoop($_, "", \%s);
-			#$log->addLine("Done Looping");
-			#$log->addLine(Dumper($all));
-			while ((my $internal, my $value ) = each(%{$all}))
+			foreach(@{$userdata})
 			{
-				$columns{$internal} = 0;
+				my %s;
+				my $all = xmlLoop($_, "", \%s);
+				#$log->addLine("Done Looping");
+				#$log->addLine(Dumper($all));
+				while ((my $internal, my $value ) = each(%{$all}))
+				{
+					$columns{$internal} = 0;
+				}
+				push(@users, $all);
 			}
-			push(@users, $all);
+		}
+		else
+		{
+			$log->addLine("Spitting out this junk data.");
+			$log->addLine(Dumper($userdata));
 		}
 	}
 	#$log->addLine( Dumper(@users) );
 	
 	my %loopvars = 
 	(
-	"patron_file" => "\$answer = ( !(\$internal =~ m/^bill/) && !(\$internal =~ m/^charge/) )", 
+	"patron_file" => "\$answer = ( !(\$internal =~ m/^bill/) && !(\$internal =~ m/^charge/) && !(\$internal =~ m/^hold/) )", 
 	"patron_bill_file" => "\$answer = \$internal =~ m/^bill/",
-	"patron_charge_file" => "\$answer = \$internal =~ m/^charge/"
+	"patron_charge_file" => "\$answer = \$internal =~ m/^charge/",
+	"patron_hold_file" => "\$answer = \$internal =~ m/^hold/"
 	);
 	
 	while ((my $table, my $search ) = each(%loopvars))
@@ -112,16 +123,21 @@ use Getopt::Long;
 				my $t = $_;
 				if(!($t =~ m/userid/g))
 				{
-					$t =~ s/[^\d]*(\d*)(.*)/$2/;
+					# my $searchphrase = $search;
+					# # get the phrase that we are searching for from the regex inside of the above hash
+					# $searchphrase =~ s/([^\^]*)\^([^\/]*).*/$2/;
+					# $log->addLine("Search phrase is: $searchphrase");
+					
+					$t =~ s/^([a-z]*)([^a-z]*)(.*)/$3/;
+					#$log->addLine("Search phrase is: $t");
 					#$log->addLine("billcols is getting $t");
-					#$t = "noname" if length($mobUtil->trim($t)) == 0;
 					$billcols{$t}=0;
 					$t = $_;
-					$t =~ s/([^\d]*\d*)(.*)/$1/;
+					$t =~ s/^([a-z]*)([^a-z]*)(.*)/$1$2/;
+					$billsects{$t}=0;
 				}
-				else{$log->addLine("billsect is getting $t")};
+				else{$log->addLine("billsect is getting $t"); $billcols{$t}=0; };
 				#$log->addLine("billsects is getting $t");
-				$billsects{$t}=0;
 			}
 			while ((my $billcol, my $tvalue ) = each(%billcols))
 			{
@@ -141,17 +157,25 @@ use Getopt::Long;
 		
 		$makeTable = substr($makeTable,0,-1);
 		$makeTable.=")";
-		$log->addLine($makeTable);
+		$log->addLogLine($makeTable);
 		$dbHandler->update("DROP TABLE IF EXISTS m_jeffco.$table");
 		$dbHandler->update($makeTable);
-		my $query = "INSERT INTO m_jeffco.$table (";
-		if ($table ne "patron_file"){$query.="$_,"  for @billfinal;}
-		if ($table eq "patron_file"){$query.="$_,"  for @cols;}
-		$query = substr($query,0,-1);
-		$query .= ")\n VALUES\n";
-			
+		my $queryheader = "INSERT INTO m_jeffco.$table (";
+		if ($table ne "patron_file"){$queryheader.="$_,"  for @billfinal;}
+		if ($table eq "patron_file"){$queryheader.="$_,"  for @cols;}
+		$queryheader = substr($queryheader,0,-1);
+		$queryheader .= ")\n VALUES\n";
+		my $query = '';
+		# insert 5k rows at a time
+		my $chompsize = 5000;
+		my $usercount=0;
+
+		
+		$log->addLogLine(Dumper(\@billfinal));
+		$log->addLogLine(Dumper(\@billsections));
 		foreach(@users)
 		{
+			$usercount++;
 			my %attr = %{$_};
 			if($table ne "patron_file")
 			{	
@@ -165,7 +189,7 @@ use Getopt::Long;
 						my $key = $billsect.$_;
 						if($key =~ m/userid/g)
 						{
-							$key = $billsect;
+							$key = $_;
 						}
 						# if($_ =~ m/noname/)
 						# {
@@ -178,7 +202,7 @@ use Getopt::Long;
 							my $data = $attr{$key};
 							# data that ends with a $ will mess up the query. So we need to put a space character at the end				if(
 							$data =~ s/\$$/\$ /g;
-							$row.="\$\$$data\$\$,";
+							$row.="\$datainsert\$$data\$datainsert\$,";
 							$hadData = 1 if !($key =~ m/userid/g);
 						}
 						else
@@ -213,14 +237,23 @@ use Getopt::Long;
 				$query = substr($query,0,-1);
 				$query .= "),\n";
 			}
-			# $log->addLine("next user");
+			if($usercount > $chompsize)
+			{
+				$query = substr($query,0,-2);
+				$log->addLogLine($query);
+				$dbHandler->update($queryheader.$query);
+				$query = '';
+				$usercount=0;
+			}
 		}
 		$query = substr($query,0,-2);
-		$log->addLine($query);
+		$log->addLogLine($query);
 		
 		#insert the patron data
-		$dbHandler->update($query);
+		$dbHandler->update($queryheader.$query);
 		undef @cols;
+		undef @billfinal;
+		undef @billsections;
 	}
 	
 	
@@ -237,7 +270,11 @@ sub xmlLoop
 {
 	my $xmlscrap = @_[0];
 	my $parent = lc @_[1];
+	# $holdcount ++ if($parent =~ m/^hold/);
 	my $compiled = @_[2];
+	my %compiled = %{$compiled};
+	# $log->addLine(Dumper($compiled)) if($holdcount > 10);
+	# return \%compiled if($holdcount > 10);
 	#$log->addLine(Dumper($compiled));
 	if(ref($xmlscrap) eq 'ARRAY')
 	{
@@ -246,7 +283,7 @@ sub xmlLoop
 		foreach (@{$xmlscrap})
 		{
 			#$log->addLine("Recursing $_");
-			$compiled = xmlLoop($_, $parent.$i, $compiled);
+			$compiled = xmlLoop($_, $parent."_".$i, $compiled);
 			$i++;
 		}
 	}
@@ -256,7 +293,7 @@ sub xmlLoop
 		while ((my $internal, my $value ) = each(%{$xmlscrap}))
 		{
 			#$log->addLine("Recursing $value");
-			$compiled = xmlLoop($value, $parent.$internal, $compiled);
+			$compiled = xmlLoop($value, $parent."_".$internal, $compiled);
 		}
 	}
 	else
@@ -265,12 +302,16 @@ sub xmlLoop
 		my $i=0;
 		my %compiled = %{$compiled};
 		my $key = $parent;
+		$key =~ s/^\s*//;
+		$key =~ s/^_*//;
+		$key =~ s/\s$//;
 		$key =~ s/[\s,]/_/g;
+		$key =~ s/\//_/g;
 		while( ($compiled{$key."_".$i} ) )
 		{
 			$i++;
 		}
-		#$log->addLine("Assigning ".$key."_".$i." = $xmlscrap");
+		# $log->addLine("Assigning ".$key."_".$i." = $xmlscrap");
 		$compiled{$key."_".$i} = $xmlscrap;
 		$compiled = \%compiled;
 	}
