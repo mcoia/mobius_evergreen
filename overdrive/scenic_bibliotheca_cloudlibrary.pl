@@ -20,12 +20,15 @@ use email;
 use DateTime;
 use utf8;
 use Encode;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
 use Digest::SHA1;
 use File::stat;
+use REST::Client;
+use LWP::UserAgent;
+use Digest::SHA qw(hmac_sha256_base64);
+
 
  my $configFile = @ARGV[0];
  if(!$configFile)
@@ -42,6 +45,7 @@ use File::stat;
  our $archivefolder;
  our $importSourceName;
  our $importSourceNameDB;
+ our $lastDateRunFilePath;
  our $dbHandler;
  our @shortnames;
  
@@ -71,6 +75,7 @@ use File::stat;
 		}
 		$archivefolder = $conf{"archivefolder"};
 		$importSourceName = $conf{"sourcename"};
+		$lastDateRunFilePath = $conf{"last_date_file"};
 		$importSourceNameDB = $importSourceName;
 		$importSourceNameDB =~ s/\s/\-/g;
 		
@@ -508,8 +513,6 @@ sub deleteFiles
 sub getmarc
 {
 	my $server = @_[0];
-	$server=~ s/http:\/\///gi;
-	$server=~ s/ftp:\/\///gi;
 	
 	my $loops=0;
 	my $login = @_[1];
@@ -518,62 +521,23 @@ sub getmarc
 	my $archivefolder = @_[4];
 	my @ret = ();
 	
-	$log->addLogLine("**********FTP starting -> $server with $login and $password");
-	
-	my $ftp = Net::FTP->new($server, Debug => 0, Passive=> 1)
-	or die $log->addLogLine("Cannot connect to ".$server);
-    $ftp->login($login,$password)
-	or die $log->addLogLine("Cannot login ".$ftp->message);
-	my @remote_dirs = ('/Marc/OCLC/Subscription/Magazine/','/Marc/OCLC/Subscription/Recorded Books eAudio Classics Subscription','/Marc/OCLC/Subscription/Recorded Books eBook Classics Collection');
-	
-	foreach(@remote_dirs)
-	{
-		$ftp->cwd($_);
-		my @remotefiles = $ftp->ls();
-		foreach(@remotefiles)
-		{
-			my $filename = $_;
-			my $download = decideToDownload($filename);
-			
-			if($download)
-			{
-				if(-e "$archivefolder/$filename")
-				{
-					my $size = stat("$archivefolder/$filename")->size; #[7];
-					my $rsize = $ftp->size($filename);
-					# print "Local: $size\n";
-					# print "remot: $rsize\n";
-					if($size ne $rsize)
-					{
-						$log->addLine("$archivefolder/$filename differes in size remote $filename");
-						unlink("$archivefolder/$filename");
-					}
-					else
-					{
-						$log->addLine("skipping $filename");
-						$download=0;
-					}
-				}
-				else
-				{
-					$log->addLine("NEW $filename");
-				}
-				if($download)
-				{
-					my $worked = $ftp->get($filename,"$archivefolder/$filename");
-					if($worked)
-					{
-						push (@ret, "$filename");
-					}
-				}
-			}
-		}
-	}
-    $ftp->quit
-	or die $log->addLogLine("Unable to close FTP connection");
-	$log->addLogLine("**********FTP session closed ***************");
 	$log->addLine(Dumper(\@ret));
 	return \@ret;
+}
+
+sub getMarcFromCloudlibrary
+{
+	my $baseURL = @_[0];
+	my $library = @_[1];
+	my $apikey = @_[2];
+	my $startDate = @_[3];
+	my $endDate = @_[4];
+	
+	my $uri = "/cirrus/library/mf/data/marc";
+	
+	
+	
+	
 }
 
 sub decideToDownload
