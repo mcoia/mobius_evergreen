@@ -1,6 +1,7 @@
 
 .jcarousel-skin-meskin {
     text-align: center;
+	overflow: hidden;
 }
 .jcarousel-skin-meskin .jcarousel-container {
     margin: auto;
