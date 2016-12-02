@@ -383,7 +383,7 @@
 			}
 			$barcodes.="\r\n";
 			#print "Appending master marc file\n";
-			$marcout->appendLineRaw($marc->as_usmarc());
+			$marcout->appendLine($marc->as_usmarc());
 			#print "Done appending master marc file\n";			
 			$recCount++;
 		}

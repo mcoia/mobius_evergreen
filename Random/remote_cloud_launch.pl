@@ -57,6 +57,7 @@ foreach(@pod_IPS)
 			@clusterconfiglines[$i]='';
 		}
 	}
+	$loop++;
 }
 print $podNames."'\n";
 $podNames=substr($podNames,0,-1);

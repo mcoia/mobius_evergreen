@@ -6,6 +6,11 @@
 # install Email::Sender::Simple
 # install Digest::SHA1
 
+# Certificate generation
+# openssl genrsa -out cert.key 4096
+# openssl req -new -x509 -days 1365 -key cert.key -out cert.crt
+
+
 use lib qw(../);
 use MARC::Record;
 use MARC::File;
@@ -28,7 +33,7 @@ use File::stat;
 use REST::Client;
 use LWP::UserAgent;
 use Digest::SHA qw(hmac_sha256_base64);
-
+use HTML::Entities;
 
  my $configFile = @ARGV[0];
  if(!$configFile)
@@ -46,6 +51,8 @@ use Digest::SHA qw(hmac_sha256_base64);
  our $importSourceName;
  our $importSourceNameDB;
  our $lastDateRunFilePath;
+ our $cert;
+ our $certKey;
  our $dbHandler;
  our @shortnames;
  
@@ -75,7 +82,9 @@ use Digest::SHA qw(hmac_sha256_base64);
 		}
 		$archivefolder = $conf{"archivefolder"};
 		$importSourceName = $conf{"sourcename"};
-		$lastDateRunFilePath = $conf{"last_date_file"};
+		$lastDateRunFilePath = $conf{"lastdatefile"};
+		$cert = $conf{"certpath"};
+		$certKey = $conf{"certkeypath"};
 		$importSourceNameDB = $importSourceName;
 		$importSourceNameDB =~ s/\s/\-/g;
 		
@@ -95,7 +104,7 @@ use Digest::SHA qw(hmac_sha256_base64);
 		my @files;
 		
 		if($valid)
-		{	
+		{
 			my @marcOutputRecords;
 			my @marcOutputRecordsRemove;
 			@shortnames = split(/,/,$conf{"participants"});
@@ -120,11 +129,11 @@ use Digest::SHA qw(hmac_sha256_base64);
 					my $thisfilename = lc($files[$b]);
 					
 					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
-					my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
+					my $file = MARC::File::XML->in("$archivefolder/".$files[$b]);
 					
 					if(! ($thisfilename =~ m/remove/))
 					{					
-						while ( my $marc = $file->next() ) 
+						while ( my $marc = $file->next() )
 						{	
 							$marc = add9($marc);
 							push(@marcOutputRecords,$marc);
@@ -159,7 +168,7 @@ use Digest::SHA qw(hmac_sha256_base64);
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->addLineRaw($output);
+				$marcout->appendLine($output);
 				
 				$output='';
 				foreach(@marcOutputRecordsRemove)
@@ -169,7 +178,7 @@ use Digest::SHA qw(hmac_sha256_base64);
 					$countremoval++;
 				}
 				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
-				$marcoutRemoval->addLineRaw($output);
+				$marcoutRemoval->appendLine($output);
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -232,6 +241,18 @@ use Digest::SHA qw(hmac_sha256_base64);
 			
 			my $workedCountRemoval = $#workedRemoval+1;
 			my $notWorkedCountRemoval = $#notworkedRemoval+1;
+			
+			# Record the success to the $lastDateRunFilePath
+			my $lastRemovalRunTime = $fdate;
+			if($#infoRemoval == 0)
+			{
+				my $previousRunDateTimeFile = new Loghandler($lastDateRunFilePath);
+				my @previousRunTime = @{$previousRunDateTimeFile->readFile()};
+				my $lastRemovalRunTime = @previousRunTime[1];
+				$lastRemovalRunTime =~ s/\n$//g;
+			}
+			my $recordActivity = new Loghandler($lastDateRunFilePath);
+			$recordActivity->truncFile($fdate."\n".$lastRemovalRunTime);
 			
 			
 			my $fileCount = $#files+1;
@@ -513,13 +534,98 @@ sub deleteFiles
 sub getmarc
 {
 	my $server = @_[0];
-	
-	my $loops=0;
 	my $login = @_[1];
 	my $password = @_[2];	
 	my $yearstoscrape = @_[3];
 	my $archivefolder = @_[4];
+	my $startDate = '0001-01-01';
+	my $lastRemovalDate = '0001-01-01';
+	if( -e $lastDateRunFilePath)
+	{
+		my $previousRunDateTimeFile = new Loghandler($lastDateRunFilePath);
+		my @previousRunTime = @{$previousRunDateTimeFile->readFile()};
+		
+		# It's always going to be the first line in the file
+		my $previousRunTime = @previousRunTime[0];
+		$previousRunTime =~ s/\n$//g;
+		my $lastRemovalRunTime = @previousRunTime[1];
+		$lastRemovalRunTime =~ s/\n$//g;
+		$log->addLine("reading last run file and got $previousRunTime and $lastRemovalRunTime");
+		my ($y,$m,$d) = $previousRunTime =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
+			or die;
+		$startDate = $y.'-'.$m.'-'.$d;
+		my ($y,$m,$d) = $lastRemovalRunTime =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
+			or die;
+		$lastRemovalDate = $y.'-'.$m.'-'.$d;
+	}
+	
+	my $dateNow = DateTime->now(time_zone => "GMT");
+	
+	my $endDate = $dateNow->ymd();
+	
+	my @newRecords = @{getMarcFromCloudlibrary($server, $login, $password, $startDate, $endDate)};
+	# Done gathering up new records.
+	
+	# Decide if it's been long enough to check for deletes
+	my $dateNow = DateTime->now( time_zone => "GMT" );
+	my ($y,$m,$d) = $lastRemovalDate =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
+		or die;
+	my $previousDate = new DateTime({ year => $y, month=> $m, day => $d });
+	my $duration = $dateNow - $previousDate;
+	
+	my $removeOutput = '';
+	if($duration->days > 30)
+	{
+		my $bib_sourceid = getbibsource();
+		my $queryDB = "SELECT record,value,(select marc from biblio.record_entry where id=a.record) from metabib.real_full_rec a where 
+		record in(select id from biblio.record_entry where not deleted and 
+		source in(select id from config.bib_source where source = '$bib_sourceid') and create_date < '$startDate') and
+		tag='035'";
+		my @results = @{$dbHandler->query($queryDB)};
+		foreach(@results)
+		{
+			my @row = @{$_};
+			my $bib = @row[0];
+			my $itemID = @row[1];
+			my $marcxml = @row[2];
+			my @checkIfRemoved = @{getMarcFromCloudlibrary($server, $login, $password, $startDate, $endDate, $itemID)};
+			# not found in the cloudlibrary collection, add it to the remove array
+			if($#checkIfRemoved == -1)
+			{
+				$marcxml =~ s/(<leader>.........)./${1}a/;
+				my $marcobj = MARC::Record->new_from_xml($marcxml);
+				$removeOutput.= convertMARCtoXML($marcobj);;
+			}
+		}
+	}
+	
+	
+	my $outputFileName = $mobUtil->chooseNewFileName($archivefolder,"import$endDate","xml");
+	my $outputFileRemove = $mobUtil->chooseNewFileName($archivefolder,"import$endDate"."remove","xml");
+	
 	my @ret = ();
+	
+	my $newOutput = '';
+	foreach(@newRecords)
+	{
+		$newOutput .= convertMARCtoXML($_);
+	}
+	
+	if(length($newOutput) > 0)
+	{
+		my $outputFile = new Loghandler($outputFileName);
+		$outputFile->appendLine($newOutput);
+		$outputFileName =~ s/$archivefolder//;
+		push (@ret, $outputFileName);
+	}
+	
+	if(length($removeOutput) > 0)
+	{
+		my $outputFile = new Loghandler($outputFileRemove);
+		$outputFile->appendLine($removeOutput);
+		$outputFileRemove =~ s/$archivefolder//;
+		push (@ret, $outputFileRemove);
+	}
 	
 	$log->addLine(Dumper(\@ret));
 	return \@ret;
@@ -532,11 +638,88 @@ sub getMarcFromCloudlibrary
 	my $apikey = @_[2];
 	my $startDate = @_[3];
 	my $endDate = @_[4];
+	my $recordID = @_[5];
+	my $uri = "/cirrus/library/$library/data/marc";
 	
-	my $uri = "/cirrus/library/mf/data/marc";
-	
-	
-	
+	my $records = 1;
+	my $offset = 1;
+	my $resultGobLimit = 50;
+	my @allRecords = ();
+	my $stop = 0;
+	while( ($records && !$stop) )
+	{
+		$records = 0;
+		my $query = "?startdate=$startDate&enddate=$endDate&offset=$offset&limit=$resultGobLimit";
+		$uri .= "/$recordID" if $recordID;
+		$query = '' if $recordID;
+		$stop = 1;
+		my $date = DateTime->now(time_zone => "GMT");
+
+		my $dayofmonth = $date->day();
+		$dayofmonth = '0'.$dayofmonth if length($dayofmonth) == 1;
+
+		my $timezonestring = $date->time_zone_short_name();
+		$timezonestring =~ s/UTC/GMT/g;
+		my $dateString = $date->day_abbr().", ".
+		$dayofmonth." ".
+		$date->month_abbr()." ".
+		$date->year()." ".
+		$date->hms()." ".
+		$timezonestring;
+		
+		my $digest = hmac_sha256_base64($dateString."\nGET\n".$uri.$query, $apikey);
+		while (length($digest) % 4) {
+			$digest .= '=';
+		}
+		
+		my $client = REST::Client->new({
+			 host    => $baseURL,
+			 cert    => $cert,
+			 key     => $certKey,
+		 });
+		$log->addLine("API query: 'GET',$uri$query");
+		my $answer = $client->request('GET',$uri.$query,'',
+			{
+			'3mcl-Datetime'=>$dateString,
+			'3mcl-Authorization'=>"3MCLAUTH library.$library:".$digest,
+			'3mcl-apiversion'=>"3mcl-apiversion: 2.0"
+			}
+		);
+		my $allXML = $answer->responseContent();
+		$allXML = decode_entities($allXML);
+		$allXML =~ s/(.*)<\?xml[^>]*>(.*)/$1$2/;
+		$allXML =~ s/(<marc:collection[^>]*>)(.*)/$2/;
+		$allXML =~ s/(.*)<\/marc:collection[^>]*>(.*)/$1$2/;
+		my @records = split("marc:record",$allXML);
+		foreach (@records)
+		{
+			# Doctor the xml
+			my $thisXML = $_;
+			$thisXML =~ s/^>//;
+			$thisXML =~ s/<\/?$//;
+			$thisXML =~ s/<(\/?)marc\:/<$1/g;
+			if(length($thisXML) > 0)
+			{	
+				$thisXML =~ s/>\s+</></go;	
+				$thisXML =~ s/\p{Cc}//go;
+				$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
+				$thisXML =~ s/[\x00-\x1f]//go;
+				$thisXML =~ s/^\s+//;
+				$thisXML =~ s/\s+$//;
+				$thisXML =~ s/<record><leader>/<leader>/;
+				$thisXML =~ s/<collection/<record/;	
+				$thisXML =~ s/<\/record><\/collection>/<\/record>/;	
+				
+				my $record = MARC::Record->new_from_xml("<record>".$thisXML."</record>");
+				push (@allRecords, $record);
+				$offset++;
+			}
+		}
+		$records = 1 if($#records > -1);
+		$log->addLine("records = $records and stop = $stop");
+		$log->addLine("Record Count: ".$#allRecords);
+	}
+	return \@allRecords;
 	
 }
 
@@ -745,10 +928,12 @@ updateJob("Processing","mergeBIBs  $query");
 sub calcSHA1
 {
 	my $marc = @_[0];
+	my $zero01 = @_[1] || '001';
+	my $subfield = @_[2] || '';
 	my $sha1 = Digest::SHA1->new;
 	$sha1->add(  length(getsubfield($marc,'007',''))>6 ? substr( getsubfield($marc,'007',''),0,6) : '' );
 	$sha1->add(getsubfield($marc,'245','h'));
-	$sha1->add(getsubfield($marc,'001',''));
+	$sha1->add(getsubfield($marc,$zero01,$subfield));
 	$sha1->add(getsubfield($marc,'245','a'));
 	return $sha1->hexdigest;
 }
@@ -798,7 +983,7 @@ sub removeBibsEvergreen
 		# if($loops < 5)
 		# {
 		my $title = getsubfield($marc,'245','a');
-		my $sha1 = calcSHA1($marc);
+		my $sha1 = calcSHA1($marc, '035', 'a');
 		my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
 		if($bibid!=-1) #already exists
 		{	
@@ -848,7 +1033,7 @@ sub importMARCintoEvergreen
 		{
 			#my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
 			my $title = getsubfield($marc,'245','a');
-			#print "Importing $title\n";
+			print "Importing $title\n";
 updateJob("Processing","CalcSHA1");
 			my $sha1 = calcSHA1($marc);
 updateJob("Processing","updating 245h and 856z");
@@ -1310,6 +1495,7 @@ sub findRecord
 {
 	my $marcsearch = @_[0];
 	my $zero01 = $marcsearch->field('001')->data();
+	$zero01 =~ s/\D//g;
 	my $dbHandler = @_[1];
 	my $sha1 = @_[2];
 	my $bibsourceid = @_[3];
@@ -1342,25 +1528,47 @@ updateJob("Processing","$query");
 	if(length($foundIDs)<1)
 	{
 		$foundIDs="-1";
-	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-updateJob("Processing","$query");
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		print "found matching 001: $id\n";
-		my $marc = @row[1];
-		my $prevmarc = $marc;
-		$prevmarc =~ s/(<leader>.........)./${1}a/;	
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matched001 = ($id,$prevmarc,$score,$marc);
-		push (@ret, [@matched001]);	
-		$none=0;
-		$count++;
+	
+		my $query = "
+SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID not in($foundIDs) and not deleted 
+and 
+(
+	marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
+	or
+	marc ~ \$\$tag=\"006\">......[oqs]\$\$
+)
+and
+(
+	marc ~ \$\$<leader>......[at]\$\$
+)
+and
+(
+	marc ~ \$\$<leader>.......[acdm]\$\$
+)
+and ID in(
+
+SELECT record from metabib.real_full_rec a where 
+		tag=\$\$035\$\$ and regexp_replace(value,'\D','')=\$\$$zero01\$\$
+)
+";
+	updateJob("Processing","$query");
+		my @results = @{$dbHandler->query($query)};
+		foreach(@results)
+		{
+			my $row = $_;
+			my @row = @{$row};
+			my $id = @row[0];
+			print "found matching 001: $id\n";
+			my $marc = @row[1];
+			my $prevmarc = $marc;
+			$prevmarc =~ s/(<leader>.........)./${1}a/;	
+			$prevmarc = MARC::Record->new_from_xml($prevmarc);
+			my $score = scoreMARC($prevmarc,$log);
+			my @matched001 = ($id,$prevmarc,$score,$marc);
+			push (@ret, [@matched001]);	
+			$none=0;
+			$count++;
+		}
 	}
 	if($none)
 	{
@@ -1592,13 +1800,13 @@ sub getTCN
 sub convertMARCtoXML
 {
 	my $marc = @_[0];	
-	my $thisXML =  decode_utf8($marc->as_xml());				
+	my $thisXML =  $marc->as_xml(); #decode_utf8();
 	
 	#this code is borrowed from marc2bre.pl
 	$thisXML =~ s/\n//sog;	
 	$thisXML =~ s/^<\?xml.+\?\s*>//go;	
 	$thisXML =~ s/>\s+</></go;	
-	$thisXML =~ s/\p{Cc}//go;	
+	$thisXML =~ s/\p{Cc}//go;
 	$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
 	$thisXML =~ s/[\x00-\x1f]//go;
 	$thisXML =~ s/^\s+//;
@@ -1617,7 +1825,7 @@ sub getbibsource
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
 	{
-		print "Didnt find molib2go in bib_source, now creating it...\n";
+		print "Didnt find $importSourceName in bib_source, now creating it...\n";
 		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'molib2go')";
 		my $res = $dbHandler->update($query);
 		print "Update results: $res\n";
@@ -1666,6 +1874,7 @@ sub updateJob
 	my $status = @_[0];
 	my $action = @_[1];
 	my $query = "UPDATE molib2go.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+	$log->addLine($query);
 	my $results = $dbHandler->update($query);
 	return $results;
 }

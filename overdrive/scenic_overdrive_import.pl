@@ -154,7 +154,7 @@ use File::stat;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->addLineRaw($output);
+				$marcout->appendLine($output);
 				
 				$output='';
 				foreach(@marcOutputRecordsRemove)
@@ -164,7 +164,7 @@ use File::stat;
 					$countremoval++;
 				}
 				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
-				$marcoutRemoval->addLineRaw($output);
+				$marcoutRemoval->appendLine($output);
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -1624,7 +1624,7 @@ sub getTCN
 sub convertMARCtoXML
 {
 	my $marc = @_[0];	
-	my $thisXML =  decode_utf8($marc->as_xml());				
+	my $thisXML =  $marc->as_xml(); #decode_utf8();
 	
 	#this code is borrowed from marc2bre.pl
 	$thisXML =~ s/\n//sog;	

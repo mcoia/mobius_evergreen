@@ -1705,7 +1705,7 @@ sub getTCN
 sub convertMARCtoXML
 {
 	my $marc = @_[0];	
-	my $thisXML =  decode_utf8($marc->as_xml());				
+	my $thisXML =  $marc->as_xml(); #decode_utf8();
 	
 	#this code is borrowed from marc2bre.pl
 	$thisXML =~ s/\n//sog;	

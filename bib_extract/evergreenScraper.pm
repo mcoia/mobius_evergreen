@@ -940,7 +940,7 @@ package evergreenScraper;
 				#print "About to add it to output\n";
 				#print Dumper($marc);
 				
-				$output.=decode_utf8($marc->as_usmarc());
+				$output.=$marc->as_usmarc();
 				#print "Added it\n";
 			}
 			else
@@ -956,7 +956,7 @@ package evergreenScraper;
 		my $fileName = $mobUtil->chooseNewFileName("/mnt/evergreen/tmp/temp",$title."tempmarc","mrc");		
 		#print "Decided on $fileName \n";	
 		my $marcout = new Loghandler($fileName);
-		$marcout->appendLineRaw($output);
+		$marcout->appendLine($output);
 		push(@newDump, $fileName);
 		my $addedToDisk = scalar keys %standard;
 		$recordsInFiles+=$addedToDisk;
