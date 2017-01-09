@@ -155,6 +155,7 @@ use Getopt::Long;
 			$makeTable = $makeTable."$_ TEXT," for @cols;
 		}
 		
+		$makeTable =~ s/#/_/g;
 		$makeTable = substr($makeTable,0,-1);
 		$makeTable.=")";
 		$log->addLogLine($makeTable);
@@ -163,6 +164,7 @@ use Getopt::Long;
 		my $queryheader = "INSERT INTO m_jeffco.$table (";
 		if ($table ne "patron_file"){$queryheader.="$_,"  for @billfinal;}
 		if ($table eq "patron_file"){$queryheader.="$_,"  for @cols;}
+		$queryheader =~ s/#/_/g;
 		$queryheader = substr($queryheader,0,-1);
 		$queryheader .= ")\n VALUES\n";
 		my $query = '';

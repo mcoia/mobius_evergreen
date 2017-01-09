@@ -5,13 +5,14 @@
 # install Email::MIME
 # install Email::Sender::Simple
 # install Digest::SHA1
+# install HTML::HTML5::Entities
 
 # Certificate generation
 # openssl genrsa -out cert.key 4096
 # openssl req -new -x509 -days 1365 -key cert.key -out cert.crt
 
 
-use lib qw(../);
+use lib qw(../../);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -567,26 +568,40 @@ sub getmarc
 	# Done gathering up new records.
 	
 	# Decide if it's been long enough to check for deletes
-	my $dateNow = DateTime->now( time_zone => "GMT" );
+	my $dateNow = DateTime->today( time_zone => "GMT" );
 	my ($y,$m,$d) = $lastRemovalDate =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
 		or die;
 	my $previousDate = new DateTime({ year => $y, month=> $m, day => $d });
-	my $duration = $dateNow - $previousDate;
-	
+    $previousDate->truncate( to => 'day' );
+    my $difference = $dateNow - $previousDate;
+    my $format = DateTime::Format::Duration->new(pattern => '%Y %m %e');
+    my $duration =  $format->format_duration($difference);
+    $log->addLine("duration raw = $duration");
+    my ($y,$m,$d) = $duration =~ /^([^\s]*)\s([^\s]*)\s([^\s]*)/;
+    
+    
+	$log->addLine("Duration from last deletes: $dateNow minus $previousDate = $y years, $m months $d days apart");
+    $duration = $y*365;
+    $duration+= $m*30;
+    $duration+= $d;
+    $log->addLine("Duration = $duration");
 	my $removeOutput = '';
-	if($duration->days > 30)
+	if($duration > 30)
 	{
 		my $bib_sourceid = getbibsource();
 		my $queryDB = "SELECT record,value,(select marc from biblio.record_entry where id=a.record) from metabib.real_full_rec a where 
 		record in(select id from biblio.record_entry where not deleted and 
-		source in(select id from config.bib_source where source = '$bib_sourceid') and create_date < '$startDate') and
+		source in($bib_sourceid) and create_date < '$startDate') and
 		tag='035'";
+        updateJob("Processing",$queryDB);
 		my @results = @{$dbHandler->query($queryDB)};
 		foreach(@results)
 		{
 			my @row = @{$_};
 			my $bib = @row[0];
 			my $itemID = @row[1];
+            $itemID =~ s/^[^\s]*\s([^\s]*)/\1/g;
+            $log->addLine("Item ID = $itemID");
 			my $marcxml = @row[2];
 			my @checkIfRemoved = @{getMarcFromCloudlibrary($server, $login, $password, $startDate, $endDate, $itemID)};
 			# not found in the cloudlibrary collection, add it to the remove array
@@ -640,7 +655,8 @@ sub getMarcFromCloudlibrary
 	my $endDate = @_[4];
 	my $recordID = @_[5];
 	my $uri = "/cirrus/library/$library/data/marc";
-	
+    
+updateJob("Processing","Starting API connection");
 	my $records = 1;
 	my $offset = 1;
 	my $resultGobLimit = 50;
@@ -652,7 +668,6 @@ sub getMarcFromCloudlibrary
 		my $query = "?startdate=$startDate&enddate=$endDate&offset=$offset&limit=$resultGobLimit";
 		$uri .= "/$recordID" if $recordID;
 		$query = '' if $recordID;
-		$stop = 1;
 		my $date = DateTime->now(time_zone => "GMT");
 
 		my $dayofmonth = $date->day();
@@ -671,13 +686,13 @@ sub getMarcFromCloudlibrary
 		while (length($digest) % 4) {
 			$digest .= '=';
 		}
-		
+
 		my $client = REST::Client->new({
 			 host    => $baseURL,
 			 cert    => $cert,
 			 key     => $certKey,
 		 });
-		$log->addLine("API query: 'GET',$uri$query");
+updateJob("Processing","API query: GET, $uri$query");
 		my $answer = $client->request('GET',$uri.$query,'',
 			{
 			'3mcl-Datetime'=>$dateString,
@@ -686,11 +701,37 @@ sub getMarcFromCloudlibrary
 			}
 		);
 		my $allXML = $answer->responseContent();
+        # $log->addLine($allXML);
+        my @unparsableEntities = ("ldquo;","\"","rdquo;","\"","ndash;","-","lsquo;","'","rsquo;","'","mdash;","-","supl;","");
+        my $i = 0;
+        while(@unparsableEntities[$i])
+        {
+            my $loops = 0;
+            while(index($allXML,@unparsableEntities[$i]) != -1)
+            {
+                my $index = index($allXML,@unparsableEntities[$i]);
+                my $find = @unparsableEntities[$i];
+                my $findlength = length($find);
+                my $first = substr($allXML,0,$index);
+                $index+=$findlength;
+                my $last = substr($allXML,$index);
+                my $rep = @unparsableEntities[$i+1];
+                #$log->addLine("Found at $index and now replacing $find");
+                $allXML = $first.$rep.$last;
+                # $allXML =~ s/(.*)&?$find(.*)/$1$rep$2/g;
+                #$log->addLine("just replaced\n$allXML");
+                $loops++;
+                exit if $loops > 15;
+            }
+            $i+=2;
+        }
+        #$log->addLine("after scrubbed\n$allXML");
 		$allXML = decode_entities($allXML);
 		$allXML =~ s/(.*)<\?xml[^>]*>(.*)/$1$2/;
 		$allXML =~ s/(<marc:collection[^>]*>)(.*)/$2/;
 		$allXML =~ s/(.*)<\/marc:collection[^>]*>(.*)/$1$2/;
 		my @records = split("marc:record",$allXML);
+updateJob("Processing","Received ".$#records." records");
 		foreach (@records)
 		{
 			# Doctor the xml
@@ -716,11 +757,12 @@ sub getMarcFromCloudlibrary
 			}
 		}
 		$records = 1 if($#records > -1);
+        #$stop = 1 if($#allRecords > 200);
 		$log->addLine("records = $records and stop = $stop");
 		$log->addLine("Record Count: ".$#allRecords);
 	}
 	return \@allRecords;
-	
+
 }
 
 sub decideToDownload
@@ -810,7 +852,21 @@ sub removeOldCallNumberURI
 {
 	my $bibid = @_[0];
 	my $dbHandler = @_[1];
-	my $query = "
+    
+    my $removeURIList = '';
+    my $query = "SELECT string_agg(uri::text,\$\$,\$\$) FROM asset.uri_call_number_map WHERE call_number in 
+        (
+            SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
+        )
+        ";
+    updateJob("Processing",$query);
+    my @results = @{$dbHandler->query($query)};
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $removeURIList = @row[0];
+    }
+	$query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
 		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
@@ -824,14 +880,7 @@ updateJob("Processing","$query");
 		SELECT id from asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	)";
 updateJob("Processing","$query");
-	$dbHandler->update($query);
-	$query = "
-	DELETE FROM asset.uri WHERE id not in
-	(
-		SELECT uri FROM asset.uri_call_number_map
-	)";
-updateJob("Processing","$query");
-	$dbHandler->update($query);
+	$dbHandler->update($query);	
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
@@ -842,7 +891,10 @@ updateJob("Processing","$query");
 	";
 updateJob("Processing","$query");
 	$dbHandler->update($query);
-
+    
+    $query = "DELETE FROM asset.uri WHERE id in ($removeURIList)";
+updateJob("Processing","$query");
+	$dbHandler->update($query);
 }
 
 sub recordAssetCopyMove
@@ -1495,12 +1547,11 @@ sub findRecord
 {
 	my $marcsearch = @_[0];
 	my $zero01 = $marcsearch->field('001')->data();
-	$zero01 =~ s/\D//g;
 	my $dbHandler = @_[1];
 	my $sha1 = @_[2];
 	my $bibsourceid = @_[3];
 	my $log = @_[4];
-	my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.tcn_source ~ \$\$$sha1\$\$ and bre.source=$bibsourceid and bre.deleted is false";
+	my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.tcn_source ~ \$sha\$$sha1\$sha\$ and bre.source=$bibsourceid and bre.deleted is false";
 updateJob("Processing","$query");
 	my @results = @{$dbHandler->query($query)};
 	my @ret;
@@ -1548,7 +1599,8 @@ and
 and ID in(
 
 SELECT record from metabib.real_full_rec a where 
-		tag=\$\$035\$\$ and regexp_replace(value,'\D','')=\$\$$zero01\$\$
+		tag=\$\$035\$\$ and regexp_replace(value,\$\$\\D\$\$,\$\$\$\$)=\$\$$zero01\$\$
+        
 )
 ";
 	updateJob("Processing","$query");
@@ -1636,7 +1688,7 @@ sub readyMARCForInsertIntoME
 					if(!$ignore)
 					{
 						$thisfield->delete_subfield(code => 'z');					
-						$thisfield->add_subfields('z'=> "Instantly available on overdrive");
+						$thisfield->add_subfields('z'=> "Instantly available on cloud library");
 					}
 				}
 			}
@@ -1821,15 +1873,15 @@ sub convertMARCtoXML
 
 sub getbibsource
 {
-	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+	my $query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = \$\$$importSourceNameDB\$\$";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
 	{
 		print "Didnt find $importSourceName in bib_source, now creating it...\n";
-		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,'molib2go')";
+		$query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,\$\$$importSourceNameDB\$\$)";
 		my $res = $dbHandler->update($query);
 		print "Update results: $res\n";
-		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = 'molib2go'";
+		$query = "SELECT ID FROM CONFIG.BIB_SOURCE WHERE SOURCE = \$\$$importSourceNameDB\$\$";
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
 		{
@@ -1873,30 +1925,10 @@ sub updateJob
 {
 	my $status = @_[0];
 	my $action = @_[1];
-	my $query = "UPDATE molib2go.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
-	$log->addLine($query);
+	my $query = "UPDATE molib2go.job SET last_update_time=now(),status=\$\$$status\$\$, CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action=\$updatejob\$$action\$updatejob\$ where id=$jobid";
+	#$log->addLine($query);
 	my $results = $dbHandler->update($query);
 	return $results;
-}
-
-sub findPBrecordInME
-{
-	my $dbHandler = @_[0];	
-	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ '\"9\">PB' limit 14";
-	my $query = "select id,marc from biblio.record_entry where marc ~* 'overdrive' AND marc ~* 'ebook' AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!=\$\$##URI##\$\$ and deleted is false)";
-	my @results = @{$dbHandler->query($query)};
-	my @each;
-	my @ret;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
-		@each = ($id,$marc);
-		push(@ret,[@each]);	
-	}
-	return \@ret;
 }
 
 sub findMatchInArchive

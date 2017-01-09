@@ -69,6 +69,7 @@ our $log;
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
 			setupSchema($dbHandler);
 			my @molib2godbrecords = @{getMolib2goList($dbHandler,$log)};
+            print "done gathering\n";
 			my @updatethese;
 			foreach(@molib2godbrecords)
 			{
@@ -76,6 +77,7 @@ our $log;
 				my $id = @{$_}[0];
 				$marc =~ s/(<leader>.........)./${1}a/;
 				my $marcobject = MARC::Record->new_from_xml($marc);
+                print "adding 9s $id\n";
 				$marcobject = add9($marcobject,\@shortnames);
 				my $thisXML = convertMARCtoXML($marcobject);
 				my $before = substr($marc,index($marc, '<leader>'));
@@ -84,6 +86,7 @@ our $log;
 				{
 					my @temp = ( $id, $thisXML );
 					push @updatethese, [@temp];
+                    print "adding to update list\n";
 					#$log->addLine("These are different now $id");
 					#$log->addLine("$marc\r\nbecame\r\n$thisXML");
 				}
@@ -208,6 +211,7 @@ sub getMolib2goList
 		my @row = @{$_};
 		my $prevmarc = @row[1];
 		my $id = @row[0];
+        print "gathering $id\n";
 		my @temp = ($id,$prevmarc);
 		push @ret,[@temp];
 	}

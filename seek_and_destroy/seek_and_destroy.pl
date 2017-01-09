@@ -204,10 +204,10 @@ if(! -e $xmlconf)
 					# $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
 					
-					# findInvalidElectronicMARC();
-					# findInvalidAudioBookMARC();
-					# findInvalidDVDMARC();
-					# findInvalidLargePrintMARC();
+					findInvalidElectronicMARC();
+					findInvalidAudioBookMARC();
+					findInvalidDVDMARC();
+					findInvalidLargePrintMARC();
 					# findInvalidMusicMARC();
 					
 					# findPhysicalItemsOnElectronicBooksUnDedupe();
@@ -218,7 +218,7 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-					findPossibleDups();
+					# findPossibleDups();
 					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
 # determineWhichVideoFormat(1362462,$results->[0]);
  # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(244015)"); 
