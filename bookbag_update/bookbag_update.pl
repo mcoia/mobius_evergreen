@@ -150,7 +150,7 @@ GROUP BY B.\"REC\"
 where C.\"THEDATE\" IS NOT NULL
 AND C.\"REC\" IS NOT NULL
 ORDER BY C.\"THEDATE\" DESC
-LIMIT 100
+LIMIT 200
 ";
 
 	$log->addLine($query);
@@ -195,7 +195,7 @@ ORDER BY
 CHECKIN_SCAN_TIME::DATE DESC LIMIT 200
 ) AS B 
 ORDER BY \"REC\" DESC
-LIMIT 100";
+LIMIT 200";
 
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};	
@@ -289,7 +289,7 @@ GROUP BY B.\"REC\"
 where C.\"THEDATE\" IS NOT NULL
 AND C.\"REC\" IS NOT NULL
 ORDER BY C.\"THEDATE\" DESC
-LIMIT 100
+LIMIT 200
 ";
 
 	my $shelflistforquery = '';

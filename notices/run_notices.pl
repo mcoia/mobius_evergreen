@@ -149,6 +149,11 @@ if($conf)
 						$tempfofile =~s/\s/\\ /g;
 						$finalpdffile =~s/\s/\\ /g;
 						$fopstandardoutput=~s/\s/\\ /g;
+						# gotta remo the ampersand character when working on the bash prompt
+						$tempxmlfile =~s/&/_/g;
+						$tempfofile =~s/&/_/g;
+						$finalpdffile =~s/&/_/g;
+						$fopstandardoutput=~s/&/_/g;
 						#print "Unlinking $finalpdffile\n";
 						unlink $finalpdffile;
 						$log->addLine( $conf{"xsltproc_binary"}." --stringparam gendate \"".@date[1]."\" --stringparam delayvalue \"$delay\" ".$conf{"path_to_xsl_template"}." $tempxmlfile > $tempfofile");
