@@ -34,7 +34,6 @@
     margin: 0;
 }
 .jcarousel-skin-meskin .jcarousel-item-placeholder {
-    background: url("/slider/skin/throbber.gif") no-repeat scroll center center #f0f2f5;
     color: #000;
     width: 96px;
 }

@@ -224,7 +224,17 @@ sub createDBUser
 	else
 	{
 		my @row = @{@results[0]};
-		$query = "UPDATE actor.usr SET PASSWD=E'$pass', home_ou=E'$org_unit_id' where id=".@row[0];
+        my $usrid = @row[0];
+        $query = "select * from actor.create_salt('main')";
+        my @results = @{$dbHandler->query($query)};
+        my @row = @{@results[0]};
+        my $salt = @row[0];
+        $query = "select * from actor.set_passwd($usrid,'main',
+        md5(\$salt\$$salt\$salt\$||md5(\$pass\$$pass\$pass\$)),
+        \$\$$salt\$\$
+        )";
+        $result = $dbHandler->update($query);
+		$query = "UPDATE actor.usr SET home_ou=E'$org_unit_id',ident_type=3,profile=25,active='t',super_user='t',deleted='f' where id=$usrid";
 		$result = $dbHandler->update($query);
 	}
 	if($result)
@@ -245,7 +255,7 @@ sub createDBUser
 	}
 	#print "User: $usr\npass: $pass\nWorkstation: $workstation";
 	
-	@ret = ($usr, $pass, $workstation, $result);
+	my @ret = ($usr, $pass, $workstation, $result);
 	return \@ret;
 }
 
