@@ -1411,7 +1411,12 @@ sub readyMARCForInsertIntoME
 	
 	my $two45 = $marc->field('245');
 	my @e856s = $marc->field('856');
-	
+    my @e022s = $marc->field('020');
+	foreach(@e022s)
+    {
+        my $thisfield = $_;
+        $thisfield->delete_subfield(code => 'z');
+    }
 	if($two45)
 	{
 		my $value = "item";
