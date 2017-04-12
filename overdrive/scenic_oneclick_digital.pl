@@ -114,8 +114,8 @@ use File::stat;
 				{
 					my $thisfilename = lc($files[$b]);
 					
-					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
-					my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
+					$log->addLogLine("Parsing: $archivefolder".$files[$b]);
+					my $file = MARC::File::USMARC->in("$archivefolder".$files[$b]);
 					
 					if(! ($thisfilename =~ m/remove/))
 					{					
@@ -154,7 +154,7 @@ use File::stat;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->addLineRaw($output);
+				$marcout->appendLine($output);
 				
 				$output='';
 				foreach(@marcOutputRecordsRemove)
@@ -164,7 +164,7 @@ use File::stat;
 					$countremoval++;
 				}
 				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
-				$marcoutRemoval->addLineRaw($output);
+				$marcoutRemoval->appendLine($output);
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -499,7 +499,7 @@ sub deleteFiles
 	my @files = @{@_[1]};
 	foreach(@files)
 	{
-		my $t = new Loghandler("$archivefolder/$_");
+		my $t = new Loghandler($archivefolder.$_);
 		$log->addLogLine("Deleting $_");
 		$t->deleteFile();
 	}
@@ -524,56 +524,113 @@ sub getmarc
 	or die $log->addLogLine("Cannot connect to ".$server);
     $ftp->login($login,$password)
 	or die $log->addLogLine("Cannot login ".$ftp->message);
-	my @remote_dirs = ('/Marc/OCLC/Subscription/Magazine/','/Marc/OCLC/Subscription/Recorded Books eAudio Classics Subscription','/Marc/OCLC/Subscription/Recorded Books eBook Classics Collection');
-	
-	foreach(@remote_dirs)
+	my @interestingFiles = ();
+    # push @interestingFiles , "/2017/02-Feb/mo2go20170214_01 (9 ebook records).dat";
+    # push @interestingFiles , "/2017/01-Jan/mo2go20170103.dat";
+    # push @interestingFiles , "/2017/FY2017 Weeded Titles/Weeded Titles FY2017.csv";
+	@interestingFiles = @{ftpRecurse($ftp, \@interestingFiles)};
+    $log->addLine(Dumper(\@interestingFiles));
+	foreach(@interestingFiles)
 	{
-		$ftp->cwd($_);
-		my @remotefiles = $ftp->ls();
-		foreach(@remotefiles)
-		{
-			my $filename = $_;
-			my $download = decideToDownload($filename);
-			
-			if($download)
-			{
-				if(-e "$archivefolder/$filename")
-				{
-					my $size = stat("$archivefolder/$filename")->size; #[7];
-					my $rsize = $ftp->size($filename);
-					# print "Local: $size\n";
-					# print "remot: $rsize\n";
-					if($size ne $rsize)
-					{
-						$log->addLine("$archivefolder/$filename differes in size remote $filename");
-						unlink("$archivefolder/$filename");
-					}
-					else
-					{
-						$log->addLine("skipping $filename");
-						$download=0;
-					}
-				}
-				else
-				{
-					$log->addLine("NEW $filename");
-				}
-				if($download)
-				{
-					my $worked = $ftp->get($filename,"$archivefolder/$filename");
-					if($worked)
-					{
-						push (@ret, "$filename");
-					}
-				}
-			}
-		}
-	}
+        my $download = 1;
+        my $filename = $_;
+        # gotta escape the space character when working on the bash prompt
+        my $localfilename = $filename;
+        $localfilename =~ s/\s/\\ /g;
+        # gotta remove the ampersand character when working on the bash prompt
+        $localfilename =~s/&/_/g;
+        $log->addLine("Checking $archivefolder".$filename);
+        if(-e "$archivefolder"."$filename")
+        {
+            my $size = stat("$archivefolder"."$filename")->size; #[7];
+            my @rsizes = $ftp->dir($filename);
+            my $rsize = @rsizes[0] ? @rsizes[0] : '0';
+            #remove the filename from the string
+            my $rfile = $filename;
+            # parenthesis and slashes in the filename screw up the regex
+            $rfile =~ s/\(/\\(/g;
+            $rfile =~ s/\)/\\)/g;
+            $rfile =~ s/\//\\\//g;
+            $rsize =~ s/$rfile//g;
+            $log->addLine($rsize);
+            my @split = split(/\s+/, $rsize);
+            @split = reverse @split;
+            pop @split while $#split > 3;
+            $rsize = pop @split;
+            $log->addLine("Local: $size");
+            $log->addLine("Remot: $rsize");
+            if($size ne $rsize)
+            {
+                $log->addLine("$archivefolder"."$filename differes in size remote $filename");
+                unlink("$archivefolder"."$filename");
+            }
+            else
+            {
+                $log->addLine("skipping $filename");
+                $download=0;
+            }
+        }
+        else
+        {
+            $log->addLine("NEW $filename");
+        }
+        if($download)
+        {
+            my $path = $archivefolder.$filename;
+            $path = substr($path,0,rindex($path,'/'));
+            # $log->addLine("Path = $path");
+            if(!-d $path)
+            {
+                $log->addLine("$path doesnt exist - creating directory");
+                make_path($path, {
+                verbose => 0,
+                mode => 0755,
+                });
+            }
+            # $log->addLine("Downloading to $archivefolder$filename");
+            my $worked = $ftp->get($filename,$archivefolder.$filename);
+            if($worked)
+            {
+                push (@ret, "$filename");
+            }
+        }
+    }
+    
     $ftp->quit
 	or die $log->addLogLine("Unable to close FTP connection");
 	$log->addLogLine("**********FTP session closed ***************");
 	$log->addLine(Dumper(\@ret));
 	return \@ret;
+}
+
+sub ftpRecurse
+{
+    my $ftpOb = @_[0];
+    my @interestingFiles = @{@_[1]};
+    # return \@interestingFiles if($#interestingFiles > 2);
+    
+    my @remotefiles = $ftpOb->ls();
+    foreach(@remotefiles)
+    {
+        # $log->addLine("pwd = ".$ftpOb->pwd." cwd into $_");
+        if($ftpOb->cwd($ftpOb->pwd."/".$_)) #it's a directory
+        {
+            #let's go again
+            @interestingFiles = @{ftpRecurse($ftpOb,\@interestingFiles)};
+            #$log->addLine("going to parent dir from = ".$ftpOb->pwd);
+            $ftpOb->cdup();
+        }
+        else #it's not a directory
+        {
+            my $pwd = $ftpOb->pwd;
+            if(decideToDownload($_))
+            {
+                my $full = $pwd."/".$_;
+                push (@interestingFiles , $full);
+            }
+        }
+    }
+    return \@interestingFiles;
 }
 
 sub decideToDownload
