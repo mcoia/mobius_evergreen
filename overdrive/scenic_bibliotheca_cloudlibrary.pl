@@ -584,7 +584,8 @@ sub getmarc
     $duration = $y*365;
     $duration+= $m*30;
     $duration+= $d;
-    $log->addLine("Duration = $duration");
+    $log->addLine("Duration = ".$duration);
+    $duration = $duration*1;
 	my $removeOutput = '';
 	if($duration > 30)
 	{
