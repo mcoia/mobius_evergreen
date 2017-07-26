@@ -931,20 +931,26 @@ sub makeCommaFromArray
 	my $pass = @_[2];
 	my $host = @_[3];
 	my @allPrompts = @{@_[4]};
+	my $keyfile = @_[5];
 	my $errorMessage = "";
 	my @promptsResponded;
-	my $timeout  = 10;
+	my $timeout  = 30;
 	
-	my $h = Expect->spawn("ssh $login\@$host");
+	my $connectVar = "ssh $login\@$host";
+	$connectVar .=' -i '.$keyfile if $keyfile;
+	my $h = Expect->spawn($connectVar);
 	#turn off command output to the screen
 	$h->log_stdout(0);
 	my $acceptkey=1;
 	unless ($h->expect($timeout, "yes/no")){$acceptkey=0;}
 	if($acceptkey){print $h "yes\r";}
-	unless ($h->expect($timeout, "password")) { return "No Password Prompt"; }
-	print $h $pass."\r";
+	if(!$keyfile)
+	{
+		unless ( $h->expect($timeout, "password") ) { return "No Password Prompt"; }
+	}
+	print $h $pass."\r" if !$keyfile;
 	unless ($h->expect($timeout, ":")) { }  #there is a quick screen directly after logging in 
-	
+
 	$i=0;
 	#print Dumper(@allPrompts);
 	foreach(@allPrompts)

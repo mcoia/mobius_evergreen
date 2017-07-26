@@ -182,6 +182,7 @@ sub readFile
 		{
 			print "******************Failed to read file*************\n";
 		}
+        binmode(inputfile, ":utf8");
 		while (!(open (inputfile, '< '. $file)) && $trys<100)
 		{
 			print "Trying again attempt $trys\n";

@@ -1645,7 +1645,19 @@ sub readyMARCForInsertIntoME
 	foreach(@e022s)
     {
         my $thisfield = $_;
+        # $log->addLine(Dumper($thisfield->subfields()));
         $thisfield->delete_subfield(code => 'z');
+        my $hasMore = 0;
+        foreach($thisfield->subfields())
+        {
+            my @s = @{$_};
+            foreach(@s)
+            {
+                $hasMore = 1;
+            }
+        }
+        # $log->addLine("Deleting the whole field") if !$hasMore;
+        $marc->delete_field($thisfield) if !$hasMore;
     }
 	if($two45)
 	{

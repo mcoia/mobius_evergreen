@@ -154,7 +154,7 @@ use File::stat;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->addLineRaw($output);
+				$marcout->appendLine($output);
 				
 				$output='';
 				foreach(@marcOutputRecordsRemove)
@@ -164,7 +164,7 @@ use File::stat;
 					$countremoval++;
 				}
 				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
-				$marcoutRemoval->addLineRaw($output);
+				$marcoutRemoval->appendLine($output);
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -1415,7 +1415,19 @@ sub readyMARCForInsertIntoME
 	foreach(@e022s)
     {
         my $thisfield = $_;
+        # $log->addLine(Dumper($thisfield->subfields()));
         $thisfield->delete_subfield(code => 'z');
+        my $hasMore = 0;
+        foreach($thisfield->subfields())
+        {
+            my @s = @{$_};
+            foreach(@s)
+            {
+                $hasMore = 1;
+            }
+        }
+        # $log->addLine("Deleting the whole field") if !$hasMore;
+        $marc->delete_field($thisfield) if !$hasMore;
     }
 	if($two45)
 	{

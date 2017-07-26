@@ -195,7 +195,11 @@ $log->addLine($query);
 	}
 	
 	my $query = "
-	select ahr.id,acard.barcode,ahr.target,ahr.hold_type,ahr.request_time::date,ac.barcode,ahtc.source_send_time::date,sendinglib.shortname,pickuplib.shortname from 
+	select ahr.id,acard.barcode,ahr.target,ahr.hold_type,ahr.request_time::date,ac.barcode,ahtc.source_send_time::date,sendinglib.shortname,pickuplib.shortname,
+(select label from asset.call_number where not deleted and id=ac.call_number limit 1),
+(select value from metabib.title_field_entry where source = (select record from asset.call_number where id=ac.call_number limit 1) limit 1)
+
+ from 
 action.hold_request ahr,
 actor.usr au,
 actor.org_unit pickuplib,
@@ -257,7 +261,7 @@ $log->addLine($query);
 		$longtransit="Holds in transit for more than 31 days\r\nTotal: $count
 		Hold Type key: T=Title,V=Volume,C=Copy,P=Part,M=Metarecord\r\n$longtransit\r\n\r\n\r\n";
 		$longtransit = truncateOutput($longtransit,7000);
-		my @header = ("Hold ID","Patron Barcode","Target","Hold Type","Request Time","Copy Barcode","Send Date","Sending Library","Destination Library");
+		my @header = ("Hold ID","Patron Barcode","Target","Hold Type","Request Time","Copy Barcode","Send Date","Sending Library","Destination Library","Call Number","Title");
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Long_transit_holds.csv");
 		push(@attachments,$baseTemp."Long_transit_holds.csv");

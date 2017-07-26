@@ -148,7 +148,7 @@ if(! -e $xmlconf)
 	if ($conf{"logfile"})
 	{
 		my $dt = DateTime->now(time_zone => "local"); 
-		my $fdate = $dt->ymd; 
+		my $fdate = $dt->ymd;
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
@@ -188,11 +188,11 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
 					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					# cleanMetaRecords();
+					cleanMetaRecords();
 					 
 					 
 					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
@@ -218,6 +218,7 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
+                    updateScoreCache();
 					findPossibleDups();
 					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
 # determineWhichVideoFormat(1362462,$results->[0]);
@@ -244,7 +245,7 @@ if(! -e $xmlconf)
 					 # updateScoreWithQuery("select id,marc from biblio.record_entry where id=243577");
 					
 					#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
-					#updateScoreCache();
+					
 				}
 			}
 			updateJob("Executing reports and email","");
@@ -2483,57 +2484,57 @@ sub findPossibleDups
 #
 # Gather up some potential candidates based on EG Fingerprints
 #
-	my $query="
-		select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
-		(
-		select fingerprint from(
-		select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
-		and id not in(select record from seekdestroy.bib_score)
-		group by fingerprint
-		) as a
-		where count>1
-		)
-		and not deleted
-		and fingerprint != \$\$\$\$
-		group by fingerprint
-		--limit 100;
-		";
-updateJob("Processing","findPossibleDups  $query");
-	my @results = @{$dbHandler->query($query)};
-	my @st=();
-	my %alreadycached;
-	my $deleteoldscorecache="";
-updateJob("Processing","findPossibleDups  looping results");
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my @ids=split(',',@row[0]);
-		my $fingerprint = @row[1];
-		for my $i(0..$#ids)
-		{
-			@ids[$i]=$mobUtil->trim(@ids[$i]);
-			my $id = @ids[$i];
-			if(!$alreadycached{$id})
-			{
-				$alreadycached{$id}=1;
-				my $q = "select marc from biblio.record_entry where id=$id";
-				my @result = @{$dbHandler->query($q)};			
-				my @r = @{@result[0]};
-				my $marc = @r[0];
-				my @scorethis = ($id,$marc);
-				push(@st,[@scorethis]);
-				$deleteoldscorecache.="$id,";
-			}
-		}
-	}
+	# my $query="
+		# select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
+		# (
+		# select fingerprint from(
+		# select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
+		# and id not in(select record from seekdestroy.bib_score)
+		# group by fingerprint
+		# ) as a
+		# where count>1
+		# )
+		# and not deleted
+		# and fingerprint != \$\$\$\$
+		# group by fingerprint
+		# --limit 100;
+		# ";
+# updateJob("Processing","findPossibleDups  $query");
+	# my @results = @{$dbHandler->query($query)};
+	# my @st=();
+	# my %alreadycached;
+	# my $deleteoldscorecache="";
+# updateJob("Processing","findPossibleDups  looping results");
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my @ids=split(',',@row[0]);
+		# my $fingerprint = @row[1];
+		# for my $i(0..$#ids)
+		# {
+			# @ids[$i]=$mobUtil->trim(@ids[$i]);
+			# my $id = @ids[$i];
+			# if(!$alreadycached{$id})
+			# {
+				# $alreadycached{$id}=1;
+				# my $q = "select marc from biblio.record_entry where id=$id";
+				# my @result = @{$dbHandler->query($q)};			
+				# my @r = @{@result[0]};
+				# my $marc = @r[0];
+				# my @scorethis = ($id,$marc);
+				# push(@st,[@scorethis]);
+				# $deleteoldscorecache.="$id,";
+			# }
+		# }
+	# }
 
-	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
-	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
-	updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
-	$dbHandler->update($q);
-	updateJob("Processing","findPossibleDups updating scorecache selectively");
-	updateScoreCache(\@st);
+	# $deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
+	# my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
+	# updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
+	# $dbHandler->update($q);
+	# updateJob("Processing","findPossibleDups updating scorecache selectively");
+	# updateScoreCache(\@st);
 	
 	
 	my $query="
@@ -2639,13 +2640,13 @@ order by bib1,bib2
 		{
 			if(@row[5] eq @row[6]) #triple check the format, no merging if they are different
 			{
-				if( (@row[5] ne 'dvd') && (@row[5] ne 'blu-ray') && (@row[5] ne 'vhs') && (@row[5] ne 'serial') )
+				if( (@row[5] ne 'dvd') && (@row[5] ne 'blu-ray') && (@row[5] ne 'vhs') && (@row[5] ne 'serial') && (@row[5] ne 'microform') )
 				{
 					mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
 				}
 				else
 				{
-					$log->addLine("Not merging and skipping because it is video/serial format");
+					$log->addLine("Not merging and skipping because it is video/serial/microform format");
 				}
 			}
 			else

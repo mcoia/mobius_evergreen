@@ -102,8 +102,8 @@ use File::stat;
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
 			setupSchema($dbHandler);
 			
-			# @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc records/hoopla/")};
-			
+            # @files = ("/2017/06-Jun/test2.mrc");
+			# @files = @{dirtrav(\@files,"/mnt/evergreen/utilityscripts/electronic_imports/molib2go_import/archive/2017/FY2017\\ Weeded\\ Titles")};
 			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
             $log->addLine(Dumper(\@files));
 			if(@files[$#files]!=-1)
@@ -164,8 +164,9 @@ use File::stat;
                                 {
                                     my $ent = $mobUtil->trim($_);
                                     $ent =~ s/\D//g;
-                                    if( ( length $ent == 13 ) || ( length $ent == 10 ) )
+                                    if( ( length($ent) == 13 ) or ( length($ent) == 10 ) )
                                     {
+                                        print "Passed\n";
                                         my @ids = @{findMatchingISBN($ent, $bib_sourceid)};
                                         push(@marcOutputRecordsRemove, @ids);
                                     }
@@ -176,7 +177,6 @@ use File::stat;
 				}
                 
                 $log->addLine("found $#marcOutputRecordsRemove records to remove");
-                
 				my $outputFile = $mobUtil->chooseNewFileName($conf{"tempspace"},"temp","mrc");
 				my $outputFileRemoval = $mobUtil->chooseNewFileName($conf{"tempspace"},"tempremoval","mrc");
 				my $marcout = new Loghandler($outputFile);
@@ -1041,7 +1041,7 @@ updateJob("Processing","updating 245h and 856z");
 				{
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
-					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?locg=157;expand=marchtml#marchtml");
 					$query = "INSERT INTO molib2go.bib_marc_update(record,changed_marc,new_record,job) VALUES($newmax,\$1,true,$jobid)";
 					my @values = ($thisXML);
 					$dbHandler->updateWithParameters($query,\@values);
@@ -1130,7 +1130,7 @@ sub attemptRemoveBibs
 			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 WHERE ID=$id";
 		updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 			$log->addLine($query);
-			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t0");
+			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?locg=157;expand=marchtml#marchtml\t0");
 			my $res = $dbHandler->updateWithParameters($query,\@values);
 			if($res)
 			{
@@ -1246,6 +1246,7 @@ sub findMatchingISBN
     index_vector  @@ to_tsquery(\$\$$isbn\$\$)
     )
     ";
+    # $log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
 	{
@@ -1329,7 +1330,7 @@ sub chooseWinnerAndDeleteRest
 updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	$log->addLine($query);
 	$log->addLine($thisXML);
-	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$matchnum");
+	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?locg=157;expand=marchtml#marchtml\t$matchnum");
 	my $res = $dbHandler->updateWithParameters($query,\@values);
 	#print "$res\n";
 	if($res)
@@ -1585,7 +1586,19 @@ sub readyMARCForInsertIntoME
 	foreach(@e022s)
     {
         my $thisfield = $_;
+        # $log->addLine(Dumper($thisfield->subfields()));
         $thisfield->delete_subfield(code => 'z');
+        my $hasMore = 0;
+        foreach($thisfield->subfields())
+        {
+            my @s = @{$_};
+            foreach(@s)
+            {
+                $hasMore = 1;
+            }
+        }
+        # $log->addLine("Deleting the whole field") if !$hasMore;
+        $marc->delete_field($thisfield) if !$hasMore;
     }
 	if($two45)
 	{

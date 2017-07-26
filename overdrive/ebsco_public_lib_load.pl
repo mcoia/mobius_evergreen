@@ -154,7 +154,7 @@ use Cwd;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->addLineRaw($output);
+				$marcout->appendLine($output);
 				
 				$output='';
 				foreach(@marcOutputRecordsRemove)
@@ -164,7 +164,7 @@ use Cwd;
 					$countremoval++;
 				}
 				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
-				$marcoutRemoval->addLineRaw($output);
+				$marcoutRemoval->appendLine($output);
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -989,7 +989,7 @@ updateJob("Processing","updating 245h and 856z");
 				{
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
-					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?locg=157;expand=marchtml");
+					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?locg=157;expand=marchtml#marchtml");
 					$query = "INSERT INTO molib2go.bib_marc_update(record,changed_marc,new_record,job) VALUES($newmax,\$1,true,$jobid)";
 					my @values = ($thisXML);
 					$dbHandler->updateWithParameters($query,\@values);
@@ -1072,7 +1072,7 @@ sub attemptRemoveBibs
 			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 WHERE ID=$id";
 		updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 			$log->addLine($query);
-			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?locg=4;expand=marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?locg=157;expand=marchtml\t0");
+			$log->addLine("$id\thttp://missourievergreen.org/eg/opac/record/$id?locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$id?locg=157;expand=marchtml#marchtml\t0");
 			my $res = $dbHandler->updateWithParameters($query,\@values);
 			if($res)
 			{
@@ -1239,7 +1239,7 @@ sub chooseWinnerAndDeleteRest
 updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	$log->addLine($query);
 	$log->addLine($thisXML);
-	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?locg=4;expand=marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?locg=157;expand=marchtml\t$matchnum");
+	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?locg=157;expand=marchtml#marchtml\t$matchnum");
 	my $res = $dbHandler->updateWithParameters($query,\@values);
 	#print "$res\n";
 	if($res)
@@ -1495,7 +1495,19 @@ sub readyMARCForInsertIntoME
 	foreach(@e022s)
     {
         my $thisfield = $_;
+        # $log->addLine(Dumper($thisfield->subfields()));
         $thisfield->delete_subfield(code => 'z');
+        my $hasMore = 0;
+        foreach($thisfield->subfields())
+        {
+            my @s = @{$_};
+            foreach(@s)
+            {
+                $hasMore = 1;
+            }
+        }
+        # $log->addLine("Deleting the whole field") if !$hasMore;
+        $marc->delete_field($thisfield) if !$hasMore;
     }
 	if($two45)
 	{
@@ -1784,6 +1796,7 @@ sub updateJob
 	my $status = @_[0];
 	my $action = @_[1];
 	my $query = "UPDATE molib2go.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+    $log->addLine($action);
 	my $results = $dbHandler->update($query);
 	return $results;
 }

@@ -237,6 +237,62 @@ if(!$schema)
 		)
 	";
 	setupEGTable($query,"item_varfield_view");
+  
+	#get holds
+	my $query = "
+        select * from 
+        sierra_view.hold
+        where patron_record_id in
+        (
+            select id from sierra_view.patron_view where ($patronlocationcodes)
+        )
+	";
+	setupEGTable($query,"patron_holds");
+	
+    #get holds metadata
+	my $query = "
+        select * from 
+        sierra_view.record_metadata
+        where id in
+        (
+            select record_id from 
+                sierra_view.hold
+                where patron_record_id in
+                (
+                    select id from sierra_view.patron_view where ($patronlocationcodes)
+                )
+        )
+	";
+	setupEGTable($query,"record_metadata");	
+    
+    #get Item Status
+	my $query = "
+        select * from 
+        sierra_view.item_status_property_myuser
+	";
+	setupEGTable($query,"item_status_property_myuser");	
+    
+    #get Item Status
+	my $query = "
+        select id,item_status_code from 
+        sierra_view.item_record
+        where
+        id in
+        (
+            select item_record_id from sierra_view.bib_record_item_record_link where bib_record_id
+            in
+            (
+                select id from sierra_view.bib_view where id in
+                (
+                    SELECT BIB_RECORD_ID FROM SIERRA_VIEW.BIB_RECORD_LOCATION WHERE 
+                    ($sierralocationcodes)
+                )
+            )
+        )
+        and
+        item_status_code !='-'
+	";
+	setupEGTable($query,"non_available_item");	
 	
 	
 	$log->addLogLine(" ---------------- Script End ---------------- ");
