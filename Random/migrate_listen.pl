@@ -8,6 +8,7 @@ use XML::Simple;
 use XML::TreeBuilder;
 use Getopt::Long;
 use DBhandler;
+use utf8;
 use Encode;
 
 our $schema;
@@ -134,6 +135,7 @@ sub setupTable
             # ensure that there is at least one tab
             if($_ =~ m/\t/)
             {
+                # $log->appendLine($_) if $count > 15000;
                 my @thisrow = split(/\t/,$_);
                 my $thisline = '';
                 my $valcount = 0;
@@ -190,6 +192,7 @@ sub setupTable
 		$query=substr($query,0,-2)."\n";
 		$loginvestigationoutput.="select count(*),$_ from $schema.$tablename group by $_ order by $_\n" for @cols;
 		print "Inserted ".$count." Rows into $schema.$tablename\n";
+        
 		$log->addLine($query);
 		$dbHandler->update($query);
         $insertFile->addLine($insertString);

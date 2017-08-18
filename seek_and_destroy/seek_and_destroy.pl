@@ -192,7 +192,7 @@ if(! -e $xmlconf)
 					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					cleanMetaRecords();
+					# cleanMetaRecords();
 					 
 					 
 					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
@@ -218,7 +218,7 @@ if(! -e $xmlconf)
 					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
 					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
 					#findInvalid856TOCURL();
-                    updateScoreCache();
+                    # updateScoreCache();
 					findPossibleDups();
 					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
 # determineWhichVideoFormat(1362462,$results->[0]);
@@ -1342,24 +1342,24 @@ sub findInvalidMARC
 	
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
-	updateJob("Processing","findInvalidMARC  $query");
-	$dbHandler->update($query);
-	foreach(@marcSearchPhrases)
-	{
-		my $phrase = lc$_;
-		my $query = $phraseQuery;
-		$query =~ s/\$phrase/$phrase/g;
-		$query =~ s/\$problemphrase/$problemPhrase/g;
-		updateJob("Processing","findInvalidMARC  $query");
-		updateProblemBibs($query,$problemPhrase,$typeName);
-	}
-	foreach(@additionalSearchQueries)
-	{
-		my $query = $_;				
-		$query =~ s/\$problemphrase/$problemPhrase/g;
-		updateJob("Processing","findInvalidMARC  $query");
-		updateProblemBibs($query,$problemPhrase,$typeName);
-	}
+	# updateJob("Processing","findInvalidMARC  $query");
+	# $dbHandler->update($query);
+	# foreach(@marcSearchPhrases)
+	# {
+		# my $phrase = lc$_;
+		# my $query = $phraseQuery;
+		# $query =~ s/\$phrase/$phrase/g;
+		# $query =~ s/\$problemphrase/$problemPhrase/g;
+		# updateJob("Processing","findInvalidMARC  $query");
+		# updateProblemBibs($query,$problemPhrase,$typeName);
+	# }
+	# foreach(@additionalSearchQueries)
+	# {
+		# my $query = $_;				
+		# $query =~ s/\$problemphrase/$problemPhrase/g;
+		# updateJob("Processing","findInvalidMARC  $query");
+		# updateProblemBibs($query,$problemPhrase,$typeName);
+	# }
 	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert	
@@ -2484,57 +2484,57 @@ sub findPossibleDups
 #
 # Gather up some potential candidates based on EG Fingerprints
 #
-	# my $query="
-		# select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
-		# (
-		# select fingerprint from(
-		# select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
-		# and id not in(select record from seekdestroy.bib_score)
-		# group by fingerprint
-		# ) as a
-		# where count>1
-		# )
-		# and not deleted
-		# and fingerprint != \$\$\$\$
-		# group by fingerprint
-		# --limit 100;
-		# ";
-# updateJob("Processing","findPossibleDups  $query");
-	# my @results = @{$dbHandler->query($query)};
-	# my @st=();
-	# my %alreadycached;
-	# my $deleteoldscorecache="";
-# updateJob("Processing","findPossibleDups  looping results");
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my @ids=split(',',@row[0]);
-		# my $fingerprint = @row[1];
-		# for my $i(0..$#ids)
-		# {
-			# @ids[$i]=$mobUtil->trim(@ids[$i]);
-			# my $id = @ids[$i];
-			# if(!$alreadycached{$id})
-			# {
-				# $alreadycached{$id}=1;
-				# my $q = "select marc from biblio.record_entry where id=$id";
-				# my @result = @{$dbHandler->query($q)};			
-				# my @r = @{@result[0]};
-				# my $marc = @r[0];
-				# my @scorethis = ($id,$marc);
-				# push(@st,[@scorethis]);
-				# $deleteoldscorecache.="$id,";
-			# }
-		# }
-	# }
+	my $query="
+		select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
+		(
+		select fingerprint from(
+		select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
+		and id not in(select record from seekdestroy.bib_score)
+		group by fingerprint
+		) as a
+		where count>1
+		)
+		and not deleted
+		and fingerprint != \$\$\$\$
+		group by fingerprint
+		--limit 100;
+		";
+updateJob("Processing","findPossibleDups  $query");
+	my @results = @{$dbHandler->query($query)};
+	my @st=();
+	my %alreadycached;
+	my $deleteoldscorecache="";
+updateJob("Processing","findPossibleDups  looping results");
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my @ids=split(',',@row[0]);
+		my $fingerprint = @row[1];
+		for my $i(0..$#ids)
+		{
+			@ids[$i]=$mobUtil->trim(@ids[$i]);
+			my $id = @ids[$i];
+			if(!$alreadycached{$id})
+			{
+				$alreadycached{$id}=1;
+				my $q = "select marc from biblio.record_entry where id=$id";
+				my @result = @{$dbHandler->query($q)};			
+				my @r = @{@result[0]};
+				my $marc = @r[0];
+				my @scorethis = ($id,$marc);
+				push(@st,[@scorethis]);
+				$deleteoldscorecache.="$id,";
+			}
+		}
+	}
 
-	# $deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
-	# my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
-	# updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
-	# $dbHandler->update($q);
-	# updateJob("Processing","findPossibleDups updating scorecache selectively");
-	# updateScoreCache(\@st);
+	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
+	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
+	updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
+	$dbHandler->update($q);
+	updateJob("Processing","findPossibleDups updating scorecache selectively");
+	updateScoreCache(\@st);
 	
 	
 	my $query="
