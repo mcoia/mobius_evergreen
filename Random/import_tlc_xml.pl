@@ -67,6 +67,7 @@ if(!$schema)
 		@columns[$i] =~s/\'/_/g;
 		@columns[$i] =~s/\(//g;
 		@columns[$i] =~s/\)//g;
+		@columns[$i] =~s/\*//g;
 	}
 	
 	#drop the table
@@ -89,7 +90,12 @@ if(!$schema)
 	{
 		$query.="(";
 		my @thisrow = @{$_};
-		$query.='$$'.$_.'$$,' for @thisrow;
+		
+		for(@thisrow){
+		$_ =~ s/\$$/\$ /g;
+		$query.='$$'.$_.'$$,';
+		}
+		
 		$query=substr($query,0,-1)."),\n";
 	}
 	$query=substr($query,0,-2)."\n";
@@ -104,8 +110,19 @@ if(!$schema)
 
 sub stuffData()
 {
+	my $xmlFileReader = new Loghandler($xmlfile);
+	my @lines = @{$xmlFileReader->readFile()};
+	my $finalXML = '';
+	for(@lines)
+	{
+		my $line = $_;
+		$line =~ s/\&/&amp;/g;
+		$finalXML.=$line;
+	}
+
+
 	my $root = XML::TreeBuilder->new({ 'NoExpand' => 0, 'ErrorContext' => 0 }); # empty tree
-    $root->parse_file($xmlfile);
+    $root->parse($finalXML);
 	
 	# Get columns
 	my @itemNodes = $root->look_down ( _tag => "metadata");
