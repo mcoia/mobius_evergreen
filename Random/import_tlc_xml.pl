@@ -86,17 +86,36 @@ if(!$schema)
 	$query = "INSERT INTO $schema.$tablename (";
 	$query.=$_."," for @columns;
 	$query=substr($query,0,-1).")\nVALUES\n";
+	my $count = 0;
+	
 	foreach(@allRows)
 	{
 		$query.="(";
 		my @thisrow = @{$_};
 		
-		for(@thisrow){
-		$_ =~ s/\$$/\$ /g;
-		$query.='$$'.$_.'$$,';
+		for(@thisrow)
+		{
+			$_ =~ s/\$$/\$ /g;
+			$query.='$$'.$_.'$$,';
 		}
 		
 		$query=substr($query,0,-1)."),\n";
+		$count++;
+		
+		if($count % 5000 == 0)
+		{
+			$query=substr($query,0,-2)."\n";
+			print "Inserting ".$count." Rows\n";
+			$log->addLine($query);
+			$dbHandler->update($query);
+
+			
+			$query = "INSERT INTO $schema.$tablename (";
+			$query.=$_."," for @columns;
+			$query=substr($query,0,-1).")\nVALUES\n";
+			
+		}
+		
 	}
 	$query=substr($query,0,-2)."\n";
 	print "Investigation queries:\n";
