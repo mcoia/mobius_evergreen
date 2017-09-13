@@ -102,7 +102,7 @@ if(!$schema)
 		$query=substr($query,0,-1)."),\n";
 		$count++;
 		
-		if($count % 5000 == 0)
+		if($count % 500 == 0)
 		{
 			$query=substr($query,0,-2)."\n";
 			print "Inserting ".$count." Rows\n";
