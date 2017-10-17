@@ -82,6 +82,7 @@ if(!$schema)
 	$log->addLine($query);
 	$dbHandler->update($query);
 	
+	
 	#insert the data
 	$query = "INSERT INTO $schema.$tablename (";
 	$query.=$_."," for @columns;
