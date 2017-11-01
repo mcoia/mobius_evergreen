@@ -6,7 +6,7 @@
 # install Email::Sender::Simple
 # install Digest::SHA1
 
-use lib qw(../);
+use lib qw(../../);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -580,7 +580,7 @@ sub decideToDownload
 	{
 		return 0;
 	}
-	if($filename =~ m/remove/g)
+	if($filename =~ m/remove/)
 	{
 		$download = 1;
 	}
@@ -590,7 +590,6 @@ sub decideToDownload
 	}
 	if($filename =~ m/polaris/g)
 	{
-		
 		$download = 0;
 	}
 	return $download;
