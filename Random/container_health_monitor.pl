@@ -3,317 +3,282 @@
 #
 # 
 
- use strict; 
- #use warnings;
- #use diagnostics; 
+use strict; use warnings;
 
-my $outputdir = "/tmp/run/";
-my $marcfile = "/tmp/run/conv.xml";
+use OpenILS::Utils::TestUtils;
+use OpenILS::Utils::CStoreEditor qw/:funcs/;
+use OpenILS::Utils::Fieldmapper;
+use DateTime::Format::Duration;
+use Loghandler;
+use Mobiusutil;
+use Data::Dumper;
+use XML::Simple;
+use DBhandler;
 
+
+our $e;
+our $script;
+our %conf;
+our $dbHandler;
+our $log;
+
+my $xmlconf = "/openils/conf/opensrf.xml";
+my $configFile = shift;
+if(!$configFile)
+{
+    print "Please specify a config file\n";
+    exit;
+}
+
+my $mobUtil = new Mobiusutil(); 
+my $conf = $mobUtil->readConfFile($configFile);
  
- my $configFile = shift;
- if(!$configFile)
- {
-	print "Please specify a config file\n";
-	exit;
- }
+if($conf)
+{
+    %conf = %{$conf};
+    if ($conf{"logfile"})
+    {
+        $log = new Loghandler($conf->{"logfile"});
+        $log->addLogLine(" ---------------- Script Starting ---------------- ");
 
- my $mobUtil = new Mobiusutil(); 
- my $conf = $mobUtil->readConfFile($configFile);
+       
+        # Setup timestamp
+        my $dt = DateTime->now(time_zone => "local");
+        # setup workstation and login
+        # -------------
+        setupLogin();
+        
+        while(1)
+        {
+            # Begin basic testing
+            # Find a copy that has parts
+            # -------------
+            my $copy = $e->search_asset_copy([
+                { deleted => 'f' },
+                {
+                    join => {
+                        acpm => {
+                            type => 'inner',
+                            join => {
+                                bmp => { type => 'left' },
+                            }
+                        }
+                    },
+                    flesh => 1,
+                    flesh_fields => { acp => ['parts']},
+                    limit => 1
+                }
+                ])->[0];
+                
+            my $parts = $copy->parts;
+            # Make sure we have part vals
+            # -------------
+            if(scalar @$parts < 1 )
+            {
+                $log->addLogLine("Test copy ". $copy->id . " does not have parts!\n Test is officially fail");
+                exit 1;
+            }
+            $log->addLogLine("Got copy ". $copy->id);
+            
+            # Find a bib without parts
+            # -------------
+            my $sdestbib = $e->search_biblio_record_entry([
+            {
+            id =>
+                {
+                    'not in' =>
+                        { "from" => 'bmp',
+                            'select' =>  { "bmp" => [ 'record' ] }
+                        }
+                },
+            deleted => 'f' },
+            { limit => 3 }
+
+            ]);
+            # Making the asumption that Evergreen is functioning if these tests work
+            # -------------
+            my $destbib;
+            foreach(@{$sdestbib}) {
+                if ($_->id > -1) {
+                    $destbib = $_;
+                    last;
+                }
+            }
+            
+            if(!$destbib)
+            {
+                $log->addLogLine("Couldn't find a bib\n Test is officially fail");
+                exit 1;
+            }
+            
+            $log->addLogLine("Got bib ". $destbib->id);
+            
+            # Clean memory            
+            # -------------
+            
+            undef $sdestbib;
+            undef $destbib;
+            undef $parts;
+            undef $copy;
+            
+            my $afterProcess = DateTime->now(time_zone => "local");
+            my $difference = $afterProcess - $dt;
+            my $format = DateTime::Format::Duration->new(pattern => '%M');
+            my $duration =  $format->format_duration($difference);
+            print "It's been $duration minutes\n";
+            # refresh login every 5 minutes
+            if($duration > 5)
+            {
+                undef $e;
+                undef $dbHandler;
+                $dt = DateTime->now(time_zone => "local");
+                $script->logout();
+                undef $script;
+                setupLogin(0);
+            }
+            
+            # Sleep for awhile and let's do it again
+            # -------------
+            sleep $conf{'sleep_interval'};
+        } # end while loop
+
+         
+        $log->addLogLine(" ---------------- Script Ending ---------------- ");
+    }
+    else
+    {
+        print "Config file does not define 'logfile' and 'marcoutdir'\n";
+    }
+}
  
- if($conf)
- {
-	my %conf = %{$conf};
-	if ($conf{"logfile"})
+ 
+sub setupLogin
+{
+    print "setupLogin called\n";
+    my $attempt_create_usr = shift || 1;
+    my %dbconf = %{getDBconnects($xmlconf)};
+    eval{$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});};
+    if ($@)
+    {
+        $log->addLogLine("Could not establish a connection to the database");
+        print "Could not establish a connection to the database";
+        exit 1;
+    }
+    
+    if($attempt_create_usr)
+    {
+         # Make sure the user exists, if not, create it!
+        createDBUser($dbHandler, $mobUtil, $conf{'workstation_lib'}, $conf{'usrname'}, 
+            $conf{'workstation'}, $conf{'passwd'}, $conf{'profile'}, $conf{'ident'},
+            $conf{'first'}, $conf{'last'});
+    }
+        
+    # Setup the vars for everyone
+    # -------------
+    $script = OpenILS::Utils::TestUtils->new();
+    $script->bootstrap;
+    $e = new_editor(xact => 1);
+    $e->init;
+    
+    my $workstation = $e->search_actor_workstation([ {name => $conf{'workstation'}, owning_lib => $conf{'workstation_lib'} } ])->[0];
+
+    if( !$workstation )
+    {
+        $script->authenticate({
+            username => $conf{'usrname'},
+            password => $conf{'passwd'},
+            type => 'staff'});
+        my $ws = $script->register_workstation($conf{'workstation'},$conf{'workstation_lib'});
+        $script->logout();
+    }
+
+    $script->authenticate({
+        username => $conf{'usrname'},
+        password => $conf{'passwd'},
+        workstation => $conf{'workstation'}
+    });
+}
+
+
+sub createDBUser
+{
+	my $dbHandler = shift;
+	my $mobiusUtil = shift;
+	my $org_unit_id = shift;
+	my $usr = shift;
+	my $workstation = shift;
+	my $pass = shift;
+    my $profile = shift;
+    my $ident = shift;
+    my $first = shift;
+    my $last = shift;
+    
+    print "Creating User\n";
+	
+	my $query = "select id from actor.usr where upper(usrname) = upper('$usr')";
+	my @results = @{$dbHandler->query($query)};
+	my $result = 1;
+	if($#results==-1)
 	{
-		my $log = new Loghandler($conf->{"logfile"});
-		my $bcodout = new Loghandler("/tmp/run/callnums.txt");
-		$bcodout->deleteFile();
-		my $callnumout = new Loghandler("/tmp/run/callnum_rows.txt");
-		$callnumout->deleteFile();
-		$log->deleteFile();
-		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my $dbHandler;
-		 eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
-		 if ($@) 
-		 {
-			$log->addLogLine("Could not establish a connection to the database");
-			print "Could not establish a connection to the database";
-		 }
-		 else
-		 {
-			my @callNumBarcodes = @{getBarcodesWithnNoCallNum($dbHandler)};
-			
-			my @marcOutputRecords;
-			my $count=0;
-			my $matches=0;
-			my $file = MARC::File::XML->in($marcfile);
-			while ( my $marc = $file->next() ) 
-			{	
-				$count++;
-				my $shortnameexists=0;
-				if(1)#$matches<5)
-				{
-					my $hasspecial=0;
-					my @all = $marc->fields();
-					
-					my @updates = ();					
-					
-					foreach(@all)
-					{
-						my $field = $_;
-						
-						if($field->tag() eq '852')
-						{
-							if($field->subfield('p'))
-							{
-								my $p = $field->subfield('p');
-								foreach(@callNumBarcodes)
-								{
-									if($p eq $_)
-									{
-										if($field->subfield('h') && length($field->subfield('h'))>2)
-										{
-											$bcodout->addLine("\"$p\",\"".$field->subfield('h')."\"");
-											updateCallNumberInDB($p,$field->subfield('h'),$dbHandler,$log);
-										}
-									}
-								}
-							}
-							if(0) #Flagging bib if has special characters
-							{
-								my @allsubs = $_->subfields();
-								foreach(@allsubs)
-								{	
-									my $test = @{$_}[1];
-									if($test =~ m/[\x80-\x{FFFF}]/)
-									{
-										my $p = $field->subfield('p');
-										$matches++;
-										#$bcodout->addLine($field->as_formatted());
-										my $callNumDB = getCallNumberRow($p,$dbHandler);
-										if($callNumDB eq '"NO CALL NUMBER"')
-										{
-											if($field->subfield('h'))
-											{
-												$bcodout->addLine("\"$p\",\"".$field->subfield('h')."\"");
-												updateCallNumberInDB($p,$field->subfield('h'),$dbHandler,$log);
-											}
-											else
-											{
-												print $field->subfield('h')."\n";
-											}
-										}
-										$callnumout->addLine($callNumDB);
-									}
-									
-								}
-							}
-						}							
-					}
-				}
-				
-			}
-			print "Processed $count records\nMatched and updated $matches records\n";
-				
-		 }
-		 
-		
-		 
-		 $log->addLogLine(" ---------------- Script Ending ---------------- ");
+		#print "inserting user\n";
+		$query = "INSERT INTO actor.usr (profile, usrname, passwd, ident_type, first_given_name, family_name, home_ou) VALUES (E'$profile', E'$usr', E'$pass', E'$ident', E'$first', E'S$last', E'$org_unit_id')";
+		$result = $dbHandler->update($query);
 	}
 	else
 	{
-		print "Config file does not define 'logfile' and 'marcoutdir'\n";
+		#print "updating user\n";
+        my @row = @{@results[0]};
+        my $usrid = @row[0];
+        $query = "select * from actor.create_salt('main')";
+        my @results = @{$dbHandler->query($query)};
+        @row = @{@results[0]};
+        my $salt = @row[0];
+        $query = "select * from actor.set_passwd($usrid,'main',
+        md5(\$salt\$$salt\$salt\$||md5(\$pass\$$pass\$pass\$)),
+        \$\$$salt\$\$
+        )";
+        $result = $dbHandler->update($query);
+		$query = "UPDATE actor.usr SET home_ou=E'$org_unit_id',ident_type=E'$ident',profile=E'$profile',active='t',super_user='t',deleted='f' where id=$usrid";
+		$result = $dbHandler->update($query);
 	}
- }
- 
- sub getBarcodesWithnNoCallNum
- {
-	my $dbHandler = @_[0];
-	my $query="select DISTINCT barcode from asset.copy where call_number in(select id from asset.call_number where label='NO CALL NUMBER' AND owning_lib in(148,150))";
-	my @results = @{$dbHandler->query($query)};
-	my @ret;
-	my $ret;
-	foreach(@results)
+	if($result)
 	{
-		my $ro = $_;
-		my @row = @{$ro};
-		push @ret,@row[0];
-	}
-	return \@ret;
- }
- sub updateCallNumberInDB
- {
-	my $barcode = @_[0];
-	my $callNum = @_[1];
-	my $dbHandler = @_[2];
-	my $log = @_[3];
-	my $query = "UPDATE asset.call_number SET LABEL = E'$callNum' where id=(select call_number from asset.copy where barcode='$barcode');";
-	$log->addLine($query);
-	$dbHandler->update($query);
- }
- sub getCallNumberRow
- {
-	my $barcode = @_[0];
-	my $dbHandler = @_[1];
-	my $query = "select label from asset.call_number where id=(select call_number from asset.copy where barcode='$barcode')";
-	my @results = @{$dbHandler->query($query)};
-	my $ret;
-	foreach(@results)
-	{
-		my $ro = $_;
-		my @row = @{$ro};
-		foreach(@row)
+		$query = "select id from actor.workstation where upper(name) = upper('$workstation')";
+		my @results = @{$dbHandler->query($query)};
+		if($#results==-1)
 		{
-			$ret.="\"$_\",";
-		}
-		$ret=substr($ret,0,-1);
-		#$ret.="\n";
-	}
-	
-	return $ret;
- }
- 
- sub getXMLfromDB
- {
-	my $barcode = @_[0];
-	my $dbHandler = @_[1];
-	my $log = @_[2];
-	my $query = "select id,marc from biblio.record_entry where id in(select record from asset.call_number where id=(select call_number from asset.copy where barcode='$barcode'))";
-	#print $query."\n";
-	my @results = @{$dbHandler->query($query)};
-	my $dbID;
-	my $marcd;
-	#print $#results."\n";
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		$dbID = @row[0];
-		my $xml = @row[1];		
-		eval 
-		{
-			$marcd = MARC::Record->new_from_xml($xml);
-		};
-		if ($@) 
-		{
-			$log->addLine("could not parse $dbID: $@");
-			#elog("could not parse $dbID: $@\n");
-			import MARC::File::XML (BinaryEncoding => 'utf8');
-			print "could not parse $dbID: $@\n";
-		}
-		if(length($dbID)<2)
-		{	
-			print "HEY! $dbID - $barcode\n";
-		}
-		return ($dbID,$marcd);
-	}
-	
- }
- 
- sub replaceField
- {
-	my $field = @_[0];
-	my $marc = @_[1];
-	my $log = @_[2];
-	if(ref($field) eq "ARRAY")
-	{
-		my @fields = @{$field};
-		my $l = $#fields;
-		my $tag = @fields[0]->tag();
-		#print "New number: $l\n";
-		my @oldfields = $marc->field($tag);
-		$log->addLine(Dumper(@oldfields));
-		$log->addLine("Moving to:");
-		$log->addLine(Dumper(@fields));
-		$marc->delete_fields(@oldfields);
-		$marc->insert_fields_ordered( @fields );
-	}
-	else
-	{
-		my $title = $marc->field('245')->subfield('a');
-		my $tag = $field->tag();
-		if($field->is_control_field())
-		{
-			my $oldfield = $marc->field($tag);
-			if(1)#$oldfield !=~ m/[\x80-\xFF]/)
-			{
-				my @add=($field);
-				$marc->delete_field($oldfield);
-				$marc->insert_fields_ordered( @add );
-			}
-			
+		#print "inserting workstation\n";
+			$query = "INSERT INTO actor.workstation (name, owning_lib) VALUES (E'$workstation', E'$org_unit_id')";		
+			$result = $dbHandler->update($query);
 		}
 		else
 		{
-			my @allsubs = $field->subfields();
-			foreach(@allsubs)
-			{
-				my $subtag = @{$_}[0];
-				my $data = @{$_}[1];
-				#print "$tag Subtag: $subtag\n";
-				my @oldfields = $marc->field($tag);
-				if($#oldfields>1)
-				{
-					print "More than 1 $tag for $title\n";
-				}
-				if($marc->field($tag))
-				{
-					if($marc->field($tag)->subfield($subtag))
-					{
-						my $testorg = $marc->field($tag)->subfield($subtag);
-						#my $hasit = $testorg =~ m/[\x80-\xFFFF]/;
-						#print "ORG: $hasit\n";
-						if(1)#$testorg !=~ m/[\x80-\xFFFF]/  &&  $data =~ m/[\x80-\xFFFF]/ )
-						{
-							#print "Original did not have specials and current did\n";
-							my $oldfield = $marc->field($tag);
-							$log->addLine(Dumper($oldfield));
-							$marc->delete_field($oldfield);
-							#print(Dumper($oldfield));
-							$oldfield->delete_subfield(code => $subtag);
-							#print(Dumper($oldfield));
-							$oldfield->add_subfields( $subtag => $data );
-							#print(Dumper($oldfield));
-							$log->addLine("Moving to:\n".Dumper($oldfield));
-							my @add = ($oldfield);
-							$marc->insert_fields_ordered( @add );
-							#$log->addLine("Marc:\n".Dumper($marc));
-						}
-					}
-					else
-					{
-						my $oldfield=$marc->field($tag);
-						$marc->delete_field($oldfield);
-						$oldfield->delete_subfield(code => $subtag);
-						$oldfield->add_subfields($subtag => $data);
-						my @add = ($oldfield);
-						$marc->insert_fields_ordered( @add );				
-						
-					}
-				}
-				else
-				{
-					print "DB did not have $tag - so I added it\n";
-					my @add = ($field);
-					$marc->insert_fields_ordered( @add );
-				}
-			}
+		#print "updating workstation\n";
+			my @row = @{@results[0]};
+			$query = "UPDATE actor.workstation SET name=E'$workstation', owning_lib= E'$org_unit_id' WHERE ID=".@row[0];
+			$result = $dbHandler->update($query);
 		}
 	}
-	return $marc;
- }
- 
- sub makeXMLfromMARC
- {
-	my $marcd = @_[0];
-	my $outputxml = $marcd->as_xml();
-	$outputxml =~ s/\\/\\\\/g;
-	$outputxml =~ s/\'/\\\'/g;
-	$outputxml =~ s/\n//g;
-	$outputxml =~ s/\r//g;
-	return $outputxml;
- }
- 
+	#print "User: $usr\npass: $pass\nWorkstation: $workstation";
+	
+	my @ret = ($usr, $pass, $workstation, $result);
+	return \@ret;
+}
+
+ sub getDBconnects
+{
+
+    my $openilsfile = shift;
+    my $xml = new XML::Simple;
+    my $data = $xml->XMLin($openilsfile);
+    my %dbconf;
+    $dbconf{"dbhost"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{host};
+    $dbconf{"db"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{db};
+    $dbconf{"dbuser"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{user};
+    $dbconf{"dbpass"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{pw};
+    $dbconf{"port"}=$data->{default}->{apps}->{"open-ils.storage"}->{app_settings}->{databases}->{database}->{port};
+    ##print Dumper(\%dbconf);
+    return \%dbconf;
+}
+
  exit;
