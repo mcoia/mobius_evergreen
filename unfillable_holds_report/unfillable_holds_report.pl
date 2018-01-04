@@ -217,6 +217,7 @@ ahr.current_copy=ac.id and
 ahtc.hold=ahr.id and
 ahr.fulfillment_time is null and
 ahr.cancel_time is null and
+ahtc.cancel_time is null and
 ahr.expire_time is null and
 ahr.capture_time is not null and
 ahtc.dest_recv_time is null and

@@ -4,7 +4,7 @@
 # 
 
 use strict; use warnings;
-
+use lib qw(../);
 use OpenILS::Utils::TestUtils;
 use OpenILS::Utils::CStoreEditor qw/:funcs/;
 use OpenILS::Utils::Fieldmapper;
@@ -21,6 +21,9 @@ our $script;
 our %conf;
 our $dbHandler;
 our $log;
+
+# Delete the lock file
+system('rm /tmp/container_health_monitor-LOCK');
 
 my $xmlconf = "/openils/conf/opensrf.xml";
 my $configFile = shift;
@@ -47,7 +50,7 @@ if($conf)
         # setup workstation and login
         # -------------
         setupLogin();
-        
+        $|++;
         while(1)
         {
             # Begin basic testing
@@ -125,7 +128,7 @@ if($conf)
             my $difference = $afterProcess - $dt;
             my $format = DateTime::Format::Duration->new(pattern => '%M');
             my $duration =  $format->format_duration($difference);
-            print "It's been $duration minutes\n";
+            print "\rIt's been $duration minutes\n";
             # refresh login every 5 minutes
             if($duration > 5)
             {
@@ -221,7 +224,7 @@ sub createDBUser
 	if($#results==-1)
 	{
 		#print "inserting user\n";
-		$query = "INSERT INTO actor.usr (profile, usrname, passwd, ident_type, first_given_name, family_name, home_ou) VALUES (E'$profile', E'$usr', E'$pass', E'$ident', E'$first', E'S$last', E'$org_unit_id')";
+		$query = "INSERT INTO actor.usr (profile, usrname, passwd, ident_type, first_given_name, family_name, home_ou) VALUES (\$\$$profile\$\$, \$\$$usr\$\$, \$\$$pass\$\$, \$\$$ident\$\$, \$\$$first\$\$, \$\$S$last\$\$, \$\$$org_unit_id\$\$)";
 		$result = $dbHandler->update($query);
 	}
 	else
@@ -238,7 +241,7 @@ sub createDBUser
         \$\$$salt\$\$
         )";
         $result = $dbHandler->update($query);
-		$query = "UPDATE actor.usr SET home_ou=E'$org_unit_id',ident_type=E'$ident',profile=E'$profile',active='t',super_user='t',deleted='f' where id=$usrid";
+		$query = "UPDATE actor.usr SET home_ou=\$\$$org_unit_id\$\$,ident_type=\$\$$ident\$\$,profile=\$\$$profile\$\$,active='t',super_user='t',deleted='f' where id=$usrid";
 		$result = $dbHandler->update($query);
 	}
 	if($result)
@@ -248,14 +251,14 @@ sub createDBUser
 		if($#results==-1)
 		{
 		#print "inserting workstation\n";
-			$query = "INSERT INTO actor.workstation (name, owning_lib) VALUES (E'$workstation', E'$org_unit_id')";		
+			$query = "INSERT INTO actor.workstation (name, owning_lib) VALUES (\$\$$workstation\$\$, \$\$$org_unit_id\$\$)";
 			$result = $dbHandler->update($query);
 		}
 		else
 		{
 		#print "updating workstation\n";
 			my @row = @{@results[0]};
-			$query = "UPDATE actor.workstation SET name=E'$workstation', owning_lib= E'$org_unit_id' WHERE ID=".@row[0];
+			$query = "UPDATE actor.workstation SET name=\$\$$workstation\$\$, owning_lib= \$\$$org_unit_id\$\$ WHERE ID=".@row[0];
 			$result = $dbHandler->update($query);
 		}
 	}
