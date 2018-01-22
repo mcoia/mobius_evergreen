@@ -22,9 +22,6 @@ our %conf;
 our $dbHandler;
 our $log;
 
-# Delete the lock file
-system('rm /tmp/container_health_monitor-LOCK');
-
 my $xmlconf = "/openils/conf/opensrf.xml";
 my $configFile = shift;
 if(!$configFile)
