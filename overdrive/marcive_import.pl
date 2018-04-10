@@ -62,7 +62,7 @@ MIEV_CNS_ALL.XXX
 =cut
 
 
-use lib qw(../../);
+use lib qw(../);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -112,7 +112,7 @@ use MARC::Batch;
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
-		$log->truncFile("");
+		# $log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
 		my @reqs = ("server","login","password","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","eg_staged_bib_overlay_dir"); 
 		my $valid = 1;
@@ -156,8 +156,8 @@ use MARC::Batch;
 			
             # @files = ("/2017/06-Jun/test2.mrc");
 			# @files = @{dirtrav(\@files,"/mnt/evergreen/utilityscripts/electronic_imports/molib2go_import/archive/2017/FY2017\\ Weeded\\ Titles")};
-            @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc_records/marcive/archive/output/ftp/YSVMnWrp/test")};
-			# @files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$archivefolder,$log)};
+            # @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc_records/marcive/archive/output/ftp/YSVMnWrp/test")};
+			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$archivefolder,$log)};
             $log->addLine(Dumper(\@files));
 			if(@files[$#files]!=-1)
 			{
@@ -167,8 +167,8 @@ use MARC::Batch;
 				{
                     my $thisfilename = lc($files[$b]);
                     $log->addLogLine("Parsing: $archivefolder".$files[$b]);
-                    # my $file = MARC::File::USMARC->in("$archivefolder".$files[$b]);
-                    my $file = MARC::File::USMARC->in($files[$b]);
+                    my $file = MARC::File::USMARC->in("$archivefolder".$files[$b]);
+                    
                     
                 	if(! ($thisfilename =~ m/all/))
 					{					
@@ -676,7 +676,7 @@ sub decideToDownload
 	my $filename = @_[0];
 	$filename = lc($filename);
 	my $download = 1;
-	if( ( (lc($filename) =~ m/\.dat/g) || ( lc($filename) =~ m/\.csv/g) || ( lc($filename) =~ m/stat/g) ) )
+	if( ( (lc($filename) =~ m/\.dat/g) || ( lc($filename) =~ m/\.csv/g) || ( lc($filename) =~ m/stat/g) || ( lc($filename) =~ m/related/g) ) )
 	{
 		return 0;
 	}

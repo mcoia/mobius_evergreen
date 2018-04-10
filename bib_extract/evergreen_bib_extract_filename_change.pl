@@ -153,7 +153,7 @@
 						my $fdate = $dt->ymd('');   # Retrieves date as a string in 'yyyymmdd' format                        
                         $fdate = substr($fdate,4); # Chop off the preceeding year
                         
-                        my $outputMarcFile = $mobUtil->chooseNewFileName($conf->{"marcoutdir"},$fileNamePrefix.$fdate,"001");
+                        my $outputMarcFile = $mobUtil->chooseNewFileName($conf->{"marcoutdir"},$fileNamePrefix.$fdate,"BIB");
 												
 						if($outputMarcFile ne "0")
 						{
