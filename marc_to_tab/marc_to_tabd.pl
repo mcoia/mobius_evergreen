@@ -48,7 +48,6 @@
 			my %fieldcount;
 			foreach(@fields)
 			{
-			@marcOutput=();
 				my $field = $_;
 				my $tag = $field->tag();
 				# my $append = 1;
@@ -95,6 +94,7 @@
 					foreach(@subfields)
 					{
 						my @b = @{$_};
+						@b[0] = lc(@b[0]);
 						my $append = 1;
 						while($subcount{$tag.@b[0]."_".$append})
 						{
@@ -130,6 +130,7 @@
 				
 			}
 			push(@allOutCSV,[@marcOutput]);
+			@marcOutput=();
 			
 		}
 		my $l = new Loghandler($conf->{"csvout"});
