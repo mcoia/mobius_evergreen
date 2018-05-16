@@ -16,6 +16,8 @@ our $schema;
 our $mobUtil = new Mobiusutil();
 our $log;
 our $dbHandler;
+our $drop;
+our $primarykey;
 our @columns;
 our @allRows;
 
@@ -25,7 +27,9 @@ GetOptions (
 "xmlconfig=s" => \$xmlconf,
 "schema=s" => \$schema,
 "xmlfile=s" => \$xmlfile,
-"tablename=s" => \$tablename
+"tablename=s" => \$tablename,
+"drop" => \$drop,
+"primarykey" => \$primarykey
 )
 or die("Error in command line arguments\nYou can specify
 --logfile configfilename (required)
@@ -33,6 +37,8 @@ or die("Error in command line arguments\nYou can specify
 --xmlfile  pathtoinputxmlfile.xml
 --tablename name of the table to edit in schema
 --schema (eg. m_slmpl)
+--drop (drop table before insert)
+--primarykey (create id column)
 \n");
 
 if(! -e $xmlconf)
@@ -72,15 +78,16 @@ if(!$schema)
 	
 	#drop the table
 	my $query = "DROP TABLE IF EXISTS $schema.$tablename";
-	$log->addLine($query);
-	$dbHandler->update($query);
+	$log->addLine($query) if $drop;
+	$dbHandler->update($query) if $drop;
 	
 	#create the table
 	$query = "CREATE TABLE $schema.$tablename (";
+    $query.="id serial primary key," if $primarykey;
 	$query.=$_." TEXT," for @columns;
 	$query=substr($query,0,-1).")";
-	$log->addLine($query);
-	$dbHandler->update($query);
+	$log->addLine($query) if $drop;
+	$dbHandler->update($query) if $drop;
 	
 	
 	#insert the data
