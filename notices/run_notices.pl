@@ -154,10 +154,12 @@ if($conf)
 						$tempfofile =~s/&/_/g;
 						$finalpdffile =~s/&/_/g;
 						$fopstandardoutput=~s/&/_/g;
+						# gotta remove the parentheses characters when working on the bash prompt
 						$tempxmlfile =~s/\)/_/g;
 						$tempfofile =~s/\)/_/g;
 						$finalpdffile =~s/\)/_/g;
 						$fopstandardoutput=~s/\)/_/g;
+						$tempxmlfile =~s/\(/_/g;
 						$tempfofile =~s/\(/_/g;
 						$finalpdffile =~s/\(/_/g;
 						$fopstandardoutput=~s/\(/_/g;
