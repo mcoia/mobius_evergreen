@@ -446,7 +446,8 @@ package evergreenScraper;
 							if((scalar @recovers) == 0)
 							{
 								#print "Sending off for range....\n";
-								$thisIncrement = calcDBRange($self,$thisOffset,$chunkGoal,$dbHandler,$tselects);								
+                                $thisIncrement = $thisOffset + $range if (!$zeroAdded && $range > 0);
+								$thisIncrement = calcDBRange($self,$thisOffset,$chunkGoal,$dbHandler,$tselects) if ($zeroAdded || $range == 0);
 								#print "Got range: $thisIncrement\n";
 							}
 							else
