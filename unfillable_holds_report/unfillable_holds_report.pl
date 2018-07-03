@@ -142,6 +142,7 @@ sub reportResults
 	my $metaholddeletes='';
     my $transittimes='';
     my $titleholdswithonlypartitems='';
+    my $itemswithmediocrestatus='';
 	my @attachments=();
 	my $ret;
 	my @returns;
@@ -401,6 +402,49 @@ WARNING: These holds have been removed from the database.
 		push(@attachments,$baseTemp."Deleted_broken_metarecord_holds.csv");
 	}
  
+    my $query = "
+select ac.barcode,aou.name from
+asset.copy ac,
+actor.org_unit aou
+where
+not ac.deleted and
+not ac.mint_condition and
+ac.circ_lib=aou.id";
+$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line = @row[0];
+		$line = $mobUtil->insertDataIntoColumn(" ".$line,@row[1],21);
+		$itemswithmediocrestatus.="$line\r\n";
+		$count++;
+		$log->addLine($query.@row[0]);
+	}
+	if($count>0)
+	{
+        # FIX THE COPIES
+        my @values = ();
+        $query = "UPDATE ASSET.COPY SET MINT_CONDITION='t' WHERE NOT DELETED AND NOT MINT_CONDITION";
+        $dbHandler->updateWithParameters($query,\@values);
+        
+		my $headerForEmail = "Barcode";
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," Circulating Library",21);
+		
+		$itemswithmediocrestatus = $headerForEmail."\r\n$itemswithmediocrestatus";
+		$itemswithmediocrestatus=
+"--- Copies with quality of mediocre ---
+WARNING: These copies have been updated to have a quality of \"Good\".
+		\r\nTotal: $count
+\r\n$itemswithmediocrestatus\r\n\r\n\r\n";
+		$itemswithmediocrestatus = truncateOutput($itemswithmediocrestatus,7000);
+		my @header = ("Barcode","Circ Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Items_With_Mediocre_Status.csv");
+		push(@attachments,$baseTemp."Items_With_Mediocre_Status.csv");
+	}
 
 
 
@@ -550,7 +594,7 @@ $log->addLine($query);
 
 
 
-	$ret.=$unfills.$longtransit.$partholddeletes.$metaholddeletes.$transittimes.$titleholdswithonlypartitems."\r\n\r\nPlease see attached spreadsheets for full details";
+	$ret.=$unfills.$longtransit.$partholddeletes.$metaholddeletes.$transittimes.$titleholdswithonlypartitems.$itemswithmediocrestatus."\r\n\r\nPlease see attached spreadsheets for full details";
 	@returns = ($ret,\@attachments);
 	my @ret = ();
 	return \@returns;
