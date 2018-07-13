@@ -20,9 +20,9 @@ use XML::Simple;
 use Unicode::Normalize;
 use Getopt::Long;
 
-	my $xmlconf = "/openils/conf/opensrf.xml";
-	our $log;
-	our $dbHandler;
+    my $xmlconf = "/openils/conf/opensrf.xml";
+    our $log;
+    our $dbHandler;
     our $inputFiles;
     our $primarykey;
     our $schema;
