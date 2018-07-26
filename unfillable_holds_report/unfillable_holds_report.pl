@@ -143,6 +143,7 @@ sub reportResults
     my $transittimes='';
     my $titleholdswithonlypartitems='';
     my $itemswithmediocrestatus='';
+    my $unusedmagazineparts='';
 	my @attachments=();
 	my $ret;
 	my @returns;
@@ -448,6 +449,84 @@ WARNING: These copies have been updated to have a quality of \"Good\".
 
 
 
+    my $query = "
+select 
+bmp.id,bmp.record,bmp.label,left(string_agg(mtfe.value,\$\$, \$\$ order by mtfe.value),30)
+from
+biblio.record_entry bre,
+biblio.monograph_part bmp,
+metabib.record_attr_flat mraf,
+metabib.title_field_entry mtfe
+where
+mtfe.source=bre.id and
+bre.id=bmp.record and
+mraf.id=bre.id and
+mraf.attr=\$\$icon_format\$\$ and
+mraf.value~\$\$serial\$\$ and
+not bmp.deleted and
+bmp.id not in(select part from asset.copy_part_map where target_copy in(select id from asset.copy where not deleted))
+group by 1,2,3
+order by 2
+
+";
+$log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	my $count=0;
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		my $line = @row[0];
+		$line = $mobUtil->insertDataIntoColumn($line,@row[1],11);
+		$line = $mobUtil->insertDataIntoColumn($line,@row[2],23);
+		$line = $mobUtil->insertDataIntoColumn($line," ".@row[3],42);
+		
+		$unusedmagazineparts.="$line\r\n";
+		$count++;
+		$log->addLine($query.@row[0]);
+	}
+	if($count>0)
+	{
+        # DELETE THE PARTS
+        my @values = ();
+        $query = "
+        delete from biblio.monograph_part where id in
+        (
+        select 
+        bmp.id
+        from
+        biblio.monograph_part bmp,
+        metabib.record_attr_flat mraf
+        where
+        mraf.id=bmp.record and
+        mraf.attr=\$\$icon_format\$\$ and
+        mraf.value~\$\$serial\$\$ and
+        not bmp.deleted and
+        bmp.id not in(select part from asset.copy_part_map where target_copy in(select id from asset.copy where not deleted))
+           )";
+        $dbHandler->updateWithParameters($query,\@values);
+        
+		my $headerForEmail = "Part ID";
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"BIB ID",11);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail,"Part Name",23);
+		$headerForEmail = $mobUtil->insertDataIntoColumn($headerForEmail," BIB Title",42);
+        
+		$unusedmagazineparts = $headerForEmail."\r\n$unusedmagazineparts";
+		$unusedmagazineparts=
+"--- Unused Magazine Parts ---
+WARNING: These magazine parts have been removed from the system.
+		\r\nTotal: $count
+\r\n$unusedmagazineparts\r\n\r\n\r\n";
+		$unusedmagazineparts = truncateOutput($unusedmagazineparts,2000);
+		my @header = ("Part ID","BIB ID","Part Name","BIB Title");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."Unused_Magazine_Parts.csv");
+		push(@attachments,$baseTemp."Unused_Magazine_Parts.csv");
+	}
+
+
+
+
 	my $query="
 select
 aou_send.name,
@@ -594,7 +673,7 @@ $log->addLine($query);
 
 
 
-	$ret.=$unfills.$longtransit.$partholddeletes.$metaholddeletes.$transittimes.$titleholdswithonlypartitems.$itemswithmediocrestatus."\r\n\r\nPlease see attached spreadsheets for full details";
+	$ret.=$unfills.$longtransit.$partholddeletes.$metaholddeletes.$transittimes.$titleholdswithonlypartitems.$unusedmagazineparts.$itemswithmediocrestatus."\r\n\r\nPlease see attached spreadsheets for full details";
 	@returns = ($ret,\@attachments);
 	my @ret = ();
 	return \@returns;
