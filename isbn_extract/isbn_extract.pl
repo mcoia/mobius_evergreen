@@ -1,9 +1,5 @@
 #!/usr/bin/perl
 use lib qw(../);
-use MARC::Record;
-use MARC::File;
-use MARC::File::XML (BinaryEncoding => 'utf8');
-use File::Path qw(make_path remove_tree);
 use strict; 
 use Loghandler;
 use Mobiusutil;
@@ -13,14 +9,8 @@ use email;
 use DateTime;
 use utf8;
 use Encode;
-use DateTime;
-use LWP::Simple;
-use OpenILS::Application::AppUtils;
-use DateTime::Format::Duration;
-use Digest::SHA1;
 use XML::Simple;
-use Unicode::Normalize;
-
+use DateTime::Format::Duration;
 
 
 my $configFile = @ARGV[0];
@@ -81,9 +71,15 @@ if(! -e $xmlconf)
 		}
 		if($valid)
 		{	
+            $log->addLogLine("Valid Config");
 			my %dbconf = %{getDBconnects($xmlconf)};
+            $log->addLogLine("got XML db connections");
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
-			
+            
+            $log->addLogLine("Getting Max ID");
+			my $maxID = getMaxID();            
+            $log->addLogLine("Max ID = $maxID");
+            
 			$baseTemp = $conf{"tempdir"};
 			$baseTemp =~ s/\/$//;
 			$baseTemp.='/';
@@ -92,19 +88,25 @@ if(! -e $xmlconf)
 			my $subject = $mobUtil->trim($conf{"emailsubjectline"});
 			
 			my $displayname = $mobUtil->trim($conf{"displayname"});
-			my @isbns = @{getList($libraryname)};
-			my $file = $mobUtil->chooseNewFileName($baseTemp,$displayname."_ISBN_extract_".$fdate."_","csv");
-			my $output='';
-			my $count = 0;
-			foreach(@isbns)
-			{
-				my $row = $_;
-				my @row = @{$row};
-				$output.=@row[0]."\n";
-				$count++;
-			}
-			my $outputFile = new Loghandler($file);
-			$outputFile->truncFile($output);
+            
+            my $limit = $conf{'chunksize'} || 10000;
+            my $offset = 1;
+			my @isbns = ('data');
+            my $file = $mobUtil->chooseNewFileName($baseTemp,$displayname."_ISBN_extract_".$fdate."_","csv");
+            
+            my @header=("isbn","itemid","bibrecordcallno","bibrecordid","title");
+            my @rows = ([@header]);
+            writeData($file,\@rows,1);
+            my $count = 0;
+            while( $offset < $maxID )
+            {
+                @isbns = @{getList($libraryname,$limit,$offset)};
+                $count+=(scalar @isbns);
+                writeData($file,\@isbns);
+                $offset+=$limit;
+            }
+			$log->addLogLine("Received $count rows from database - writing to $file");
+            $log->addLogLine("finished $file");
 			my @files = ($file);
 			#my @files = ("/mnt/evergreen/tmp/2015-04-16_.csv");
 			
@@ -132,11 +134,47 @@ if(! -e $xmlconf)
 	}
 }
 
+sub writeData
+{
+    my $file = @_[0];
+    my @isbns = @{@_[1]};
+    my $overwriteFile = @_[2] || 0;
+    my $outputFile = new Loghandler($file);
+    my $output = '';
+    foreach(@isbns)
+    {
+        my $row = $_;
+        my @row = @{$row};
+        $output.=join("\t",@row);
+        $output.="\n";        
+    }
+    $output = substr($output,0,-1) if $overwriteFile;
+    $outputFile->appendLine($output) if !$overwriteFile;
+    $outputFile->truncFile($output) if $overwriteFile;
+    undef $output;
+    undef $outputFile;
+    my $lines = scalar @isbns;
+    $log->addLogLine("wrote $lines lines to $file");
+}
+
+
 sub getList
 {
 	my $libname = lc(@_[0]);
+    my $limit = @_[1];
+    my $offset = @_[2];
+    
 	my $query = "
-	select distinct isbn from
+select isbn,
+ac.barcode,
+concat(
+    (case when acn.prefix > -1 then (select label||\$\$ \$\$ from asset.call_number_prefix where id=acn.prefix) else \$\$\$\$ end),
+    acn.label,
+    (case when acn.suffix > -1 then (select label||\$\$ \$\$ from asset.call_number_prefix where id=acn.suffix) else \$\$\$\$ end)
+),
+a.record,
+string_agg(mtfe.value,\$\$ / \$\$ order by mtfe.value)
+from
 (
 select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value from metabib.real_full_rec where 
 (
@@ -159,25 +197,47 @@ label=\$\$##URI##\$\$
 and
 tag=\$\$020\$\$
 and
-record not in(select id from biblio.record_entry where deleted)
+record 
+in(select id from biblio.record_entry where not deleted order by id limit $limit offset $offset)
 ) as a
-where length(isbn) in(10,13)
+left join metabib.title_field_entry mtfe on a.record=mtfe.source
+left join asset.call_number acn on(mtfe.source=acn.record and not acn.deleted)
+left join asset.copy ac on (ac.call_number=acn.id and not ac.deleted)
+where
+length(a.isbn) in(10,13)
+group by 1,2,3,4
 order by 1";
 
 	if($fullDB)
 	{
 		$query = "
-	select distinct isbn from
+select isbn,
+ac.barcode,
+concat(
+    (case when acn.prefix > -1 then (select label||\$\$ \$\$ from asset.call_number_prefix where id=acn.prefix) else \$\$\$\$ end),
+    acn.label,
+    (case when acn.suffix > -1 then (select label||\$\$ \$\$ from asset.call_number_prefix where id=acn.suffix) else \$\$\$\$ end)
+),
+a.record,
+string_agg(mtfe.value,\$\$ / \$\$ order by mtfe.value)
+from
 (
 select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value from metabib.real_full_rec where 
 (
 record in
 (
-select id from biblio.record_entry where not deleted
+select id from biblio.record_entry where not deleted order by id limit $limit offset $offset
 )
+and
+tag=\$\$020\$\$
 )
 ) as a
-where length(isbn) in(10,13)
+left join metabib.title_field_entry mtfe on a.record=mtfe.source
+left join asset.call_number acn on(mtfe.source=acn.record and not acn.deleted)
+left join asset.copy ac on (ac.call_number=acn.id and not ac.deleted)
+where
+length(a.isbn) in(10,13)
+group by 1,2,3,4
 order by 1";
 	}
 	$log->addLine($query);
@@ -185,6 +245,13 @@ order by 1";
 	
 	return \@results;
 	
+}
+
+sub getMaxID
+{
+    my @results = @{$dbHandler->query("select max(id) from biblio.record_entry")};
+    my @row = @{@results[0]};
+    return @row[0];
 }
 
 sub getDBconnects
