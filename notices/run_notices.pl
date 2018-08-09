@@ -96,7 +96,9 @@ if($conf)
 			(SELECT SHORTNAME FROM ACTOR.ORG_UNIT WHERE ID=ATED.OWNER),DELAY
 			FROM ACTION_TRIGGER.EVENT_DEFINITION ATED
 			WHERE			
-			ATED.GRANULARITY=\$\$".$conf{"granularity_name"}."\$\$";
+			ATED.GRANULARITY=\$\$".$conf{"granularity_name"}."\$\$
+            OR
+            (ATED.REACTOR=\$\$ProcessTemplate\$\$ AND ATED.HOOK=\$\$lost.auto\$\$ AND ATED.GRANULARITY=\$\$long_overdue_to_lost\$\$)";
 			$log->addLine($query);
 			my $resetDaysRepeat = $daysrepeat;
 			my @results = @{$dbHandler->query($query)};	
