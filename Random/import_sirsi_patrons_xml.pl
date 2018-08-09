@@ -77,7 +77,6 @@ use Getopt::Long;
 	my %dbconf = %{getDBconnects($xmlconf)};
 	$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
     
-    print Dumper(\@{$inputFiles});
     my $firstTimeThrough = 1;
     
     foreach(@{$inputFiles})
@@ -93,8 +92,20 @@ use Getopt::Long;
             my @users = ();
             my %columns = ();
             while ( (my $user, my $userdata) = each(%{$data}))
-            {
-                if(ref($userdata) eq 'ARRAY')
+            {  
+                if(ref($userdata) eq 'HASH')     # in case the chunk size is 1            
+                {
+                    my %s;
+                    my $all = xmlLoop($userdata, "", \%s);
+                    # $log->addLine("Done Looping");
+                    # $log->addLine(Dumper($all));
+                    while ((my $internal, my $value ) = each(%{$all}))
+                    {
+                        $columns{$internal} = 0;
+                    }
+                    push(@users, $all);
+                }
+                elsif(ref($userdata) eq 'ARRAY')
                 {
                     foreach(@{$userdata})
                     {
@@ -115,7 +126,7 @@ use Getopt::Long;
                     $log->addLine(Dumper($userdata));
                 }
             }
-            #$log->addLine( Dumper(@users) );
+            # $log->addLine("USER DATA DUMP: ". Dumper(@users) );
             
             my %loopvars = 
             (
@@ -279,7 +290,7 @@ use Getopt::Long;
                                 my $data = $attr{$_};
                                 # data that ends with a $ will mess up the query. So we need to put a space character at the end				if(
                                 $data =~ s/\$$/\$ /g;
-                                $query.="\$\$$data\$\$,";
+                                $query.="\$datainsert\$$data\$datainsert\$,";
                             }
                             else
                             {
@@ -460,7 +471,7 @@ sub getChunk
 # ";
     close($info);
     my $finalret = $xmlheader.$ret;
-    $finalret.="</report>" if !($finalret =~ m/<\/report>/); # only append the closing tag when it's not already there from the source file
+    $finalret.="</report>\n" if !($finalret =~ m/<\/report>/); # only append the closing tag when it's not already there from the source file
     return 0 if $starting > $userCount;
     return $finalret;
 }
