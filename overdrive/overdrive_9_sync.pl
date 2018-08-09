@@ -306,39 +306,53 @@ sub removeOldCallNumberURI
 {
 	my $bibid = @_[0];
 	my $dbHandler = @_[1];
+    
+    my $uriids = '';
+    my $query = "select uri from asset.uri_call_number_map WHERE call_number in 
+	(
+		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
+	)";
+updateJob("Processing","$query");
+    my @results = @{$dbHandler->query($query)};
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $uriids.=@row[0].",";
+    }
+    $uriids = substr($uriids,0,-1);
+    
 	my $query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
 		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
 	)
 	";
-
+updateJob("Processing","$query");
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
 		SELECT id from asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	)";
-
+updateJob("Processing","$query");
 	$dbHandler->update($query);
+    
+    if(length($uriids) > 0)
+    {
+        $query = "DELETE FROM asset.uri WHERE id in ($uriids)";
+    updateJob("Processing","$query");
+        $dbHandler->update($query);
+    }
 	$query = "
-	DELETE FROM asset.uri WHERE id not in
-	(
-		SELECT uri FROM asset.uri_call_number_map
-	)";
-
+	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
+	";
+updateJob("Processing","$query");	
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
-
+updateJob("Processing","$query");
 	$dbHandler->update($query);
-	$query = "
-	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
-	";
-
-	$dbHandler->update($query);
-
 }
 
 sub convertMARCtoXML
