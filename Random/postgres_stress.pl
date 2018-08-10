@@ -10,6 +10,7 @@ use Getopt::Long;
 use DBhandler;
 use REST::Client;
 use bignum ( p => -10 );
+use Cwd;
 
 
 our $wordnikapikey='';
@@ -17,21 +18,47 @@ our $mobUtil = new Mobiusutil();
 our $log;
 our $dbHandler;
 our $dt;
+our $appStress = 0;
 
 our @columns;
 our @allRows;
 
 my $xmlconf = "/openils/conf/opensrf.xml";
+my $searchType;
+my $OPACURL;
+my $thread;
+my $chunk;
+my $thisScriptName = $0;
+my $randomWordsNum = 15;
+my $cwd = getcwd();
+
 GetOptions (
 "logfile=s" => \$logFile,
 "xmlconfig=s" => \$xmlconf,
-"wordnikapikey=s" => \$wordnikapikey
+"wordnikapikey=s" => \$wordnikapikey,
+"searchtype=s" => \$searchType,
+"OPACURL=s" => \$OPACURL,
+"thread=s" => \$thread,
+"chunksize=i" => \$chunk,
+"appstress=f" => \$appStress,
+"words=i" => \$randomWordsNum
 )
 or die("Error in command line arguments\nYou can specify
 --logfile configfilename (required)
 --xmlconfig pathtoevergreenopensrf.xml (default /opensrf/conf/opensrf.xml)
 --wordnikapikey key
+--searchtype keyword/title/etc
+--OPACURL missourievergreen.org (a value here will cause the script to hit http instead of local postgres query)
+--chunksize 5 (how many concurrent sessions to stress with)
+--appstress (include this flag if you only want to stress the application bricks)
+--words (how many random words to use - might want to use a number higher than your chunk size, default is 15)
 \n");
+
+if($thread)
+{
+    searchOPAC($thread, $searchType, $OPACURL);
+    exit;
+}
 
 if(! -e $xmlconf)
 {
@@ -52,24 +79,40 @@ if(!$logFile)
 	
 	$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
 	$log->addLogLine("gathering up 25 words at 4 letters each");
-	my @short = @{getWords(1200,4)};
+	my @short = @{getWords($randomWordsNum,4)};
 	$log->addLogLine("gathering up 25 words at 7 letters each");
-	my @long = @{getWords(1200,7)};
+	my @long = @{getWords($randomWordsNum,7)};
 	$log->addLine(Dumper(\@short));
 	$log->addLine(Dumper(\@long));
 	
 	my @shortwordstime;
-	foreach(@short)
-	{
-		clockStart();
-		searchQuery($_);
-		my %duration = %{clockEnd()};
-		my $seconds = $duration{seconds} + ( $duration{minutes} * 60 );
-		my $nanoseconds = $duration{nanoseconds};
-		$seconds+= ($nanoseconds / 1000000000); #1 billion nanoseconds in 1 second
-		# print $seconds."\n";
-		push(@shortwordstime, $seconds);
-	}
+    my $loops = 1;
+    
+    while($loops > 0)
+    {
+        foreach(@short)
+        {
+            my $numberOfNonMeProcesses = scalar grep /$thisScriptName/, (split /\n/, `ps -aef`);
+            while ($numberOfNonMeProcesses > $chunk)
+            {
+                sleep 1;
+                $numberOfNonMeProcesses = scalar grep /$thisScriptName/, (split /\n/, `ps -aef`);
+            }
+            clockStart();
+            searchQuery($_, $searchType) if !$OPACURL;
+            my $cmd = "cd $cwd && ./postgres_stress.pl --logfile $logFile --wordnikapikey $wordnikapikey --searchtype $searchType --OPACURL $OPACURL --chunk $chunk";
+            $cmd.=" --appstress" if $appStress;
+            $cmd.=" --thread $_ &";
+            system($cmd)  if $OPACURL;
+            my %duration = %{clockEnd()};
+            my $seconds = $duration{seconds} + ( $duration{minutes} * 60 );
+            my $nanoseconds = $duration{nanoseconds};
+            $seconds+= ($nanoseconds / 1000000000); #1 billion nanoseconds in 1 second
+            # print $seconds."\n";
+            push(@shortwordstime, $seconds);
+        }
+        $loops-- if !$appStress;
+    }
 	$log->addLine(Dumper(\@shortwordstime));
 	my $average=0;
 	foreach(@shortwordstime)
@@ -80,17 +123,31 @@ if(!$logFile)
 	$log->addLine("short average: $average");
 	
 	my @longwordstime;
-	foreach(@long)
-	{
-		clockStart();
-		searchQuery($_);
-		my %duration = %{clockEnd()};
-		my $seconds = $duration{seconds} + ( $duration{minutes} * 60 );
-		my $nanoseconds = $duration{nanoseconds};
-		$seconds+= ($nanoseconds / 1000000000); #1 billion nanoseconds in 1 second
-		# print $seconds."\n";
-		push(@longwordstime, $seconds);
-	}
+    while($loops > 0)
+    {
+        foreach(@long)
+        {
+            my $numberOfNonMeProcesses = scalar grep /$thisScriptName/, (split /\n/, `ps -aef`);
+            while ($numberOfNonMeProcesses > $chunk)
+            {
+                sleep 1;
+                $numberOfNonMeProcesses = scalar grep /$thisScriptName/, (split /\n/, `ps -aef`);
+            }
+            clockStart();
+            searchQuery($_, $searchType) if length $OPACURL < 2;
+            my $cmd = "cd $cwd && ./postgres_stress.pl --logfile $logFile --wordnikapikey $wordnikapikey --searchtype $searchType --OPACURL $OPACURL";
+            $cmd.=" --appstress" if $appStress;
+            $cmd.=" --thread $_ &";
+            system($cmd)  if $OPACURL;
+            my %duration = %{clockEnd()};
+            my $seconds = $duration{seconds} + ( $duration{minutes} * 60 );
+            my $nanoseconds = $duration{nanoseconds};
+            $seconds+= ($nanoseconds / 1000000000); #1 billion nanoseconds in 1 second
+            # print $seconds."\n";
+            push(@longwordstime, $seconds);
+        }
+        $loops-- if !$appStress;
+    }
 	$log->addLine(Dumper(\@longwordstime));
 	my $average=0;
 	foreach(@longwordstime)
@@ -102,19 +159,25 @@ if(!$logFile)
 	
 	
  
- 
- #print $client->responseContent(),"\n";
- # print $client->responseHeader('ResponseHeader'),"\n";
- #$client->request('GET','http://api.wordnik.com:80/v4/words.json/randomWords','request body content', \%params);
- #print $client->responseContent(),"\n";
- #print $client->responseHeader('ResponseHeader'),"\n";
-	
 	$log->addLogLine(" ---------------- Script End ---------------- ");
 
-	
+    
+sub searchOPAC
+{
+    use pQuery;
+    my $word = shift;
+    my $searchType = shift;
+    my $OPACURL = shift;
+    my $finalURL = "http://".$OPACURL."/eg/opac/results?query=$word&qtype=".$searchType."&locg=1";
+    $finalURL = "http://".$OPACURL."/eg/opac" if $appStress; # let's just stress test the app server
+    #print "hitting\n$finalURL\n";
+    pQuery($finalURL)->find("a")->each(sub { });
+}
+
 sub searchQuery
 {
 	my $word = shift;
+    my $type = shift;
 	my $query = "
 	SELECT  *
 	          FROM  search.query_parser_fts(
@@ -137,7 +200,7 @@ sub searchQuery
 	        
 	        LEFT JOIN (
 	          SELECT fe.*, fe_weight.weight, x9ffe220_keyword_xq.tsq, x9ffe220_keyword_xq.tsq_rank /* search */
-	            FROM  metabib.keyword_field_entry AS fe
+	            FROM  metabib.".$type."_field_entry AS fe
 	              JOIN config.metabib_field AS fe_weight ON (fe_weight.id = fe.field)
 	            JOIN x9ffe220_keyword_xq ON (fe.index_vector @@ x9ffe220_keyword_xq.tsq)
 	        ) AS x9ffe220_keyword ON (m.source = x9ffe220_keyword.source)
