@@ -141,8 +141,11 @@ if($conf)
             }
             
             # Sleep for awhile and let's do it again
+            # Make sure that more than 1 app server isn't running these exact checks at the exact time
+            # introduce some randomness
             # -------------
-            sleep $conf{'sleep_interval'};
+            my $random_number = int(rand(50));
+            sleep ( $conf{'sleep_interval'} + $random_number );
         } # end while loop
 
          
@@ -178,6 +181,8 @@ sub setupLogin
         
     # Setup the vars for everyone
     # -------------
+    undef $script if $script;
+    $e->reset() if $e;
     $script = OpenILS::Utils::TestUtils->new();
     $script->bootstrap;
     $e = new_editor(xact => 1);
