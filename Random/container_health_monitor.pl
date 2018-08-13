@@ -14,6 +14,7 @@ use Mobiusutil;
 use Data::Dumper;
 use XML::Simple;
 use DBhandler;
+use File::Grep qw(fgrep);
 
 
 our $e;
@@ -35,7 +36,7 @@ if(!$configFile)
 
 my $mobUtil = new Mobiusutil(); 
 my $conf = $mobUtil->readConfFile($configFile);
- 
+
 if($conf)
 {
     %conf = %{$conf};
@@ -43,6 +44,8 @@ if($conf)
     {
         $log = new Loghandler($conf->{"logfile"});
         $log->addLogLine(" ---------------- Script Starting ---------------- ");
+        my @grepPhrases = () if !$conf{'osrfsys_log_grep'};
+        @grepPhrases = split(/,/,$conf{'osrfsys_log_grep'}) if $conf{'osrfsys_log_grep'};
 
        
         # Setup timestamp
@@ -115,6 +118,23 @@ if($conf)
             }
             
             $log->addLogLine("Got bib ". $destbib->id);
+            
+            # Grep the logs for key phrases (in the config file)
+            # -------------
+            if($conf{'osrfsys_log_path'})
+            {
+                foreach(@grepPhrases)
+                {
+                    my $thisPhrase = $_;
+                    my $found = 0;
+                    $thisPhrase =~ s/^\s+|\s+$//g;
+                    # print "grepping ".$conf{'osrfsys_log_path'}." for $thisPhrase\n";                    
+                    $found = 1 if ( fgrep { /$thisPhrase/ } $conf{'osrfsys_log_path'} );
+                    print "exiting due to presence of $thisPhrase in ".$conf{'osrfsys_log_path'}.".\n"  if( $found );
+                    exit 1 if( $found );
+                    undef $found;
+                }
+            }
             
             # Clean memory            
             # -------------
