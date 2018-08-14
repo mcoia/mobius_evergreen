@@ -52,40 +52,11 @@ if($conf)
         my $dt = DateTime->now(time_zone => "local");
         # setup workstation and login
         # -------------
-        setupLogin();
+        setupLogin( 1 ); # 1 = Call the create user function
         $|++;
         while(1)
         {
-            # Begin basic testing
-            # Find a copy that has parts
-            # -------------
-            my $copy = $e->search_asset_copy([
-                { deleted => 'f' },
-                {
-                    join => {
-                        acpm => {
-                            type => 'inner',
-                            join => {
-                                bmp => { type => 'left' },
-                            }
-                        }
-                    },
-                    flesh => 1,
-                    flesh_fields => { acp => ['parts']},
-                    limit => 1
-                }
-                ])->[0];
-                
-            my $parts = $copy->parts;
-            # Make sure we have part vals
-            # -------------
-            if(scalar @$parts < 1 )
-            {
-                $log->addLogLine("Test copy ". $copy->id . " does not have parts!\n Test is officially fail");
-                exit 1;
-            }
-            $log->addLogLine("Got copy ". $copy->id);
-            
+            # Begin basic testing interacting with storage
             # Find a bib without parts
             # -------------
             my $sdestbib = $e->search_biblio_record_entry([
@@ -101,8 +72,8 @@ if($conf)
             { limit => 3 }
 
             ]);
-            # Making the asumption that Evergreen is functioning if these tests work
-            # -------------
+           
+           
             my $destbib;
             foreach(@{$sdestbib}) {
                 if ($_->id > -1) {
@@ -118,6 +89,28 @@ if($conf)
             }
             
             $log->addLogLine("Got bib ". $destbib->id);
+            
+            # Load the holds shelf so that we interact with OpenSRF
+            # -------------
+            
+            # First, we need an OU ID number, best to get a branch instead of a system or consortium
+            my @test_ou = @{$e->search_actor_org_unit([
+            { 
+                ou_type => 3,
+                opac_visible => 't'
+            }
+            ])};
+            # @test_ou = @{@test_ou[0]};
+            print "Max array ".$#test_ou."\n";
+            my $random_number = int(rand($#test_ou));
+            print "Random - $random_number\n";            
+            my $test_ou = @test_ou[$random_number];
+            
+            print $test_ou->id." ".$test_ou->shortname ."\n";
+            my $storage = $script->session('open-ils.circ');
+            my $req = $storage->request(
+                'open-ils.circ.holds.id_list.retrieve_by_pickup_lib', 0, $test_ou->id )->gather(1);
+            $log->addLine(Dumper($req));
             
             # Grep the logs for key phrases (in the config file)
             # -------------
@@ -141,8 +134,8 @@ if($conf)
             
             undef $sdestbib;
             undef $destbib;
-            undef $parts;
-            undef $copy;
+            undef @test_ou;
+            undef $test_ou;
             
             my $afterProcess = DateTime->now(time_zone => "local");
             my $difference = $afterProcess - $dt;
@@ -150,22 +143,23 @@ if($conf)
             my $duration =  $format->format_duration($difference);
             print "\rIt's been $duration minutes\n";
             # refresh login every 5 minutes
-            if($duration > 5)
+            if($duration > 5 )
             {
                 undef $e;
                 undef $dbHandler;
                 $dt = DateTime->now(time_zone => "local");
                 $script->logout();
                 undef $script;
-                setupLogin(0);
+                setupLogin( 0 ); # 0 = Don't bother calling the create user function
             }
             
             # Sleep for awhile and let's do it again
             # Make sure that more than 1 app server isn't running these exact checks at the exact time
             # introduce some randomness
             # -------------
-            my $random_number = int(rand(50));
+            $random_number = int(rand(50));
             sleep ( $conf{'sleep_interval'} + $random_number );
+            undef $random_number;
         } # end while loop
 
          
@@ -180,8 +174,9 @@ if($conf)
  
 sub setupLogin
 {
-    print "setupLogin called\n";
-    my $attempt_create_usr = shift || 1;
+    my $attempt_create_usr = shift;
+    
+    # print "Received '$attempt_create_usr' from setupLogin call\n";
     my %dbconf = %{getDBconnects($xmlconf)};
     eval{$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});};
     if ($@)
