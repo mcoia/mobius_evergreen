@@ -9,6 +9,6 @@ START="$CSSHNAME "
 LINE=$START$IPS
 
 echo $LINE
-sed -i '/$CSSHNAME/d' .clusterssh/clusters
+sed -i "/$CSSHNAME/d" .clusterssh/clusters
 
 echo $LINE >> .clusterssh/clusters
