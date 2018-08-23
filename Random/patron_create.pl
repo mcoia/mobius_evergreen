@@ -92,7 +92,9 @@ use XML::Simple;
   
     foreach(@{$inputFiles})
     {
+        last;  # short circut when debugging  and data is already imported
         my $file = $_;
+        print "Processing $file\n";
         my $path;
         my @sp = split('/',$file);
        
@@ -125,6 +127,9 @@ use XML::Simple;
         
         $queryInserts .= ")\nVALUES \n";
         $queryByHand  .= ")\nVALUES \n";
+        
+        my $queryInsertsHead = $queryInserts;
+        my $queryByHandHead = $queryByHand;
         
         while ( my $row = $csv->getline( $fh ) )
         {
@@ -174,6 +179,21 @@ use XML::Simple;
                 undef @thisLineVals;
             }
             $rownum++;
+            
+            if($success % 500 == 0)
+            {
+                $queryInserts = substr($queryInserts,0,-2);
+                $queryByHand = substr($queryByHand,0,-2);
+                $log->addLine($queryByHand);
+                print ("Importing $success\n");
+                $log->addLine("Importing $success / $rownum");
+                $dbHandler->updateWithParameters($queryInserts,\@queryValues);
+                $success = 0;
+                $parameterCount = 1;
+                @queryValues = ();
+                $queryInserts = $queryInsertsHead;
+                $queryByHand = $queryByHandHead;
+            }
         }
         
         $queryInserts = substr($queryInserts,0,-2) if $success;
@@ -186,34 +206,15 @@ use XML::Simple;
             $queryInserts = substr($queryInserts,0,-1);
         }
 
-        $log->addLine($queryInserts);
+        # $log->addLine($queryInserts);
         $log->addLine($queryByHand);
-        $log->addLine(Dumper(\@queryValues));
+        # $log->addLine(Dumper(\@queryValues));
         
         close $fh;
         $log->addLine("Importing $success / $rownum");
         
         $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
         
-        # # Clean out duplicate barcodes
-        # my $queryClean = "DELETE from dtdata where
-        # number in(
-        # select thenumber from 
-        # (
-            # select min(number) as thenumber,item from dtdata
-            # WHERE
-            # item IN
-            # (
-            # select item FROM
-            # (
-            # select item,count(*) from dtdata group by 1 having count(*)>1
-            # ) as dups
-            # )
-            # group by 2
-        # ) as dupclear
-        # )
-        # ";
-        # $dbHandler->update($queryClean);
         # # delete the file so we don't read it again
         # unlink $file;
     }
@@ -225,7 +226,59 @@ use XML::Simple;
     $log->addLine($query);
     $dbHandler->update($query);
     
-    # Next 
+    # Delete file header rows
+    $query = "delete from $schema.patron_import where lower(btrim(guardian))~\$\$guard\$\$";
+    $log->addLine($query);
+    $dbHandler->update($query);
+    
+    # Kick out lines that do not match actor.org_unit
+    $query = "update $schema.patron_import 
+    set
+    imported = false,
+    error_message = \$\$Library \$\$||library||\$\$ does not match anything in the database\$\$ 
+    where not dealt_with and not imported and lower(library) not in(select shortname from actor.org_unit)";
+    $log->addLine($query);
+    $dbHandler->update($query);
+    
+    # Kick out lines that do not have DOB
+    $query = "update $schema.patron_import pi 
+    set
+    imported = false,
+    error_message = \$\$DOB is required\$\$
+    where
+    not dealt_with and not imported and
+    btrim(dob)=\$\$\$\$";
+    $log->addLine($query);
+    $dbHandler->update($query);
+    
+   
+    # Kick out lines that have matching barcodes in production but are different patrons based upon DOB
+    $query = "update $schema.patron_import pi 
+    set
+    imported = false,
+    error_message = \$\$Duplicate barcode already in production\$\$
+    from
+    actor.card ac,
+    actor.usr au    
+    where 
+    not pi.dealt_with and 
+    not pi.imported and 
+    au.id=ac.usr and
+    ac.barcode=pi.studentid and
+    pi.dob::date != au.dob::date";
+    $log->addLine($query);
+    $dbHandler->update($query);
+    
+    
+    
+    
+    
+    # Finally, mark all of the rows dealt_with for next execution to ignore
+    $query = "update $schema.patron_import set dealt_with=true where not dealt_with";
+    $log->addLine($query);
+    # $dbHandler->update($query);
+    
+    
 
 sub checkFileReady
 {
@@ -262,8 +315,11 @@ sub setupSchema
         ";
          while ( (my $key, my $value) = each(%columns) ) { $query.= $value." text,"; }
         $query.="
+        home_ou bigint,
+        usr_id bigint,
         imported boolean default false,
-        error_message text,
+        error_message text,        
+        dealt_with boolean default false,
         insert_date timestamp with time zone NOT NULL DEFAULT now()
         )";
         
