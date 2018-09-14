@@ -52,6 +52,7 @@ or die("Error in command line arguments\nYou can specify
 --chunksize 5 (how many concurrent sessions to stress with)
 --appstress (include this flag if you only want to stress the application bricks)
 --words (how many random words to use - might want to use a number higher than your chunk size, default is 15)
+This software does require that you be issued an API key from https://developer.wordnik.com/
 \n");
 
 if($thread)
@@ -101,7 +102,7 @@ if(!$logFile)
             clockStart();
             searchQuery($_, $searchType) if !$OPACURL;
             my $cmd = "cd $cwd && ./postgres_stress.pl --logfile $logFile --wordnikapikey $wordnikapikey --searchtype $searchType --OPACURL $OPACURL --chunk $chunk";
-            $cmd.=" --appstress" if $appStress;
+            $cmd.=" --appstress 1" if $appStress;
             $cmd.=" --thread $_ &";
             system($cmd)  if $OPACURL;
             my %duration = %{clockEnd()};
@@ -122,6 +123,7 @@ if(!$logFile)
 	my $average = $average / ($#shortwordstime+1);
 	$log->addLine("short average: $average");
 	
+    $loops = 1;
 	my @longwordstime;
     while($loops > 0)
     {
@@ -135,8 +137,8 @@ if(!$logFile)
             }
             clockStart();
             searchQuery($_, $searchType) if length $OPACURL < 2;
-            my $cmd = "cd $cwd && ./postgres_stress.pl --logfile $logFile --wordnikapikey $wordnikapikey --searchtype $searchType --OPACURL $OPACURL";
-            $cmd.=" --appstress" if $appStress;
+            my $cmd = "cd $cwd && ./postgres_stress.pl --logfile $logFile --wordnikapikey $wordnikapikey --searchtype $searchType --OPACURL $OPACURL --chunk $chunk";
+            $cmd.=" --appstress 1" if $appStress;
             $cmd.=" --thread $_ &";
             system($cmd)  if $OPACURL;
             my %duration = %{clockEnd()};
@@ -186,7 +188,8 @@ sub searchQuery
 	                    \$core_query_12135\$
 	WITH x9ffe220_keyword_xq AS (SELECT 
 	      (to_tsquery('english_nostop', COALESCE(NULLIF( '(' || btrim(regexp_replace(search_normalize(split_date_range(\$_12135\$!!!searchword!!!\$_12135\$)),E'(?:\\s+|:)','&','g'),'&|')  || ')', '()'), '')) || to_tsquery('simple', COALESCE(NULLIF( '(' || btrim(regexp_replace(search_normalize(split_date_range(\$_12135\$!!!searchword!!!\$_12135\$)),E'(?:\\s+|:)','&','g'),'&|')  || ')', '()'), ''))) AS tsq,
-	      (to_tsquery('english_nostop', COALESCE(NULLIF( '(' || btrim(regexp_replace(search_normalize(split_date_range(\$_12135\$!!!searchword!!!\$_12135\$)),E'(?:\\s+|:)','&','g'),'&|')  || ')', '()'), '')) || to_tsquery('simple', COALESCE(NULLIF( '(' || btrim(regexp_replace(search_normalize(split_date_range(\$_12135\$!!!searchword!!!\$_12135\$)),E'(?:\\s+|:)','&','g'),'&|')  || ')', '()'), ''))) AS tsq_rank ),lang_with AS (SELECT id FROM config.coded_value_map WHERE ctype = 'item_lang' AND code = \$_12135\$eng\$_12135\$)
+	      (to_tsquery('english_nostop', COALESCE(NULLIF( '(' || btrim(regexp_replace(search_normalize(split_date_range(\$_12135\$!!!searchword!!!\$_12135\$)),E'(?:\\s+|:)','&','g'),'&|')  || ')', '()'), '')) || to_tsquery('simple', COALESCE(NULLIF( '(' || btrim(regexp_replace(search_normalize(split_date_range(\$_12135\$!!!searchword!!!\$_12135\$)),E'(?:\\s+|:)','&','g'),'&|')  || ')', '()'), ''))) AS tsq_rank ),
+          lang_with AS (SELECT id FROM config.coded_value_map WHERE ctype = 'item_lang' AND code = \$_12135\$eng\$_12135\$)
 	SELECT  m.metarecord AS id,
 	        ARRAY_AGG(DISTINCT m.source) AS records,
 	        1.0/((AVG(
