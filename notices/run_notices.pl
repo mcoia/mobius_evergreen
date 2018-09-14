@@ -92,13 +92,16 @@ if($conf)
 				exit;
 			}
 			
-			my $query = "SELECT ATED.ID,ATED.NAME,
-			(SELECT SHORTNAME FROM ACTOR.ORG_UNIT WHERE ID=ATED.OWNER),DELAY
-			FROM ACTION_TRIGGER.EVENT_DEFINITION ATED
-			WHERE			
-			ATED.GRANULARITY=\$\$".$conf{"granularity_name"}."\$\$
+			my $query = "SELECT ated.id,ated.name,
+			(SELECT shortname FROM actor.org_unit WHERE id=ated.owner),
+			(CASE WHEN lower(delay::TEXT)!~'day' THEN (SELECT delay FROM action_trigger.event_definition WHERE owner=ated.owner AND reactor='MarkItemLost' AND hook='checkout.due' LIMIT 1) else delay end)
+			FROM action_trigger.event_definition ated
+			WHERE
+			(ated.granularity=\$\$".$conf{"granularity_name"}."\$\$
             OR
-            (ATED.REACTOR=\$\$ProcessTemplate\$\$ AND ATED.HOOK=\$\$lost.auto\$\$ AND ATED.GRANULARITY=\$\$long_overdue_to_lost\$\$)";
+            (ated.reactor=\$\$ProcessTemplate\$\$ AND ated.hook=\$\$lost.auto\$\$ AND ated.granularity=\$\$long_overdue_to_lost\$\$)
+            )and
+            id=611";
 			$log->addLine($query);
 			my $resetDaysRepeat = $daysrepeat;
 			my @results = @{$dbHandler->query($query)};	
