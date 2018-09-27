@@ -7,14 +7,9 @@ profileid="86"
 importdir="/mnt/evergreen/_uploads/student_patron_import_files"
 logfile="test.log"
 
+RESULT=`ps -a | sed -n /patron_create/p`
 
-ps -a | grep -v grep | grep patron_create > /dev/null
-result=$?
-# echo "exit code: ${result}"
-if [ "${result}" -eq "0" ] ; then
-    echo "script is already running"
-else
-
+if [ "${RESULT:-null}" = null ]; then
     if [ -z "$(ls -A $importdir)" ]; then
        echo "No files to process"
     else
@@ -23,7 +18,7 @@ else
             filename="${filename// /\\ }"
             fileslist+=$filename" "
         done
-        
+
         # echo "$fileslist"
         ./patron_create.pl \
         --directory $importdir \
@@ -32,9 +27,11 @@ else
         --fromemail $fromemail \
         --toemail $alertemails \
         --logfile $logfile
-        
+
         rm -f $importdir/*.csv
-        
+
     fi
 
+else
+    echo "script is already running"
 fi
