@@ -423,8 +423,9 @@ Your file(s) have been processed. These are the files:$inputFileFriendly\r\n\r\n
 $errored" if $reporting{"Total with errors"} > 0;
     
     $body.="\r\n\r\n-MOBIUS Perl Squad-";
-    
-    $email->send("Evergreen Utility - Patron import results - ". scalar $#inputFiles." file(s)",$body);
+    my $fileCount = $#inputFiles;
+    $fileCount++;
+    $email->send("Evergreen Utility - Patron import results - $fileCount file(s)",$body);
     
     # Finally, mark all of the rows dealt_with for next execution to ignore
     $query = "update $schema.patron_import set dealt_with=true where not dealt_with";
