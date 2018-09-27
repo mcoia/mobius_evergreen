@@ -29,7 +29,7 @@ use email;
     our $inputDirectory;
     my $logFile;
     my $inputFileFriendly;
-    
+    my %fileParsingReport = ();
     
     
     GetOptions (
@@ -119,7 +119,9 @@ use email;
         my $path;
         my @sp = split('/',$file);       
         $path=substr($file,0,( (length(@sp[$#sp]))*-1) );
-        $inputFileFriendly .= "\r\n" . pop @sp;
+        my $bareFilename =  pop @sp;
+        $fileParsingReport{"*** $bareFilename ***"} = "\r\n";
+        $inputFileFriendly .= "\r\n" . $bareFilename;
 
         # last;  # short circut when debugging  and data is already imported
 
@@ -130,6 +132,7 @@ use email;
         open my $fh, "<:encoding(utf8)", $file or die "$file: $!";
         my $rownum = 0;
         my $success = 0;
+        my $accumulatedTotal = 0;
         my $queryByHand = '';
         my $parameterCount = 1;
         
@@ -157,17 +160,17 @@ use email;
         
         while ( my $row = $csv->getline( $fh ) )
         {
-           
+            
+            my $valid = 0;
             my @rowarray = @{$row};
             if(scalar @rowarray != $sanitycheckcolumnnums )
             {
                 $log->addLine("Error parsing line $rownum\nIncorrect number of columns: ". scalar @rowarray);
+                $fileParsingReport{"*** $bareFilename ***"} .= "\r\nError parsing line $rownum\nIncorrect number of columns: ". scalar @rowarray;
             }
             else
             {
-             
-                my $valid = 1;
-                
+                $valid = 1;
                 my $thisLineInsert = '';
                 my $thisLineInsertByHand = '';
                 my @thisLineVals = ();
@@ -179,8 +182,10 @@ use email;
                     $thisLineInsert .= '$'.$parameterCount.',';
                     $parameterCount++;
                     # Trim whitespace off the data
-                    @rowarray[$colpos] =~ s/^[\s\t]*(.*)/$1/;
-                    @rowarray[$colpos] =~ s/(.*)[\s\t]*$/$1/;
+                    @rowarray[$colpos] =~ s/^\s+//;
+                    @rowarray[$colpos] =~ s/^\t+//;
+                    @rowarray[$colpos] =~ s/\s+$//;
+                    @rowarray[$colpos] =~ s/\t+$//;
                                         
                     $thisLineInsertByHand.="\$data\$".@rowarray[$colpos]."\$data\$,";
                     push (@thisLineVals, @rowarray[$colpos]);
@@ -204,13 +209,15 @@ use email;
             }
             $rownum++;
             
-            if($success % 500 == 0)
+            if( ($success % 500 == 0) && ($success != 0) )
             {
+                $accumulatedTotal+=$success;
                 $queryInserts = substr($queryInserts,0,-2);
                 $queryByHand = substr($queryByHand,0,-2);
                 $log->addLine($queryByHand);
                 # print ("Importing $success\n");
-                $log->addLine("Importing $success / $rownum");
+                $fileParsingReport{"*** $bareFilename ***"} .= "\r\nImporting $accumulatedTotal / $rownum";
+                $log->addLine("Importing $accumulatedTotal / $rownum");
                 $dbHandler->updateWithParameters($queryInserts,\@queryValues);
                 $success = 0;
                 $parameterCount = 1;
@@ -235,7 +242,9 @@ use email;
         # $log->addLine(Dumper(\@queryValues));
         
         close $fh;
-        $log->addLine("Importing $success / $rownum");
+        $accumulatedTotal+=$success;
+        $fileParsingReport{"*** $bareFilename ***"} .= "\r\nImporting $accumulatedTotal / $rownum"  if $success;
+        $log->addLine("Importing $accumulatedTotal / $rownum") if $success;
         
         $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
         
@@ -266,7 +275,7 @@ use email;
     # Kick out lines that do not match actor.org_unit
     $query = "update $schema.patron_import 
     set
-    error_message = \$\$Library \$\$||library||\$\$ does not match anything in the database\$\$ 
+    error_message = \$\$Library '\$\$||library||\$\$' does not match anything in the database\$\$ 
     where not dealt_with and not imported and lower(library) not in(select lower(shortname) from actor.org_unit)";
     $log->addLine($query);
     $dbHandler->update($query);
@@ -289,7 +298,7 @@ use email;
     # Kick out lines that have matching barcodes in production but are not part of this project
     $query = "update $schema.patron_import pi 
     set
-    error_message = \$\$Duplicate barcode already in production\$\$
+    error_message = \$\$Duplicate barcode already in production for non-student\$\$
     from
     actor.card ac,
     actor.usr au    
@@ -396,6 +405,12 @@ Dear staff,
 
 Your file(s) have been processed. These are the files:$inputFileFriendly\r\n\r\nHere is a summary:\r\n\r\n";
     
+    while ( (my $key, my $value) = each(%fileParsingReport) ) 
+    {
+        $body.=$key.": ".$value;
+    }
+    $body.="\r\n\r\n";
+    
     my $lastReport = "";
     while ( (my $key, my $value) = each(%reporting) ) 
     {
@@ -459,8 +474,8 @@ sub installPatron
     active = true, barred = false, deleted = false, juvenile = true,
     profile = $profileID," if !$newPatron;
     
-    $installQuery .= "ident_type, ident_value, expire_date, active, barred, deleted, juvenile, profile," if $newPatron;
-    $valuesClause .= "3, E'Student ID Project', now() + (btrim(E' 1 year')::interval), true, false, false, true, $profileID," if $newPatron;
+    $installQuery .= "ident_type, ident_value, expire_date, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
+    $valuesClause .= "3, E'Student ID Project', now() + (btrim(E' 1 year')::interval), true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $usr" if !$newPatron;
@@ -527,7 +542,7 @@ sub installPatron
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $mailingID" if $mailingID;
-    $installQuery .= " )  $valuesClause ) " if !$mailingID;
+    $installQuery .= ",usr, country )  $valuesClause, $usr, E'US' ) " if !$mailingID;
     $log->addLine($installQuery);
     # $log->addLine($valuesClause);
     $log->addLine(Dumper(\@vals));
@@ -644,6 +659,15 @@ sub findUsrID
     my $usr = 0;
     $usr = $results[0][0] if $results[0][0];
     
+    # Attempt to match on usrname instead of card
+    if(!$usr)
+    {
+        $query = "select id from actor.usr where usrname=\$\$$barcode\$\$";
+        $log->addLine($query);
+        @results = @{$dbHandler->query($query)};
+        $usr = $results[0][0] if $results[0][0];
+    }
+    
     return $usr;
 }  
 
@@ -687,7 +711,7 @@ sub errorPatron
     where id = ".$patron{"id"};
     $log->addLine($query);
     my @vals = ($error);
-    $dbHandler->update($query, \@vals);
+    $dbHandler->updateWithParameters($query, \@vals);
 }
 
 
