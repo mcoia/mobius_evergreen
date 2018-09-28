@@ -166,7 +166,7 @@ use email;
             if(scalar @rowarray != $sanitycheckcolumnnums )
             {
                 $log->addLine("Error parsing line $rownum\nIncorrect number of columns: ". scalar @rowarray);
-                $fileParsingReport{"*** $bareFilename ***"} .= "\r\nError parsing line $rownum\nIncorrect number of columns: ". scalar @rowarray;
+                $fileParsingReport{"*** $bareFilename ***"} .= "Error parsing line $rownum\nIncorrect number of columns: ". scalar @rowarray . "\r\n";
             }
             else
             {
@@ -216,7 +216,7 @@ use email;
                 $queryByHand = substr($queryByHand,0,-2);
                 $log->addLine($queryByHand);
                 # print ("Importing $success\n");
-                $fileParsingReport{"*** $bareFilename ***"} .= "\r\nImporting $accumulatedTotal / $rownum";
+                $fileParsingReport{"*** $bareFilename ***"} .= "Importing $accumulatedTotal / $rownum\r\n";
                 $log->addLine("Importing $accumulatedTotal / $rownum");
                 $dbHandler->updateWithParameters($queryInserts,\@queryValues);
                 $success = 0;
@@ -348,7 +348,7 @@ use email;
     my @results = @{$dbHandler->query($query)};
     foreach(@results)
     {
-        $log->addLine("moving through patron installation");
+        # $log->addLine("moving through patron installation");
         my @row = @{$_};
         my %patron;
         while ( (my $key, my $value) = each(%colmap) ) { $patron{$value} = @row[$columnOrder{$value}]; }
