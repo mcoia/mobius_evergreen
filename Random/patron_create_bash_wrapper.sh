@@ -7,7 +7,7 @@ profileid="86"
 importdir="/mnt/evergreen/_uploads/student_patron_import_files"
 logfile="test.log"
 
-RESULT=`ps -a | sed -n /patron_create/p`
+RESULT=`ps -aux | grep -v sed | sed -n /patron_create.pl/p`
 
 if [ "${RESULT:-null}" = null ]; then
     if [ -z "$(ls -A $importdir)" ]; then

@@ -78,7 +78,7 @@ use email;
     
         
     $log = new Loghandler($logFile);
-    $log->truncFile("");
+    # $log->truncFile("");
     $log->addLogLine(" ---------------- Script Starting ---------------- ");		
 
     
@@ -88,7 +88,7 @@ use email;
 	my $dateString = "$fdate $ftime";
     
     my %dbconf = %{getDBconnects($xmlconf)};
-	$dbHandler = new DBhandler($dbconf{"db"},"172.31.38.234",$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"}); #$dbconf{"dbhost"}
+    $dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"}); #$dbconf{"dbhost"}
     
     #Student Number,Last Name,First Name,Middle Name,Date of Birth ,Street,City,State,Zip,Guardian,Email Address,Phone Number,Gender,School ,Home Library,County
     my %colmap = (
@@ -547,8 +547,15 @@ sub installPatron
     $log->addLine($installQuery);
     # $log->addLine($valuesClause);
     $log->addLine(Dumper(\@vals));
-    
     $dbHandler->updateWithParameters($installQuery, \@vals);
+    
+    if (!$mailingID) # link the newly inserted address back to actor.usr
+    {
+        $query = "UPDATE actor.usr SET mailing_address = (SELECT MAX(id) FROM actor.usr_address WHERE usr = $usr) WHERE id = $usr";
+        $log->addLine($query);
+        $dbHandler->update($query);
+    }
+    
     
     my $genderStatValue = "Male";
     $genderStatValue = "Female" if lc($patron{"gender"}) eq 'f';
