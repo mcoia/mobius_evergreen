@@ -100,8 +100,7 @@ if($conf)
 			(ated.granularity=\$\$".$conf{"granularity_name"}."\$\$
             OR
             (ated.reactor=\$\$ProcessTemplate\$\$ AND ated.hook=\$\$lost.auto\$\$ AND ated.granularity=\$\$long_overdue_to_lost\$\$)
-            )and
-            id=611";
+            )";
 			$log->addLine($query);
 			my $resetDaysRepeat = $daysrepeat;
 			my @results = @{$dbHandler->query($query)};	
