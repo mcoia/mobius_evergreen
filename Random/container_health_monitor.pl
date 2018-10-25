@@ -52,65 +52,67 @@ if($conf)
         my $dt = DateTime->now(time_zone => "local");
         # setup workstation and login
         # -------------
-        setupLogin( 1 ); # 1 = Call the create user function
+        # All OpenSRF checks are DISABLED NOW Because it's not really working right.
+        # -------------
+        # setupLogin( 1 ); # 1 = Call the create user function
         $|++;
         while(1)
         {
             # Begin basic testing interacting with storage
             # Find a bib without parts
             # -------------
-            my $sdestbib = $e->search_biblio_record_entry([
-            {
-            id =>
-                {
-                    'not in' =>
-                        { "from" => 'bmp',
-                            'select' =>  { "bmp" => [ 'record' ] }
-                        }
-                },
-            deleted => 'f' },
-            { limit => 3 }
+            # my $sdestbib = $e->search_biblio_record_entry([
+            # {
+            # id =>
+                # {
+                    # 'not in' =>
+                        # { "from" => 'bmp',
+                            # 'select' =>  { "bmp" => [ 'record' ] }
+                        # }
+                # },
+            # deleted => 'f' },
+            # { limit => 3 }
 
-            ]);
+            # ]);
            
            
-            my $destbib;
-            foreach(@{$sdestbib}) {
-                if ($_->id > -1) {
-                    $destbib = $_;
-                    last;
-                }
-            }
+            # my $destbib;
+            # foreach(@{$sdestbib}) {
+                # if ($_->id > -1) {
+                    # $destbib = $_;
+                    # last;
+                # }
+            # }
             
-            if(!$destbib)
-            {
-                $log->addLogLine("Couldn't find a bib\n Test is officially fail");
-                exit 1;
-            }
+            # if(!$destbib)
+            # {
+                # $log->addLogLine("Couldn't find a bib\n Test is officially fail");
+                # exit 1;
+            # }
             
-            $log->addLogLine("Got bib ". $destbib->id);
+            # $log->addLogLine("Got bib ". $destbib->id);
             
-            # Load the holds shelf so that we interact with OpenSRF
-            # -------------
+            # # Load the holds shelf so that we interact with OpenSRF
+            # # -------------
             
-            # First, we need an OU ID number, best to get a branch instead of a system or consortium
-            my @test_ou = @{$e->search_actor_org_unit([
-            { 
-                ou_type => 3,
-                opac_visible => 't'
-            }
-            ])};
-            # @test_ou = @{@test_ou[0]};
-            print "Max array ".$#test_ou."\n";
-            my $random_number = int(rand($#test_ou));
-            print "Random - $random_number\n";            
-            my $test_ou = @test_ou[$random_number];
+            # # First, we need an OU ID number, best to get a branch instead of a system or consortium
+            # my @test_ou = @{$e->search_actor_org_unit([
+            # { 
+                # ou_type => 3,
+                # opac_visible => 't'
+            # }
+            # ])};
+            # # @test_ou = @{@test_ou[0]};
+            # print "Max array ".$#test_ou."\n";
+            # my $random_number = int(rand($#test_ou));
+            # print "Random - $random_number\n";            
+            # my $test_ou = @test_ou[$random_number];
             
-            print $test_ou->id." ".$test_ou->shortname ."\n";
-            my $storage = $script->session('open-ils.circ');
-            my $req = $storage->request(
-                'open-ils.circ.holds.id_list.retrieve_by_pickup_lib', 0, $test_ou->id )->gather(1);
-            $log->addLine(Dumper($req));
+            # print $test_ou->id." ".$test_ou->shortname ."\n";
+            # my $storage = $script->session('open-ils.circ');
+            # my $req = $storage->request(
+                # 'open-ils.circ.holds.id_list.retrieve_by_pickup_lib', 0, $test_ou->id )->gather(1);
+            # $log->addLine(Dumper($req));
             
             # Grep the logs for key phrases (in the config file)
             # -------------
@@ -121,10 +123,14 @@ if($conf)
                     my $thisPhrase = $_;
                     my $found = 0;
                     $thisPhrase =~ s/^\s+|\s+$//g;
-                    # print "grepping ".$conf{'osrfsys_log_path'}." for $thisPhrase\n";                    
+                    # print "grepping ".$conf{'osrfsys_log_path'}." for $thisPhrase\n";
                     $found = 1 if ( fgrep { /$thisPhrase/ } $conf{'osrfsys_log_path'} );
-                    print "exiting due to presence of $thisPhrase in ".$conf{'osrfsys_log_path'}.".\n"  if( $found );
-                    exit 1 if( $found );
+                    if( $found )
+                    {
+                        print "exiting due to presence of $thisPhrase in ".$conf{'osrfsys_log_path'}.".\n";
+                        system( "machinename=`uname -a | awk '{print \$2}'` && /bin/grep -C 100 '$thisPhrase' ".$conf{'osrfsys_log_path'}." > /mnt/evergreen/os_`echo \$machinename`_badlogbrick.log" );
+                        exit 1;
+                    }
                     undef $found;
                 }
             }
@@ -132,10 +138,10 @@ if($conf)
             # Clean memory            
             # -------------
             
-            undef $sdestbib;
-            undef $destbib;
-            undef @test_ou;
-            undef $test_ou;
+            # undef $sdestbib;
+            # undef $destbib;
+            # undef @test_ou;
+            # undef $test_ou;
             
             my $afterProcess = DateTime->now(time_zone => "local");
             my $difference = $afterProcess - $dt;
@@ -143,21 +149,21 @@ if($conf)
             my $duration =  $format->format_duration($difference);
             print "\rIt's been $duration minutes\n";
             # refresh login every 5 minutes
-            if($duration > 5 )
-            {
-                undef $e;
-                undef $dbHandler;
-                $dt = DateTime->now(time_zone => "local");
-                $script->logout();
-                undef $script;
-                setupLogin( 0 ); # 0 = Don't bother calling the create user function
-            }
+            # if($duration > 5 )
+            # {
+                # undef $e;
+                # undef $dbHandler;
+                # $dt = DateTime->now(time_zone => "local");
+                # $script->logout();
+                # undef $script;
+                # setupLogin( 0 ); # 0 = Don't bother calling the create user function
+            # }
             
             # Sleep for awhile and let's do it again
             # Make sure that more than 1 app server isn't running these exact checks at the exact time
             # introduce some randomness
             # -------------
-            $random_number = int(rand(50));
+            my $random_number = int(rand(50));
             sleep ( $conf{'sleep_interval'} + $random_number );
             undef $random_number;
         } # end while loop
