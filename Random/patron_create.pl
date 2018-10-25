@@ -651,7 +651,7 @@ sub setStatCat
     
     $log->addLine($query);
     $log->addLine(Dumper(\@vars));
-    $dbHandler->updateWithParameters($query,\@vars) if (!$found);
+    $dbHandler->updateWithParameters($query,\@vars);
     
     return 1;
 }
