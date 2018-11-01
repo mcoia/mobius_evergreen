@@ -44,8 +44,12 @@ if($conf)
     {
         $log = new Loghandler($conf->{"logfile"});
         $log->addLogLine(" ---------------- Script Starting ---------------- ");
-        my @grepPhrases = () if !$conf{'osrfsys_log_grep'};
-        @grepPhrases = split(/,/,$conf{'osrfsys_log_grep'}) if $conf{'osrfsys_log_grep'};
+        my @grepOpensrfPhrases = () if !$conf{'osrfsys_log_grep'};
+        @grepOpensrfPhrases = split(/,/,$conf{'osrfsys_log_grep'}) if $conf{'osrfsys_log_grep'};
+        my @grepSecondFilePhrases = () if !$conf{'second_file_log_grep'};
+        @grepSecondFilePhrases = split(/,/,$conf{'second_file_log_grep'}) if $conf{'second_file_log_grep'};
+        my $deathOutputFolder = '/mnt/evergreen';
+        $deathOutputFolder = $conf{'death_output_folder'};
 
        
         # Setup timestamp
@@ -116,9 +120,9 @@ if($conf)
             
             # Grep the logs for key phrases (in the config file)
             # -------------
-            if($conf{'osrfsys_log_path'})
+            if($conf{'osrfsys_log_path'} && (-e $conf{'osrfsys_log_path'}) )
             {
-                foreach(@grepPhrases)
+                foreach(@grepOpensrfPhrases)
                 {
                     my $thisPhrase = $_;
                     my $found = 0;
@@ -128,7 +132,28 @@ if($conf)
                     if( $found )
                     {
                         print "exiting due to presence of $thisPhrase in ".$conf{'osrfsys_log_path'}.".\n";
-                        system( "machinename=`uname -a | awk '{print \$2}'` && /bin/grep -C 100 '$thisPhrase' ".$conf{'osrfsys_log_path'}." > /mnt/evergreen/os_`echo \$machinename`_badlogbrick.log" );
+                        system( "machinename=`uname -a | awk '{print \$2}'` && /bin/grep -C 10000 '$thisPhrase' ".$conf{'osrfsys_log_path'}." > $deathOutputFolder/os_`echo \$machinename`_badlogbrick_osrfsys.log" );
+                        system( "machinename=`uname -a | awk '{print \$2}'` && /bin/cat /var/log/ejabberd/ejabberd.log /var/log/ejabberd/error.log > $deathOutputFolder/os_`echo \$machinename`_ejabberd.log" );
+                        exit 1;
+                    }
+                    undef $found;
+                }
+            }
+            
+            if($conf{'second_file_log_path'} && (-e $conf{'second_file_log_path'}) )
+            {
+                foreach(@grepSecondFilePhrases)
+                {
+                    my $thisPhrase = $_;
+                    my $found = 0;
+                    $thisPhrase =~ s/^\s+|\s+$//g;
+                    # print "grepping ".$conf{'second_file_log_path'}." for $thisPhrase\n";
+                    $found = 1 if ( fgrep { /$thisPhrase/ } $conf{'second_file_log_path'} );
+                    if( $found )
+                    {
+                        print "exiting due to presence of $thisPhrase in ".$conf{'second_file_log_path'}.".\n";
+                        system( "machinename=`uname -a | awk '{print \$2}'` && /bin/grep -C 100 '$thisPhrase' ".$conf{'second_file_log_path'}." > $deathOutputFolder/os_`echo \$machinename`_badlogbrick_second_file.log" );
+                        system( "machinename=`uname -a | awk '{print \$2}'` && /bin/cat /var/log/ejabberd/ejabberd.log /var/log/ejabberd/error.log > $deathOutputFolder/os_`echo \$machinename`_ejabberd.log" );
                         exit 1;
                     }
                     undef $found;
