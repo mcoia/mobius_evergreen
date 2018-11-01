@@ -439,6 +439,7 @@ sub installPatron
     my $p = shift;
     my %patron = %{$p};
     my $newPatron = 0;
+    my $query = '';
     
     my %prodMap = 
     (
@@ -511,6 +512,7 @@ sub installPatron
      ## Address updates/Inserts
     $query = "SELECT mailing_address from actor.usr where id= $usr";
     my @results = @{$dbHandler->query($query)};
+    my $mailingID = '';
     $mailingID = $results[0][0] if $results[0][0];
     $log->addLine("Mailing ID = $mailingID");
     $mailingID = 0 if length($mailingID) == 0;    
