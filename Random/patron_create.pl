@@ -249,6 +249,10 @@ use email;
         
         $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
         
+        my $query = "UPDATE $schema.patron_import set expire_date = $expireDateString, file_name = \$data\$$bareFilename\$data\$ WHERE file_name is null";
+        $log->addLine($query) if $success;
+        $dbHandler->update($query) if $success;
+        
         # # delete the file so we don't read it again
         # Disabled because we are going to let bash do this 
         # so that we don't halt execution of this script in case of errors
@@ -330,6 +334,8 @@ use email;
     my %columnOrder = {};
     ## Add the home_ou column to the map
     $colmap{16} = "home_ou";
+    ## Add the expire_date column to the map
+    $colmap{17} = "expire_date";
     my $i = 0;
     $query = "select ";
     while ( (my $key, my $value) = each(%colmap) )
@@ -355,7 +361,7 @@ use email;
         while ( (my $key, my $value) = each(%colmap) ) { $patron{$value} = @row[$columnOrder{$value}]; }
         $patron{"id"} = @row[$columnOrder{"id"}];
         $log->addLine(Dumper(\%patron));
-        my $installSuccess = installPatron(\%patron, $expireDateString);
+        my $installSuccess = installPatron(\%patron);
         errorPatron(\%patron, $installSuccess) if ($installSuccess ne 'success');
     }
     
@@ -438,7 +444,6 @@ $errored" if $reporting{"Total with errors"} > 0;
 sub installPatron
 {
     my $p = shift;
-    my $expireDate = shift || "now() + \$\$1 year\$\$::interval";
     my %patron = %{$p};
     my $newPatron = 0;
     my $query = '';
@@ -453,7 +458,8 @@ sub installPatron
         'guardian' => 'ident_value2',
         'email' => 'email',
         'phone' => 'day_phone',
-        'home_ou' => 'home_ou'
+        'home_ou' => 'home_ou',
+        'expire_date' => 'expire_date'
     );
     
     my $usr = findUsrID($patron{"studentID"});
@@ -474,12 +480,11 @@ sub installPatron
         $colCount++;
     }
     $installQuery .= "ident_type = 3, ident_value = E'Student ID Project', 
-    expire_date = $expireDate ,
     active = true, barred = false, deleted = false, juvenile = true,
     profile = $profileID," if !$newPatron;
     
-    $installQuery .= "ident_type, ident_value, expire_date, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
-    $valuesClause .= "3, E'Student ID Project', $expireDate, true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
+    $installQuery .= "ident_type, ident_value, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
+    $valuesClause .= "3, E'Student ID Project', true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $usr" if !$newPatron;
@@ -737,8 +742,7 @@ sub getDateFromFile
         @s[0] =~ s/(\d{4})(\d{2})(\d{2})/\1-\2-\3/;
         $ret = "\$\$".@s[0]."\$\$::date";
     }
-    print $ret."\n";
-    exit 0;
+    print "Expire date set to $ret\n";    
     return $ret;
 }
 
@@ -801,6 +805,8 @@ sub setupSchema
         $query.="
         home_ou bigint,
         usr_id bigint,
+        expire_date timestamp with time zone,
+        file_name text,
         imported boolean default false,
         error_message text DEFAULT \$\$\$\$,        
         dealt_with boolean default false,
