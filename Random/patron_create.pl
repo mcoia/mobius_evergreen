@@ -122,6 +122,7 @@ use email;
         my $bareFilename =  pop @sp;
         $fileParsingReport{"*** $bareFilename ***"} = "\r\n";
         $inputFileFriendly .= "\r\n" . $bareFilename;
+        my $expireDateString = getDateFromFile($bareFilename);
 
         # last;  # short circut when debugging  and data is already imported
 
@@ -354,7 +355,7 @@ use email;
         while ( (my $key, my $value) = each(%colmap) ) { $patron{$value} = @row[$columnOrder{$value}]; }
         $patron{"id"} = @row[$columnOrder{"id"}];
         $log->addLine(Dumper(\%patron));
-        my $installSuccess = installPatron(\%patron);
+        my $installSuccess = installPatron(\%patron, $expireDateString);
         errorPatron(\%patron, $installSuccess) if ($installSuccess ne 'success');
     }
     
@@ -437,6 +438,7 @@ $errored" if $reporting{"Total with errors"} > 0;
 sub installPatron
 {
     my $p = shift;
+    my $expireDate = shift || "now() + \$\$1 year\$\$::interval";
     my %patron = %{$p};
     my $newPatron = 0;
     my $query = '';
@@ -472,12 +474,12 @@ sub installPatron
         $colCount++;
     }
     $installQuery .= "ident_type = 3, ident_value = E'Student ID Project', 
-    expire_date = now() + E'1 year'::interval,
+    expire_date = $expireDate ,
     active = true, barred = false, deleted = false, juvenile = true,
     profile = $profileID," if !$newPatron;
     
     $installQuery .= "ident_type, ident_value, expire_date, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
-    $valuesClause .= "3, E'Student ID Project', now() + (btrim(E' 1 year')::interval), true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
+    $valuesClause .= "3, E'Student ID Project', $expireDate, true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $usr" if !$newPatron;
@@ -724,6 +726,21 @@ sub errorPatron
     $dbHandler->updateWithParameters($query, \@vals);
 }
 
+sub getDateFromFile
+{
+    my $nameString = shift;
+    my $ret = "now() + \$\$1 year\$\$::interval";
+    my @s = split(/_/,$nameString);
+    # Strict formula YYYYMMDD_FILENAME.ext
+    if( ($#s > 0) && (length(@s[0]) == 8) && (@s[0] =~ m/^(\d{4})(\d{2})(\d{2})$/) )
+    {
+        @s[0] =~ s/(\d{4})(\d{2})(\d{2})/\1-\2-\3/;
+        $ret = "\$\$".@s[0]."\$\$::date";
+    }
+    print $ret."\n";
+    exit 0;
+    return $ret;
+}
 
 sub checkFileReady
 {
