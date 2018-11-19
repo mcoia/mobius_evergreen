@@ -36,6 +36,7 @@ $dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$db
 and id not in
 (select record from asset.call_number where label=\$\$##URI##\$\$ and not deleted)
 and lower(marc) !~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
+and create_date < now() - \$\$2 weeks\$\$::interval
 order by id
 	";
 	my @results = @{$dbHandler->query($query)};
@@ -56,7 +57,7 @@ order by id
 		$duration = substr($duration,0,index($duration,'.')+3);
 		
 		print "$current / $total id $bibid\telapsed/remaining $duration/$eta\n";
-		$query = "delete from biblio.record_entry where id=$bibid";
+		$query = "update biblio.record_entry set deleted=true, edit_date = now() where id=$bibid";
 		$dbHandler->update($query);
 		$log->addLine("$bibid\t$query");
 		$current++;
