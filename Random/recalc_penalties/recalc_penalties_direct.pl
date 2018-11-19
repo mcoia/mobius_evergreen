@@ -110,7 +110,32 @@ if($valid)
 		OpenSRF::System->bootstrap_client(config_file => '/openils/conf/opensrf_core.xml'); 
 		my $script = OpenILS::Utils::Cronscript->new;
 		
-		my $query = "select distinct usr,(select home_ou from actor.usr where id=a.usr) from action.circulation a where due_date> (now()-('48 hours'::interval)) and due_date<now() and xact_finish is null and checkin_time is null and usr not in (select usr from actor.usr_standing_penalty) order by (select home_ou from actor.usr where id=a.usr)";
+		my $query = "
+select distinct acirc.usr,
+au.home_ou
+ from 
+ action.circulation acirc
+ left join actor.usr au on au.id=acirc.usr
+ left outer join actor.usr_standing_penalty ausp on ausp.usr = au.id 
+ where 
+  acirc.due_date> (now()-(\$\$48 hours\$\$::interval)) and acirc.due_date<now() and 
+  acirc.xact_finish is null and 
+  acirc.checkin_time is null and 
+  ausp.id is null
+
+  union all
+
+  select distinct acirc2.usr,
+au2.home_ou
+ from 
+ action.circulation acirc2
+ left join actor.usr au2 on au2.id=acirc2.usr
+ left outer join actor.usr_standing_penalty ausp2 on ausp2.usr = au2.id 
+ where 
+  acirc2.xact_finish > now() - \$\$10 hours\$\$::interval and
+  ( ausp2.stop_date is null or  ausp2.stop_date > now() ) and
+  ausp2.id is not null
+  order by 2";
 		my @results = @{$dbHandler->query($query)};
 		my $total = $#results+1;
 		$log->addLogLine("$total users to check");
