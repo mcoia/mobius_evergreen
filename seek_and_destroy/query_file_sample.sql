@@ -755,7 +755,8 @@ BRE.ID IN
 	WHERE A."FORMAT"!~$$lpbook$$
 	UNION
 	SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-);
+) AND
+BRE.ID > 0;
 
 #
 # Find Items that do not show signs of being large print but are attached to large print bibs
@@ -781,7 +782,8 @@ BRE.ID IN
 	SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
 	) AS A
 	WHERE A."FORMAT"~$$lpbook$$
-);
+) AND
+BRE.ID > 0;
 
 #
 # Find DVD MISMATCHES
@@ -1105,6 +1107,7 @@ BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
 ACL.ID=AC.LOCATION AND
 BRE.DELETED AND
+BRE.ID > 0 AND
 NOT AC.DELETED;
 
 #
@@ -1117,6 +1120,7 @@ BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
 ACL.ID=AC.LOCATION AND
 NOT BRE.DELETED AND
+BRE.ID > 0 AND
 NOT AC.DELETED AND
 lower(BRE.marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$ AND
 BRE.id in
