@@ -189,10 +189,10 @@ if(! -e $xmlconf)
 					
 					
 					$dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
+					$dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
 					#tag902s();
 # Before we do anything, we really gotta clean up that metabib schema!
-					# cleanMetaRecords();
+					cleanMetaRecords();
 					 
 					 
 					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
@@ -250,7 +250,6 @@ if(! -e $xmlconf)
 			}
 			updateJob("Executing reports and email","");
 		
-			#$jobid=2;
 			
 			my @tolist = ($conf{"alwaysemail"});
 			if(length($errorMessage)==0) #none of the code currently sets an errorMessage but maybe someday
@@ -502,6 +501,20 @@ sub reportResults
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_video_bib_to_item.csv");
 		push(@attachments,$baseTemp."questionable_video_bib_to_item.csv");
+	}
+    
+    #mismatch all MUSIC formats
+	$query =  $queries{"questionable_music_bib_to_item"};
+	updateJob("Processing","reportResults $query");
+	@results = @{$dbHandler->query($query)};
+	if($#results>-1)
+	{
+		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: All music formats items/bibs mismatched");
+		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
+		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
+		my @outputs = ([@header],@results);
+		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_music_bib_to_item.csv");
+		push(@attachments,$baseTemp."questionable_music_bib_to_item.csv");
 	}
 	
 	
@@ -1342,24 +1355,24 @@ sub findInvalidMARC
 	
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
-	# updateJob("Processing","findInvalidMARC  $query");
-	# $dbHandler->update($query);
-	# foreach(@marcSearchPhrases)
-	# {
-		# my $phrase = lc$_;
-		# my $query = $phraseQuery;
-		# $query =~ s/\$phrase/$phrase/g;
-		# $query =~ s/\$problemphrase/$problemPhrase/g;
-		# updateJob("Processing","findInvalidMARC  $query");
-		# updateProblemBibs($query,$problemPhrase,$typeName);
-	# }
-	# foreach(@additionalSearchQueries)
-	# {
-		# my $query = $_;				
-		# $query =~ s/\$problemphrase/$problemPhrase/g;
-		# updateJob("Processing","findInvalidMARC  $query");
-		# updateProblemBibs($query,$problemPhrase,$typeName);
-	# }
+	updateJob("Processing","findInvalidMARC  $query");
+	$dbHandler->update($query);
+	foreach(@marcSearchPhrases)
+	{
+		my $phrase = lc$_;
+		my $query = $phraseQuery;
+		$query =~ s/\$phrase/$phrase/g;
+		$query =~ s/\$problemphrase/$problemPhrase/g;
+		updateJob("Processing","findInvalidMARC  $query");
+		updateProblemBibs($query,$problemPhrase,$typeName);
+	}
+	foreach(@additionalSearchQueries)
+	{
+		my $query = $_;				
+		$query =~ s/\$problemphrase/$problemPhrase/g;
+		updateJob("Processing","findInvalidMARC  $query");
+		updateProblemBibs($query,$problemPhrase,$typeName);
+	}
 	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert	
