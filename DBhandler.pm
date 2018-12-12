@@ -37,9 +37,6 @@ package DBhandler;
  use utf8;
  use Data::Dumper;
  
- 
- use String::Multibyte;
- 
  our @columnNames;
  
  
