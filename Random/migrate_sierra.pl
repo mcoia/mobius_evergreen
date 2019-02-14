@@ -81,12 +81,44 @@ if(!$schema)
 	
 	my $patronlocationcodes = $sierralocationcodes;
 	$patronlocationcodes =~ s/LOCATION_CODE/home_library_code/g;
+  
+  
+  #get itype meanings
+	my $query = "
+		select * from sierra_view.itype_property_myuser";
+	setupEGTable($query,"itype_property_myuser");
+	
+    
+    
+  #get location/branches
+	my $query = "
+		select * from 
+(
+select svl.code as location_code,svl.is_public,svl.is_requestable,svln.name as location_name,svb.address,svb.code_num,svbm.name as branch_name from 
+sierra_view.location svl,
+sierra_view.location_name svln,
+sierra_view.branch svb,
+sierra_view.branch_myuser svbm
+where
+svbm.code=svb.code_num and
+svb.code_num=svl.branch_code_num and
+svln.location_id=svl.id
+)
+as b
+where
+($sierralocationcodes)
+	";
+	setupEGTable($query,"location_branch_info");
+	
+  
 	#get patrons
 	my $query = "
 		select * from sierra_view.patron_view where ($patronlocationcodes) 
 	";
 	setupEGTable($query,"patron_view");
 	
+  
+  
 	#get patron addresses	
 	my $query = "
 		select * from sierra_view.patron_record_address where 
@@ -302,12 +334,15 @@ sub setupEGTable
 {
 	my $query = @_[0];
 	my $tablename = @_[1];
+    
+    my $insertChunkSize = 500;
 	
-	$query.="\nlimit $sample" if($sample);	
 	print "Gathering $tablename....";
-	$log->addLine($query);
-	my @allRows = @{$sierradbHandler->query($query)};
-	my @cols = @{$sierradbHandler->getColumnNames()};
+	
+    my @ret = @{getRemoteSierraData($query)};
+    
+	my @allRows = @{@ret[0]};
+	my @cols = @{@ret[1]};
 	print $#allRows." rows\n";
 	
 	
@@ -322,39 +357,101 @@ sub setupEGTable
 	$query=substr($query,0,-1).")";
 	$log->addLine($query);
 	$dbHandler->update($query);
+    my @vals = ();
+    my $valpos = 1;
+    my $totalInserted = 0;
 	
 	if($#allRows > -1)
 	{
 		#insert the data
+        my $rowcount = 0;
 		$query = "INSERT INTO $schema.$tablename (";
 		$query.=$_."," for @cols;
 		$query=substr($query,0,-1).")\nVALUES\n";
+        my $queryTemplate = $query;
 		foreach(@allRows)
 		{
 			$query.="(";
 			my @thisrow = @{$_};
-			for(@thisrow)
-			{
-				my $value = $_;
-				#add period on trialing $ signs
-				#print "$value -> ";
-				$value =~ s/\$$/\$\./;
-				#print "$value\n";
-				$query.='$$'.$value.'$$,'
-			}
+			$query.= "\$" . $valpos++ . "," for(@thisrow);
+            push @vals, @thisrow;
+            # for(@thisrow)
+			# {
+				# my $value = $_;
+				# #add period on trialing $ signs
+				# #print "$value -> ";
+				# $value =~ s/\$$/\$\./;
+                # #add period on head $ signs
+                # $value =~ s/^\$/\.\$/;
+				# #print "$value\n";
+				# $query.='$data$'.$value.'$data$,'
+			# }
 			$query=substr($query,0,-1)."),\n";
+            $rowcount++;
+            if($rowcount % $insertChunkSize == 0)
+            {
+                $totalInserted+=$insertChunkSize;
+                $query=substr($query,0,-2)."\n";
+                $loginvestigationoutput.="select count(*),$_ from $schema.$tablename group by $_ order by $_\n" for @cols;
+                print "Inserted ".$totalInserted." Rows into $schema.$tablename\n";
+                $log->addLine($query);
+                $dbHandler->updateWithParameters($query, \@vals);
+                $query = $queryTemplate;
+                $rowcount=0;
+                @vals = ();
+                $valpos = 1;
+            }
 		}
-		$query=substr($query,0,-2)."\n";
-		$loginvestigationoutput.="select count(*),$_ from $schema.$tablename group by $_ order by $_\n" for @cols;
-		print "Inserted ".$#allRows." Rows into $schema.$tablename\n";
-		$log->addLine($query);
-		$dbHandler->update($query);
+        
+        if($valpos > 1)
+        {
+            $query=substr($query,0,-2)."\n";
+            $loginvestigationoutput.="select count(*),$_ from $schema.$tablename group by $_ order by $_\n" for @cols;
+            print "Inserted ".$#allRows." Rows into $schema.$tablename\n";
+            $log->addLine($query);
+            $dbHandler->updateWithParameters($query, \@vals);
+        }
+
 	}
 	else
 	{
 		print "Empty dataset for $tablename \n";
 		$log->addLine("Empty dataset for $tablename");
 	}
+}
+
+sub getRemoteSierraData
+{
+    my $queryTemplate = @_[0];
+    my $offset = 0;
+    my @ret = ();
+    my $limit = 10000;
+    $limit = $sample if $sample;
+    $queryTemplate.="\nORDER BY 1\n LIMIT $limit OFFSET !OFFSET!";
+    my $loops = 0;
+    my @cols;
+    my $data = 1;
+    my @allRows = ();
+    
+    while($data)
+    {
+        my $query = $queryTemplate;
+        $query =~ s/!OFFSET!/$offset/g;
+        $log->addLine($query);
+        my @theseRows = @{$sierradbHandler->query($query)};
+        @cols = @{$sierradbHandler->getColumnNames()} if !(@cols);
+        $data = 0 if($#theseRows < 0 );
+        push @allRows, @theseRows if ($#theseRows > -1 );
+        $loops++;
+        $offset = ($loops * $limit) + 1;
+        $data = 0 if $sample;
+        undef @theseRows;
+    }
+
+
+    push @ret, [@allRows];
+    push @ret, [@cols];
+    return \@ret;
 }
 
 sub calcCheckDigit
