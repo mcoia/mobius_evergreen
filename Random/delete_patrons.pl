@@ -121,7 +121,7 @@ $log->addLogLine("$query");
             $loops++;
         }
         
-        $log->addLine("success Delete ".$#successforgive);
+        $log->addLine("success Delete ".$success);
         
         
     }
