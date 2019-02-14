@@ -114,8 +114,9 @@ $log->addLogLine("$query");
             $success++;
             $query = "select * from actor.usr_delete($patronid, null)";
             $log->addLine($query);
-            # my @res = @{$dbHandler->query($query)};
-            # $log->addLine($res[0][0]);
+            my @res = @{$dbHandler->query($query)};
+            $log->addLine($res[0][0]);
+            # Just do one for testing
             # exit;
             $loops++;
         }
