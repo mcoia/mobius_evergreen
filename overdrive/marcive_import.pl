@@ -922,38 +922,42 @@ updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 sub findRecord
 {
     my $marcsearch = @_[0];
-    my $bibid = $marcsearch->field('901')->subfield('c');
-    my $dbHandler = @_[1];
-    my $log = @_[2];
-    my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.id = $bibid and not deleted";
-updateJob("Processing","$query");
-    my @results = @{$dbHandler->query($query)};
-    my @ret;
-    my $none=1;
-    my $count=0;
-    foreach(@results)
+    if ( $marcsearch->field('901') )
     {
-        my $row = $_;
-        my @row = @{$row};
-        my $id = @row[0];
-        my $marc = @row[1];
-        print "found matching: $id\n";
-        my $prevmarc = $marc;
-        $prevmarc =~ s/(<leader>.........)./${1}a/;    
-        $prevmarc = MARC::Record->new_from_xml($prevmarc);
-        my $score = scoreMARC($prevmarc,$log);
-        my @matchedsha = ($id,$prevmarc,$score,$marc);
-        push (@ret, [@matchedsha]);
-        $none=0;
-        $count++;
+        my $bibid = $marcsearch->field('901')->subfield('c');
+        my $dbHandler = @_[1];
+        my $log = @_[2];
+        my $query = "SELECT bre.ID,bre.MARC FROM BIBLIO.RECORD_ENTRY bre WHERE bre.id = $bibid and not deleted";
+    updateJob("Processing","$query");
+        my @results = @{$dbHandler->query($query)};
+        my @ret;
+        my $none=1;
+        my $count=0;
+        foreach(@results)
+        {
+            my $row = $_;
+            my @row = @{$row};
+            my $id = @row[0];
+            my $marc = @row[1];
+            print "found matching: $id\n";
+            my $prevmarc = $marc;
+            $prevmarc =~ s/(<leader>.........)./${1}a/;    
+            $prevmarc = MARC::Record->new_from_xml($prevmarc);
+            my $score = scoreMARC($prevmarc,$log);
+            my @matchedsha = ($id,$prevmarc,$score,$marc);
+            push (@ret, [@matchedsha]);
+            $none=0;
+            $count++;
+        }
+        if($none)
+        {
+            return -1;
+        }
+        print "Count matches: $count\n";
+    updateJob("Processing","Count matches: $count");
+        return \@ret;
     }
-    if($none)
-    {
-        return -1;
-    }
-    print "Count matches: $count\n";
-updateJob("Processing","Count matches: $count");
-    return \@ret;
+    return -1;
 }
 
 sub mergeMARC856
