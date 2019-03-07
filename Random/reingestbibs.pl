@@ -125,8 +125,8 @@ split_part(split_part(marc,'<controlfield tag=\"001\">',2),'<',1)!=tcn_value and
 			$duration = $duration / 60;
 			$duration = substr($duration,0,index($duration,'.')+3);
 			$log->addLogLine("Ingesting $bibID\t$completed / $total\telapsed/remaining $duration/$eta");
-			$query = "update biblio.record_entry set id=id where id=$bibID";
-			$dbHandler->update($query);
+			$query = "select * from metabib.reingest_metabib_field_entries($bibID,false,false,false,false,null)";
+			$dbHandler->query($query);
 			$completed++;
 		}
 		$log->addLogLine("Reingest is finished!");
