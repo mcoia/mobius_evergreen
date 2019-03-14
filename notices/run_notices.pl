@@ -99,7 +99,7 @@ if($conf)
 			WHERE
 			(ated.granularity=\$\$".$conf{"granularity_name"}."\$\$
             OR
-            (ated.reactor=\$\$ProcessTemplate\$\$ AND ated.hook=\$\$lost.auto\$\$ AND ated.granularity=\$\$long_overdue_to_lost\$\$)
+            (ated.reactor=\$\$ProcessTemplate\$\$ AND ated.hook in (\$\$lost.auto\$\$,\$\$longoverdue.auto\$\$) AND ated.granularity=\$\$long_overdue_to_lost\$\$)
             )";
 			$log->addLine($query);
 			my $resetDaysRepeat = $daysrepeat;
