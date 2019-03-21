@@ -194,7 +194,7 @@ use File::stat;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->appendLine($output);
+				$marcout->addLineRaw($output);
 				
                
                 $output='';
@@ -205,7 +205,7 @@ use File::stat;
                     $countremoval++;
                 }
                 $log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval") if $removalsViaMARC;
-                $marcoutRemoval->appendLine($output) if $removalsViaMARC;
+                $marcoutRemoval->addLineRaw($output) if $removalsViaMARC;
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -808,7 +808,7 @@ sub recordAssetCopyMove
 	my $dbHandler = @_[2];
 	my $overdriveMatchString = @_[3];
 	my $log = @_[4];
-	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$)";
+	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$) and not deleted";
 	my @cids;
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
@@ -816,22 +816,7 @@ sub recordAssetCopyMove
 		my @row = @{$_};
 		push(@cids,@row[0]);
 	}
-	
-	if($#cids>-1)
-	{		
-		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
-		moveAssetCopyToPreviouslyDedupedBib($oldbib,$overdriveMatchString);		
-	}	
-	
-	#Check again after the attempt to undedupe
-	@cids = ();
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my @row = @{$_};
-		push(@cids,@row[0]);
-	}
-	
+    
 	foreach(@cids)
 	{
 		print "There were asset.copies on $oldbib even after attempting to put them on a deduped bib\n";
@@ -1315,8 +1300,6 @@ sub chooseWinnerAndDeleteRest
 		}
 		$i++;
 	}
-	#attempt to move any items on the winning bib that were deduped 6-28-2013
-	moveAssetCopyToPreviouslyDedupedBib($winnerBibID,$overdriveMatchString);
 	# melt the incoming molib2go 856's retaining the rest of the marc from the DB
 	# At this point, the 9's have been added to the newMarc (data from molib2go)
 	$finalMARC = mergeMARC856($finalMARC, $newMarc, $log);
@@ -1348,111 +1331,6 @@ updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	
 	return \@ret;
 	
-}
-
-sub moveAssetCopyToPreviouslyDedupedBib
-{
-	my $currentBibID = @_[0];
-	my $overdriveMatchString = @_[1];
-	my %possibles;
-	#this query will only return previously deleted bibs that do not have the molib2go 001 field ($overdriveMatchString)
-	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
-	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid and bre.marc !~ \$\$$overdriveMatchString\$\$";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-	#print $query."\n";
-	my @results = @{$dbHandler->query($query)};
-	my $winner=0;
-	my $currentWinnerElectricScore=10000;
-	my $currentWinnerMARCScore=0;
-	foreach(@results)
-	{
-		my @row = @{$_};
-		my $prevmarc = @row[1];
-		$prevmarc =~ s/(<leader>.........)./${1}a/;
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my @temp=($prevmarc,determineElectric($prevmarc),scoreMARC($prevmarc,$log));
-		#need to initialize the winner values
-		$winner=@row[0];
-		$currentWinnerElectricScore = @temp[1];
-		$currentWinnerMARCScore = @temp[2];
-		$possibles{@row[0]}=\@temp;
-	}
-	
-	#choose the best deleted bib - we want the lowest electronic bib score in this case because we want to attach the 
-	#items to the *most physical bib
-	while ((my $bib, my $attr) = each(%possibles))
-	{
-		my @atts = @{$attr};
-		if(@atts[1]<$currentWinnerElectricScore)
-		{
-			$winner=$bib;
-			$currentWinnerElectricScore=@atts[1];
-			$currentWinnerMARCScore=@atts[2];
-		}
-		elsif(@atts[1]==$currentWinnerElectricScore && @atts[2]>$currentWinnerMARCScore)
-		{
-			$winner=$bib;
-			$currentWinnerElectricScore=@atts[1];
-			$currentWinnerMARCScore=@atts[2];
-		}		
-	}
-	if($winner!=0)
-	{
-		$query = "select deleted from biblio.record_entry where id=$winner";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my $row = $_;
-			my @row = @{$row};
-			print "$winner - ".@row[0]."\n";
-			#make sure that it is in fact deleted
-			if(@row[0] eq 't' ||@row[0] == 1)
-			{
-				my $tcn_value = $winner;
-				my $count=1;			
-				#make sure that when we undelete it, it will not collide its tcn_value 
-				while($count>0)
-				{
-					$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $winner";
-					$log->addLine($query);
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-					my @results = @{$dbHandler->query($query)};
-					foreach(@results)
-					{	
-						my $row = $_;
-						my @row = @{$row};
-						$count=@row[0];
-					}
-					$tcn_value.="_";
-				}
-				#take the last tail off
-				$tcn_value=substr($tcn_value,0,-1);
-				#finally, undelete the bib making it available for the asset.call_number
-				$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$winner";
-				$dbHandler->update($query);
-			}
-		}
-		#find all of the eligible call_numbers
-		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my @row = @{$_};
-			my $acnid = @row[0];
-			$query = 
-"INSERT INTO molib2go.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
-VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-			$log->addLine($query);
-			$dbHandler->update($query);
-			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-			$log->addLine($query);
-			$dbHandler->update($query);
-		}
-		moveHolds($dbHandler,$currentBibID,$winner,$log);
-	}
 }
 
 sub moveHolds
