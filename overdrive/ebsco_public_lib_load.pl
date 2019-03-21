@@ -20,7 +20,6 @@ use email;
 use DateTime;
 use utf8;
 use Encode;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
@@ -58,7 +57,7 @@ use Cwd;
 		$log = new Loghandler($conf->{"logfile"});
 		$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("server","login","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
+		my @reqs = ("sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","incomingmarcfolder"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -104,7 +103,7 @@ use Cwd;
 			
 			# @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc records/ebrary/")};
 			# @files = ("importtest.mrc");
-			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"yearstoscrape"},$archivefolder,$log)};
+			@files = @{getmarc($conf{"incomingmarcfolder"},$archivefolder,$log)};
 			if(@files[$#files]!=-1)
 			{
 			#print Dumper(@files);
@@ -505,126 +504,66 @@ sub deleteFiles
 	}
 }
 
-sub getOCLCFTPPassword
+sub parseFileName
 {
-	my $server = @_[0];
-	$server =~ s/http:\/\///gi;
-	$server =~ s/ftp:\/\///gi;
-	my $login = @_[1];
-	my $password = '';
-	my $cwd = getcwd();
-	my $passwordfile = new Loghandler($cwd."/oclcphistory.txt");
-	my @oldpasswords = @{$passwordfile->readFile()};
-	for my $i ( 0 .. $#oldpasswords ) 
-	{
-		@oldpasswords[$i]=$mobUtil->trim(@oldpasswords[$i]);
-	}
-	$log->addLine(Dumper(@oldpasswords));
-	$password = @oldpasswords[$#oldpasswords];
-	$log->addLogLine("**********FTP starting -> $server with $login and $password");
-	
-	my $ftp = Net::FTP->new($server, Debug => 0, Passive=> 1)
-	or die $log->addLogLine("Cannot connect to ".$server);
-	if($ftp->login($login,$password))
-	{
-		$log->addLine("$password is still working!");
-	}
-	else
-	{
-		$log->addLine("$password is not working - making a new one");
-		my $newpass = '';
-		my $alreadyUsed = 1;
-		while ($alreadyUsed)
-		{
-			$newpass = $mobUtil->generateRandomString(8);
-			my @chars = split('',$newpass);
-			my $containsNumber=0;
-			$log->addLine("testing $newpass");
-			for(@chars)
-			{
-				if($mobUtil->is_integer($_))
-				{
-					$containsNumber = 1;
-				}
-			}
-			if(!$containsNumber)
-			{
-				next;
-			}
-			$alreadyUsed = 0;
-			foreach(@oldpasswords)
-			{
-				if($_ eq $newpass)
-				{
-					$alreadyUsed = 1;
-				}
-			}
-			if(!$alreadyUsed)
-			{
-				$log->addLine("Found one that's not already used: $newpass");
-				my $ftp = Net::FTP->new($server, Debug => 1, Passive=> 1)
-				or die $log->addLogLine("Cannot connect to ".$server);
-				print $login,$password."/".$newpass."/".$newpass."\n";
-				$log->addLine($login,$password."/".$newpass."/".$newpass);
-				if($ftp->login($login,$password."/".$newpass."/".$newpass))
-				{
-					$log->addLine("$password changed to $newpass");
-				}
-				else
-				{
-					$alreadyUsed=1;
-					my @tolist = ($conf{"alwaysemail"});
-					my $email = new email($conf{"fromemail"},\@tolist,0,0,\%conf);
-					$email->send("Evergreen Utility - $importSourceName Import Report Job # $jobid - Could not change the OCLC FTP Password","Could not change the OCLC FTP Passworde\r\n\r\n-Evergreen Perl Squad-");
-					exit;
-				}
-				$ftp->quit();
-			}
-		}
-		$passwordfile->addLine($newpass);
-		$password = $newpass;
-	}
-	$ftp->quit();
-	return $password;
+    my $fullPath = @_[0];
+    my @sp = split('/',$fullPath);
+    my $path=substr($fullPath,0,( (length(@sp[$#sp]))*-1) );
+    
+    my @fsp = split('\.',@sp[$#sp]);
+    my $fExtension = pop @fsp;
+    my $baseFileName = join('.', @fsp);
+    $baseFileName= Encode::encode("CP1252", $baseFileName);
+    my @ret = ($path,$baseFileName,$fExtension);
+    return \@ret;
+}
+
+sub moveFile
+{
+    my $file = @_[0];
+    my $destination = @_[1];
+    my $fhandle = new Loghandler($file);
+
+    if( $fhandle->copyFile($destination) )
+    {
+        if(! (unlink($file)) )
+        {
+            print "Unable to delete $file";
+            return 0;
+        }
+    }
+    undef $fhandle;
+    return 1;
 }
 
 sub getmarc
 {
-	my $server = @_[0];
-	$server=~ s/http:\/\///gi;
-	$server=~ s/ftp:\/\///gi;
+	my $incomingfolder = @_[0];
+    my $archivefolder = @_[1];
+    my $log = @_[2];
 	
-	my $loops=0;
-	my $login = @_[1];
-	my $yearstoscrape = @_[2];
-	my $archivefolder = @_[3];
-	my @ret = ();
-	my $password = getOCLCFTPPassword($server,$login);
-	$log->addLogLine("**********FTP starting -> $server with $login and $password");
-	
-	my $ftp = Net::FTP->new($server, Debug => 0, Passive=> 1)
-	or die $log->addLogLine("Cannot connect to ".$server);
-	$ftp->login($login,$password)
-	or die $log->addLogLine("Cannot login ".$ftp->message);
-	$ftp->cwd("'edx.wcs.mornt.ftp'");
-	my @remotefiles = $ftp->ls();
-	foreach(@remotefiles)
+    my @ret;
+    my @files;
+	#Get all files in the directory path
+	@files = @{dirtrav(\@files,$incomingfolder)};
+    
+	foreach(@files)
 	{
 		my $filename = $_;
+        my @filePathParse = @{parseFileName($filename)};
+        $filename = @filePathParse[1].'.'.@filePathParse[2];
 		my $download = decideToDownload($filename);
 		
 		if($download)
 		{
 			if(-e "$archivefolder/$filename")
 			{
-				$ftp->binary();
 				my $size = stat("$archivefolder/$filename")->size; #[7];
-				my $rsize = $ftp->size($filename);
+				my $rsize = stat("$incomingfolder/$filename")->size;
 				# print "Local: $size\n";
 				# print "remot: $rsize\n";
-				# OCLC's FTP server does not convey the file size!
-				# Just going to assume that the files are identical based on name
-				if(0)#$size ne $rsize)
+				
+                if($size ne $rsize)
 				{
 					$log->addLine("$archivefolder/$filename differes in size remote $filename");
 					unlink("$archivefolder/$filename");
@@ -632,6 +571,7 @@ sub getmarc
 				else
 				{
 					$log->addLine("skipping $filename");
+                    unlink(@filePathParse[0].'/'.$filename);
 					$download=0;
 				}
 			}
@@ -641,8 +581,8 @@ sub getmarc
 			}
 			if($download)
 			{
-				$ftp->binary();
-				my $worked = $ftp->get($filename,"$archivefolder/$filename");
+                my $fhandle = new Loghandler();
+				my $worked = moveFile(@filePathParse[0].'/'.$filename,"$archivefolder/$filename");
 				if($worked)
 				{
 					push (@ret, "$filename");
@@ -650,9 +590,6 @@ sub getmarc
 			}
 		}
 	}
-    $ftp->quit
-	or die $log->addLogLine("Unable to close FTP connection");
-	$log->addLogLine("**********FTP session closed ***************");
 	$log->addLine(Dumper(\@ret));
 	return \@ret;
 }
@@ -738,6 +675,21 @@ sub removeOldCallNumberURI
 {
 	my $bibid = @_[0];
 	my $dbHandler = @_[1];
+    
+    my $uriids = '';
+    my $query = "select uri from asset.uri_call_number_map WHERE call_number in 
+	(
+		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
+	)";
+updateJob("Processing","$query");
+    my @results = @{$dbHandler->query($query)};
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $uriids.=@row[0].",";
+    }
+    $uriids = substr($uriids,0,-1);
+    
 	my $query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
@@ -753,13 +705,13 @@ updateJob("Processing","$query");
 	)";
 updateJob("Processing","$query");
 	$dbHandler->update($query);
-	$query = "
-	DELETE FROM asset.uri WHERE id not in
-	(
-		SELECT uri FROM asset.uri_call_number_map
-	)";
-updateJob("Processing","$query");
-	$dbHandler->update($query);
+    
+    if(length($uriids) > 0)
+    {
+        $query = "DELETE FROM asset.uri WHERE id in ($uriids)";
+    updateJob("Processing","$query");
+        $dbHandler->update($query);
+    }
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
@@ -780,7 +732,7 @@ sub recordAssetCopyMove
 	my $dbHandler = @_[2];
 	my $overdriveMatchString = @_[3];
 	my $log = @_[4];
-	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$)";
+	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$) and not deleted";
 	my @cids;
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
@@ -788,22 +740,7 @@ sub recordAssetCopyMove
 		my @row = @{$_};
 		push(@cids,@row[0]);
 	}
-	
-	if($#cids>-1)
-	{		
-		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
-		moveAssetCopyToPreviouslyDedupedBib($oldbib,$overdriveMatchString);		
-	}	
-	
-	#Check again after the attempt to undedupe
-	@cids = ();
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my @row = @{$_};
-		push(@cids,@row[0]);
-	}
-	
+    
 	foreach(@cids)
 	{
 		print "There were asset.copies on $oldbib even after attempting to put them on a deduped bib\n";
@@ -1006,10 +943,11 @@ updateJob("Processing","updating 245h and 856z");
 	}
 	$file->close();
 	undef $file;
+    @ret = ();
 	push(@ret, (\@worked, \@notworked, \@updated));
 	#print Dumper(@ret);
 	return \@ret;
-	
+
 }
 
 sub attemptRemoveBibs
@@ -1027,14 +965,20 @@ sub attemptRemoveBibs
 	{
 		my @attrs = @{$_};	
 		my $id = @attrs[0];
+        $log->addLine("deleting $id");
 		my $marcobj = @attrs[1];
 		my $score = @attrs[2];
 		my $marcxml = @attrs[3];
 		my $answer = decideToDeleteOrRemove9($marcobj);
 		if($answer==1)
 		{
-			my $query = "SELECT ID,BARCODE FROM ASSET.COPY WHERE CALL_NUMBER IN
-			(SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$id) AND NOT DELETED";
+			my $query = "
+            SELECT ac.ID,ac.BARCODE FROM ASSET.COPY ac,ASSET.CALL_NUMBER acn
+                WHERE 
+                ac.call_number = acn.id and
+                not ac.deleted and
+                not acn.deleted and
+                acn.RECORD=$id";
 			$log->addLine($query);
 			my @results = @{$dbHandler->query($query)};
 			foreach(@results)
@@ -1172,6 +1116,39 @@ sub decideToDeleteOrRemove9
 	
 }
 
+sub findMatchingISBN
+{
+    my $isbn = @_[0];
+    my $bibsourceid = @_[1];
+    my @ret = ();
+    
+    my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE
+    tcn_source~\$\$$importSourceNameDB-script\$\$ AND
+    source=$bibsourceid AND
+    NOT DELETED AND
+    ID IN(
+    select source from metabib.identifier_field_entry
+    WHERE
+    index_vector  @@ to_tsquery(\$\$$isbn\$\$)
+    )
+    ";
+    $log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+        my $id = @row[0];
+        my $marc = @row[1];
+        my $marcobj = $marc;
+        $marcobj =~ s/(<leader>.........)./${1}a/;
+        my $marcobj = MARC::Record->new_from_xml($marcobj);
+        my $score = scoreMARC($marcobj,$log);
+        my @arr = ($id,$marcobj,$score,$marc);
+		push (@ret, [@arr]);
+    }
+    return \@ret;
+}
 
 sub chooseWinnerAndDeleteRest
 {
@@ -1224,8 +1201,6 @@ sub chooseWinnerAndDeleteRest
 		}
 		$i++;
 	}
-	#attempt to move any items on the winning bib that were deduped 6-28-2013
-	moveAssetCopyToPreviouslyDedupedBib($winnerBibID,$overdriveMatchString);
 	# melt the incoming molib2go 856's retaining the rest of the marc from the DB
 	# At this point, the 9's have been added to the newMarc (data from molib2go)
 	$finalMARC = mergeMARC856($finalMARC, $newMarc, $log);
@@ -1257,111 +1232,6 @@ updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	
 	return \@ret;
 	
-}
-
-sub moveAssetCopyToPreviouslyDedupedBib
-{
-	my $currentBibID = @_[0];
-	my $overdriveMatchString = @_[1];
-	my %possibles;
-	#this query will only return previously deleted bibs that do not have the molib2go 001 field ($overdriveMatchString)
-	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
-	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid and bre.marc !~ \$\$$overdriveMatchString\$\$";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-	#print $query."\n";
-	my @results = @{$dbHandler->query($query)};
-	my $winner=0;
-	my $currentWinnerElectricScore=10000;
-	my $currentWinnerMARCScore=0;
-	foreach(@results)
-	{
-		my @row = @{$_};
-		my $prevmarc = @row[1];
-		$prevmarc =~ s/(<leader>.........)./${1}a/;
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my @temp=($prevmarc,determineElectric($prevmarc),scoreMARC($prevmarc,$log));
-		#need to initialize the winner values
-		$winner=@row[0];
-		$currentWinnerElectricScore = @temp[1];
-		$currentWinnerMARCScore = @temp[2];
-		$possibles{@row[0]}=\@temp;
-	}
-	
-	#choose the best deleted bib - we want the lowest electronic bib score in this case because we want to attach the 
-	#items to the *most physical bib
-	while ((my $bib, my $attr) = each(%possibles))
-	{
-		my @atts = @{$attr};
-		if(@atts[1]<$currentWinnerElectricScore)
-		{
-			$winner=$bib;
-			$currentWinnerElectricScore=@atts[1];
-			$currentWinnerMARCScore=@atts[2];
-		}
-		elsif(@atts[1]==$currentWinnerElectricScore && @atts[2]>$currentWinnerMARCScore)
-		{
-			$winner=$bib;
-			$currentWinnerElectricScore=@atts[1];
-			$currentWinnerMARCScore=@atts[2];
-		}		
-	}
-	if($winner!=0)
-	{
-		$query = "select deleted from biblio.record_entry where id=$winner";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my $row = $_;
-			my @row = @{$row};
-			print "$winner - ".@row[0]."\n";
-			#make sure that it is in fact deleted
-			if(@row[0] eq 't' ||@row[0] == 1)
-			{
-				my $tcn_value = $winner;
-				my $count=1;			
-				#make sure that when we undelete it, it will not collide its tcn_value 
-				while($count>0)
-				{
-					$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $winner";
-					$log->addLine($query);
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-					my @results = @{$dbHandler->query($query)};
-					foreach(@results)
-					{	
-						my $row = $_;
-						my @row = @{$row};
-						$count=@row[0];
-					}
-					$tcn_value.="_";
-				}
-				#take the last tail off
-				$tcn_value=substr($tcn_value,0,-1);
-				#finally, undelete the bib making it available for the asset.call_number
-				$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$winner";
-				$dbHandler->update($query);
-			}
-		}
-		#find all of the eligible call_numbers
-		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my @row = @{$_};
-			my $acnid = @row[0];
-			$query = 
-"INSERT INTO molib2go.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
-VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-			$log->addLine($query);
-			$dbHandler->update($query);
-			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-			$log->addLine($query);
-			$dbHandler->update($query);
-		}
-		moveHolds($dbHandler,$currentBibID,$winner,$log);
-	}
 }
 
 sub moveHolds
@@ -1454,25 +1324,26 @@ updateJob("Processing","$query");
 	{
 		$foundIDs="-1";
 	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-updateJob("Processing","$query");
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		print "found matching 001: $id\n";
-		my $marc = @row[1];
-		my $prevmarc = $marc;
-		$prevmarc =~ s/(<leader>.........)./${1}a/;	
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matched001 = ($id,$prevmarc,$score,$marc);
-		push (@ret, [@matched001]);	
-		$none=0;
-		$count++;
-	}
+    # This is super slow - disabled
+	# my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
+# updateJob("Processing","$query");
+	# my @results = @{$dbHandler->query($query)};
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# print "found matching 001: $id\n";
+		# my $marc = @row[1];
+		# my $prevmarc = $marc;
+		# $prevmarc =~ s/(<leader>.........)./${1}a/;	
+		# $prevmarc = MARC::Record->new_from_xml($prevmarc);
+		# my $score = scoreMARC($prevmarc,$log);
+		# my @matched001 = ($id,$prevmarc,$score,$marc);
+		# push (@ret, [@matched001]);	
+		# $none=0;
+		# $count++;
+	# }
 	if($none)
 	{
 		return -1;
