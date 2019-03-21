@@ -535,20 +535,22 @@ sub getmarc
 		{
 			if(-e "$archivefolder/$filename")
 			{
-				my $size = stat("$archivefolder/$filename")->size; #[7];
-				my $rsize = $ftp->size($filename);
-				# print "Local: $size\n";
-				# print "remot: $rsize\n";
-				if($size ne $rsize)
-				{
+                # Disabled because Hoopla tends to reuse the file names and the size compare is unreliable
+                # So we are just going to always download and process the files
+				# my $size = stat("$archivefolder/$filename")->size; #[7];
+				# my $rsize = $ftp->size($filename);
+				# # print "Local: $size\n";
+				# # print "remot: $rsize\n";
+				# if($size ne $rsize)
+				# {
 					$log->addLine("$archivefolder/$filename differes in size remote $filename");
 					unlink("$archivefolder/$filename");
-				}
-				else
-				{
-					$log->addLine("skipping $filename");
-					$download=0;
-				}
+				# }
+				# else
+				# {
+					# $log->addLine("skipping $filename");
+					# $download=0;
+				# }
 			}
 			else
 			{
