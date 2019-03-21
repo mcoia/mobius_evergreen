@@ -657,6 +657,21 @@ sub removeOldCallNumberURI
 {
 	my $bibid = @_[0];
 	my $dbHandler = @_[1];
+    
+    my $uriids = '';
+    my $query = "select uri from asset.uri_call_number_map WHERE call_number in 
+	(
+		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
+	)";
+updateJob("Processing","$query");
+    my @results = @{$dbHandler->query($query)};
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $uriids.=@row[0].",";
+    }
+    $uriids = substr($uriids,0,-1);
+    
 	my $query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
@@ -672,13 +687,13 @@ updateJob("Processing","$query");
 	)";
 updateJob("Processing","$query");
 	$dbHandler->update($query);
-	$query = "
-	DELETE FROM asset.uri WHERE id not in
-	(
-		SELECT uri FROM asset.uri_call_number_map
-	)";
-updateJob("Processing","$query");
-	$dbHandler->update($query);
+    
+    if(length($uriids) > 0)
+    {
+        $query = "DELETE FROM asset.uri WHERE id in ($uriids)";
+    updateJob("Processing","$query");
+        $dbHandler->update($query);
+    }
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
@@ -952,8 +967,13 @@ sub attemptRemoveBibs
 		my $answer = decideToDeleteOrRemove9($marcobj);
 		if($answer==1)
 		{
-			my $query = "SELECT ID,BARCODE FROM ASSET.COPY WHERE CALL_NUMBER IN
-			(SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$id) AND NOT DELETED";
+			my $query = "
+            SELECT ac.ID,ac.BARCODE FROM ASSET.COPY ac,ASSET.CALL_NUMBER acn
+                WHERE 
+                ac.call_number = acn.id and
+                not ac.deleted and
+                not acn.deleted and
+                acn.RECORD=$id";
 			$log->addLine($query);
 			my @results = @{$dbHandler->query($query)};
 			foreach(@results)
@@ -1713,6 +1733,7 @@ sub updateJob
 	my $status = @_[0];
 	my $action = @_[1];
 	my $query = "UPDATE molib2go.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+    $log->addLine($action);
 	my $results = $dbHandler->update($query);
 	return $results;
 }
