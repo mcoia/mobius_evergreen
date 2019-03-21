@@ -20,7 +20,6 @@ use email;
 use DateTime;
 use utf8;
 use Encode;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
@@ -1043,6 +1042,7 @@ updateJob("Processing","updating 245h and 856z");
 	}
 	$file->close();
 	undef $file;
+    @ret = ();
 	push(@ret, (\@worked, \@notworked, \@updated));
 	#print Dumper(@ret);
 	return \@ret;
@@ -1423,25 +1423,26 @@ updateJob("Processing","$query");
 	{
 		$foundIDs="-1";
 	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-updateJob("Processing","$query");
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		print "found matching 001: $id\n";
-		my $marc = @row[1];
-		my $prevmarc = $marc;
-		$prevmarc =~ s/(<leader>.........)./${1}a/;	
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matched001 = ($id,$prevmarc,$score,$marc);
-		push (@ret, [@matched001]);	
-		$none=0;
-		$count++;
-	}
+    # This is super slow - disabled
+	# my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
+# updateJob("Processing","$query");
+	# my @results = @{$dbHandler->query($query)};
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# print "found matching 001: $id\n";
+		# my $marc = @row[1];
+		# my $prevmarc = $marc;
+		# $prevmarc =~ s/(<leader>.........)./${1}a/;	
+		# $prevmarc = MARC::Record->new_from_xml($prevmarc);
+		# my $score = scoreMARC($prevmarc,$log);
+		# my @matched001 = ($id,$prevmarc,$score,$marc);
+		# push (@ret, [@matched001]);	
+		# $none=0;
+		# $count++;
+	# }
 	if($none)
 	{
 		return -1;
