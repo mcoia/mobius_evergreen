@@ -1,12 +1,11 @@
 #!/usr/bin/perl
 
 # These Perl modules are required:
-# install pQuery
 # install Email::MIME
 # install Email::Sender::Simple
 # install Digest::SHA1
 
-use lib qw(../);
+use lib qw(../../);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -20,7 +19,6 @@ use email;
 use DateTime;
 use utf8;
 use Encode;
-use pQuery;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
@@ -36,7 +34,7 @@ use File::stat;
 
  our $mobUtil = new Mobiusutil(); 
  our $conf = $mobUtil->readConfFile($configFile);
- 
+ our %conf;
  our $jobid=-1;
  our $log;
  our $archivefolder;
@@ -47,7 +45,7 @@ use File::stat;
  
  if($conf)
  {
-	my %conf = %{$conf};
+	%conf = %{$conf};
 	if ($conf{"logfile"})
 	{
 		my $dt = DateTime->now(time_zone => "local"); 
@@ -55,9 +53,9 @@ use File::stat;
 		my $ftime = $dt->hms;
 		my $dateString = "$fdate $ftime";
 		$log = new Loghandler($conf->{"logfile"});
-		$log->truncFile("");
+		#$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("server","login","password","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","yearstoscrape"); 
+		my @reqs = ("server","login","password","remotefolder","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","incomingmarcfolder","recordsource","ignorefiles","removalfiles"); 
 		my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
@@ -101,13 +99,12 @@ use File::stat;
 			$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
 			setupSchema($dbHandler);
 			
-			# @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc records/hoopla/")};
-			
-			@files = @{getmarc($conf{"server"},$conf{"login"},$conf{"password"},$conf{"yearstoscrape"},$archivefolder,$log)};
-			
+            @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
+            @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} ne 'folder');
+            
 			if(@files[$#files]!=-1)
 			{
-			#print Dumper(@files);
+			print Dumper(@files);
 				my $cnt = 0;
 				my @removalFiles = ();
 				for my $b(0..$#files)
@@ -115,7 +112,7 @@ use File::stat;
 					my $thisfilename = lc($files[$b]);
 					
 					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
-					my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
+					my $file = MARC::File::USMARC->in($files[$b]);
 					
 					if(! ($thisfilename =~ m/remove/))
 					{					
@@ -505,7 +502,95 @@ sub deleteFiles
 	}
 }
 
-sub getmarc
+sub parseFileName
+{
+    my $fullPath = @_[0];
+    my @sp = split('/',$fullPath);
+    my $path=substr($fullPath,0,( (length(@sp[$#sp]))*-1) );
+    
+    my @fsp = split('\.',@sp[$#sp]);
+    my $fExtension = pop @fsp;
+    my $baseFileName = join('.', @fsp);
+    $baseFileName= Encode::encode("CP1252", $baseFileName);
+    my @ret = ($path,$baseFileName,$fExtension);
+    return \@ret;
+}
+
+sub moveFile
+{
+    my $file = @_[0];
+    my $destination = @_[1];
+    my $fhandle = new Loghandler($file);
+
+    if( $fhandle->copyFile($destination) )
+    {
+        if(! (unlink($file)) )
+        {
+            print "Unable to delete $file";
+            return 0;
+        }
+    }
+    undef $fhandle;
+    return 1;
+}
+
+sub getmarcFromFolder
+{
+	my $incomingfolder = $conf{'incomingmarcfolder'};
+    my $archivefolder = $conf{'archivefolder'};
+    my $log = @_[2];
+	
+    my @ret;
+    my @files;
+	#Get all files in the directory path
+	@files = @{dirtrav(\@files,$incomingfolder)};
+    
+	foreach(@files)
+	{
+		my $filename = $_;
+        my @filePathParse = @{parseFileName($filename)};
+        $filename = @filePathParse[1].'.'.@filePathParse[2];
+		my $download = decideToDownload($filename);
+		
+		if($download)
+		{
+			if(-e "$archivefolder/$filename")
+			{
+				my $size = stat("$archivefolder/$filename")->size; #[7];
+				my $rsize = stat("$incomingfolder/$filename")->size;
+				$log->addLogLine("$filename Local: $size Remote: $rsize");
+                if($size ne $rsize)
+				{
+					$log->addLine("$archivefolder/$filename differes in size remote $filename");
+					unlink("$archivefolder/$filename");
+				}
+				else
+				{
+					$log->addLine("skipping $filename");
+                    unlink(@filePathParse[0].'/'.$filename);
+					$download=0;
+				}
+			}
+			else
+			{
+				$log->addLogLine("NEW $filename");
+			}
+			if($download)
+			{
+                my $fhandle = new Loghandler();
+				my $worked = moveFile(@filePathParse[0].'/'.$filename,"$archivefolder/$filename");
+				if($worked)
+				{
+					push (@ret, $filename);
+				}
+			}
+		}
+	}
+	$log->addLine(Dumper(\@ret));
+	return \@ret;
+}
+
+sub getmarcFromFTP
 {
 	my $server = @_[0];
 	$server=~ s/http:\/\///gi;
@@ -524,19 +609,20 @@ sub getmarc
 	or die $log->addLogLine("Cannot connect to ".$server);
     $ftp->login($login,$password)
 	or die $log->addLogLine("Cannot login ".$ftp->message);
-	$ftp->cwd('/cpp/mz7/');
-	
-    my @remotefiles = $ftp->ls();
-	foreach(@remotefiles)
+	$ftp->cwd($remotefolder);
+	my @interestingFiles = ();
+	@interestingFiles = @{ftpRecurse($ftp, \@interestingFiles)};
+    $log->addLine(Dumper(\@interestingFiles));
+	foreach(@interestingFiles)
 	{
 		my $filename = $_;
 		my $download = decideToDownload($filename);
 		
 		if($download)
 		{
-			if(-e "$archivefolder/$filename")
+			if(-e "$archivefolder"."$filename")
 			{
-				my $size = stat("$archivefolder/$filename")->size; #[7];
+				my $size = stat("$archivefolder"."$filename")->size; #[7];
 				my $rsize = $ftp->size($filename);
 				# print "Local: $size\n";
 				# print "remot: $rsize\n";
@@ -572,31 +658,62 @@ sub getmarc
 	return \@ret;
 }
 
+sub ftpRecurse
+{
+    my $ftpOb = @_[0];
+    my @interestingFiles = @{@_[1]};
+    # return \@interestingFiles if($#interestingFiles > 2);
+    
+    my @remotefiles = $ftpOb->ls();
+    foreach(@remotefiles)
+    {
+        # $log->addLine("pwd = ".$ftpOb->pwd." cwd into $_");
+        if($ftpOb->cwd($ftpOb->pwd."/".$_)) #it's a directory
+        {
+            #let's go again
+            @interestingFiles = @{ftpRecurse($ftpOb,\@interestingFiles)};
+            #$log->addLine("going to parent dir from = ".$ftpOb->pwd);
+            $ftpOb->cdup();
+        }
+        else #it's not a directory
+        {
+            my $pwd = $ftpOb->pwd;
+            if(decideToDownload($_))
+            {
+                my $full = $pwd."/".$_;
+                push (@interestingFiles , $full);
+            }
+        }
+    }
+    return \@interestingFiles;
+}
+
 sub decideToDownload
 {
 	my $filename = @_[0];
 	$filename = lc($filename);
 	my $download = 1;
-	if(! ($filename =~ m/\.mrc/g) )
-	{
-		return 0;
-	}
-	if($filename =~ m/remove/g)
-	{
-		$download = 1;
-	}
-	if($filename =~ m/add/g)
-	{
-		$download = 1;
-	}
-	if($filename =~ m/polaris/g)
-	{
-		
-		$download = 0;
-	}
+    my @onlyProcess = ();
+    if($conf{'onlyprocess'}) # This is optional but if present, very restrictive
+    {
+        my $go = 0;
+        my @phrases = split(/\s/,$conf{'onlyprocess'});
+        foreach(@phrases)
+        {
+            my $phrase = lc $_;
+            $go = 1 if ($filename =~ m/$phrase/g );
+        }
+        return 0 if !$go;
+    }
+    my @ignorePhrases = split(/\s/,$conf{'ignorefiles'});
+    foreach(@ignorePhrases)
+    {
+        my $phrase = lc $_;
+        $download = 0 if ($filename =~ m/$phrase/g );
+    }
+    $log->addLogLine("Ignoring file $filename due to a match in ".$conf{'ignorefiles'}) if !$download;
 	return $download;
 }
-
 
 sub add9
 {
@@ -659,6 +776,21 @@ sub removeOldCallNumberURI
 {
 	my $bibid = @_[0];
 	my $dbHandler = @_[1];
+    
+    my $uriids = '';
+    my $query = "select uri from asset.uri_call_number_map WHERE call_number in 
+	(
+		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
+	)";
+updateJob("Processing","$query");
+    my @results = @{$dbHandler->query($query)};
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $uriids.=@row[0].",";
+    }
+    $uriids = substr($uriids,0,-1);
+    
 	my $query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
@@ -674,13 +806,13 @@ updateJob("Processing","$query");
 	)";
 updateJob("Processing","$query");
 	$dbHandler->update($query);
-	$query = "
-	DELETE FROM asset.uri WHERE id not in
-	(
-		SELECT uri FROM asset.uri_call_number_map
-	)";
-updateJob("Processing","$query");
-	$dbHandler->update($query);
+    
+    if(length($uriids) > 0)
+    {
+        $query = "DELETE FROM asset.uri WHERE id in ($uriids)";
+    updateJob("Processing","$query");
+        $dbHandler->update($query);
+    }
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
@@ -910,7 +1042,7 @@ updateJob("Processing","updating 245h and 856z");
 				{
 					my @temp = ($newmax,$title);
 					push @worked, [@temp];
-					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml");
+					$log->addLine("$newmax\thttp://mig.missourievergreen.org/eg/opac/record/$newmax?locg=157;expand=marchtml#marchtml");
 					$query = "INSERT INTO molib2go.bib_marc_update(record,changed_marc,new_record,job) VALUES($newmax,\$1,true,$jobid)";
 					my @values = ($thisXML);
 					$dbHandler->updateWithParameters($query,\@values);
@@ -1160,7 +1292,7 @@ sub chooseWinnerAndDeleteRest
 updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	$log->addLine($query);
 	$log->addLine($thisXML);
-	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t$matchnum");
+	$log->addLine("$winnerBibID\thttp://missourievergreen.org/eg/opac/record/$winnerBibID?locg=4;expand=marchtml#marchtml\thttp://mig.missourievergreen.org/eg/opac/record/$winnerBibID?locg=157;expand=marchtml#marchtml\t$matchnum");
 	my $res = $dbHandler->updateWithParameters($query,\@values);
 	#print "$res\n";
 	if($res)
@@ -1178,111 +1310,6 @@ updateJob("Processing","chooseWinnerAndDeleteRest   $query");
 	
 	return \@ret;
 	
-}
-
-sub moveAssetCopyToPreviouslyDedupedBib
-{
-	my $currentBibID = @_[0];
-	my $overdriveMatchString = @_[1];
-	my %possibles;
-	#this query will only return previously deleted bibs that do not have the molib2go 001 field ($overdriveMatchString)
-	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
-	where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid and bre.marc !~ \$\$$overdriveMatchString\$\$";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-	#print $query."\n";
-	my @results = @{$dbHandler->query($query)};
-	my $winner=0;
-	my $currentWinnerElectricScore=10000;
-	my $currentWinnerMARCScore=0;
-	foreach(@results)
-	{
-		my @row = @{$_};
-		my $prevmarc = @row[1];
-		$prevmarc =~ s/(<leader>.........)./${1}a/;
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my @temp=($prevmarc,determineElectric($prevmarc),scoreMARC($prevmarc,$log));
-		#need to initialize the winner values
-		$winner=@row[0];
-		$currentWinnerElectricScore = @temp[1];
-		$currentWinnerMARCScore = @temp[2];
-		$possibles{@row[0]}=\@temp;
-	}
-	
-	#choose the best deleted bib - we want the lowest electronic bib score in this case because we want to attach the 
-	#items to the *most physical bib
-	while ((my $bib, my $attr) = each(%possibles))
-	{
-		my @atts = @{$attr};
-		if(@atts[1]<$currentWinnerElectricScore)
-		{
-			$winner=$bib;
-			$currentWinnerElectricScore=@atts[1];
-			$currentWinnerMARCScore=@atts[2];
-		}
-		elsif(@atts[1]==$currentWinnerElectricScore && @atts[2]>$currentWinnerMARCScore)
-		{
-			$winner=$bib;
-			$currentWinnerElectricScore=@atts[1];
-			$currentWinnerMARCScore=@atts[2];
-		}		
-	}
-	if($winner!=0)
-	{
-		$query = "select deleted from biblio.record_entry where id=$winner";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my $row = $_;
-			my @row = @{$row};
-			print "$winner - ".@row[0]."\n";
-			#make sure that it is in fact deleted
-			if(@row[0] eq 't' ||@row[0] == 1)
-			{
-				my $tcn_value = $winner;
-				my $count=1;			
-				#make sure that when we undelete it, it will not collide its tcn_value 
-				while($count>0)
-				{
-					$query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $winner";
-					$log->addLine($query);
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-					my @results = @{$dbHandler->query($query)};
-					foreach(@results)
-					{	
-						my $row = $_;
-						my @row = @{$row};
-						$count=@row[0];
-					}
-					$tcn_value.="_";
-				}
-				#take the last tail off
-				$tcn_value=substr($tcn_value,0,-1);
-				#finally, undelete the bib making it available for the asset.call_number
-				$query = "update biblio.record_entry set deleted='f',tcn_source='un-deduped',tcn_value = \$\$$tcn_value\$\$  where id=$winner";
-				$dbHandler->update($query);
-			}
-		}
-		#find all of the eligible call_numbers
-		$query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$ AND DELETED is false";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{	
-			my @row = @{$_};
-			my $acnid = @row[0];
-			$query = 
-"INSERT INTO molib2go.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
-VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$acnid,$jobid)";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");							
-			$log->addLine($query);
-			$dbHandler->update($query);
-			$query = "UPDATE ASSET.CALL_NUMBER SET RECORD=$winner WHERE id = $acnid";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-			$log->addLine($query);
-			$dbHandler->update($query);
-		}
-		moveHolds($dbHandler,$currentBibID,$winner,$log);
-	}
 }
 
 sub moveHolds
@@ -1476,8 +1503,8 @@ sub readyMARCForInsertIntoME
 					}
 					if(!$ignore)
 					{
-						$thisfield->delete_subfield(code => 'z');					
-						$thisfield->add_subfields('z'=> "Instantly available on overdrive");
+						#$thisfield->delete_subfield(code => 'z');					
+						#$thisfield->add_subfields('z'=> "Instantly available on ebrary");
 					}
 				}
 			}
@@ -1715,6 +1742,7 @@ sub updateJob
 	my $status = @_[0];
 	my $action = @_[1];
 	my $query = "UPDATE molib2go.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
+    $log->addLine($action);
 	my $results = $dbHandler->update($query);
 	return $results;
 }
