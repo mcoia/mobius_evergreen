@@ -91,6 +91,7 @@ use File::stat;
 		{	
 			my @marcOutputRecords;
 			my @marcOutputRecordsRemove;
+            my $removalsViaMARC = 1;
 			@shortnames = split(/,/,$conf{"participants"});
 			for my $y(0.. $#shortnames)
 			{				
@@ -109,31 +110,70 @@ use File::stat;
 				my @removalFiles = ();
 				for my $b(0..$#files)
 				{
-					my $thisfilename = lc($files[$b]);
-					
-					$log->addLogLine("Parsing: $archivefolder/".$files[$b]);
-					my $file = MARC::File::USMARC->in($files[$b]);
-					
-					if(! ($thisfilename =~ m/remove/))
-					{					
+                    my $thisfilename = lc($files[$b]);
+					if(! compareStringToArray($thisfilename,$conf{'removalfiles'}) )
+					{
+                        $log->addLogLine("Parsing: $archivefolder".$files[$b]);
+                        my $file = MARC::File::USMARC->in("$archivefolder".$files[$b]);
 						while ( my $marc = $file->next() ) 
 						{	
 							$marc = add9($marc);
 							push(@marcOutputRecords,$marc);
 						}
 						$cnt++;
+                        $file->close();
+                        undef $file;
 					}
 					else
 					{
-						while ( my $marc = $file->next() ) 
-						{	
-							push(@marcOutputRecordsRemove,$marc);
-						}
-						push (@removalFiles,$thisfilename);
+                        push (@removalFiles,$files[$b]);
+                        if(! ( ($thisfilename =~ m/csv/) || ($thisfilename =~ m/tsv/) ) )
+                        {
+                            $log->addLogLine("Parsing: $archivefolder".$files[$b]);
+                            my $file = MARC::File::USMARC->in($archivefolder.$files[$b]);
+                            while ( my $marc = $file->next() ) 
+                            {	
+                                push(@marcOutputRecordsRemove,$marc);
+                            }
+                            $file->close();
+                            undef $file;
+                        }
+                        else # Handle comma separated files, get the ISBN
+                        {
+                            $removalsViaMARC = 0;
+                            my $tfile = new Loghandler($archivefolder.$files[$b]);
+                            my @lines = @{$tfile->readFile()};
+                            my $commas = 0;
+                            my $tabs = 0;
+                            my $bib_sourceid = getbibsource();
+                            foreach(@lines)
+                            {
+                                my @split = split(/,/,$_);
+                                $commas+=$#split;
+                                @split = split(/\t/,$_);
+                                $tabs+=$#split;
+                            }
+                            my $delimiter = $commas > $tabs ? "," : "\t";
+                            foreach(@lines)
+                            {
+                                my @split = split(/$delimiter/,$_);
+                                foreach(@split)
+                                {
+                                    my $ent = $mobUtil->trim($_);
+                                    $ent =~ s/\D//g;
+                                    if( ( length($ent) == 13 ) or ( length($ent) == 10 ) )
+                                    {
+                                        print "Passed\n";
+                                        my @ids = @{findMatchingISBN($ent, $bib_sourceid)};
+                                        push(@marcOutputRecordsRemove, @ids);
+                                    }
+                                }
+                            }
+                        }
 					}
-					$file->close();
-					undef $file;
 				}
+                
+                $log->addLine("found $#marcOutputRecordsRemove records to remove");
 				my $outputFile = $mobUtil->chooseNewFileName($conf{"tempspace"},"temp","mrc");
 				my $outputFileRemoval = $mobUtil->chooseNewFileName($conf{"tempspace"},"tempremoval","mrc");
 				my $marcout = new Loghandler($outputFile);
@@ -142,7 +182,6 @@ use File::stat;
 				$marcoutRemoval->deleteFile();
 				
 				my $output;
-				#my $output = getListOfMARC($log,$dbHandler,\@marcOutputRecords);
 			
 				foreach(@marcOutputRecords)
 				{
@@ -151,17 +190,18 @@ use File::stat;
 					$count++;
 				}
 				$log->addLogLine("Outputting $count record(s) into $outputFile");
-				$marcout->appendLine($output);
+				$marcout->addLineRaw($output);
 				
-				$output='';
-				foreach(@marcOutputRecordsRemove)
-				{
-					my $marc = $_;
-					$output.=$marc->as_usmarc();
-					$countremoval++;
-				}
-				$log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval");
-				$marcoutRemoval->appendLine($output);
+               
+                $output='';
+                foreach(@marcOutputRecordsRemove)
+                {
+                    my $marc = $_;
+                    $output.=$marc->as_usmarc() if $removalsViaMARC;
+                    $countremoval++;
+                }
+                $log->addLogLine("Outputting $countremoval record(s) into $outputFileRemoval") if $removalsViaMARC;
+                $marcoutRemoval->addLineRaw($output) if $removalsViaMARC;
 				
 				eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
 				if ($@) 
@@ -186,7 +226,8 @@ use File::stat;
 							@info = @{importMARCintoEvergreen($outputFile,$log,$dbHandler,$mobUtil,$bib_sourceid)};
 							$finalImport = 1;
 							$log->addLine(Dumper(\@info));
-							@infoRemoval = @{removeBibsEvergreen($outputFileRemoval,$log,$dbHandler,$mobUtil,$bib_sourceid)};
+							@infoRemoval = @{removeBibsEvergreen($outputFileRemoval,$log,$dbHandler,$mobUtil,$bib_sourceid,$removalsViaMARC,\@marcOutputRecordsRemove)};
+                            $log->addLine(Dumper(\@infoRemoval));
 						}
 						else
 						{
@@ -458,38 +499,6 @@ sub gatherOutputReport
 	
 }
 
-sub getListOfMARC
-{
-	my $log = @_[0];
-	my $dbHandler = @_[1];
-	my @marcOutputRecords = @{@_[2]};
-	my $ret;
-	my $matches=0;
-	my $loops=0;
-	foreach(@marcOutputRecords)
-	{
-		my $zero01 = $_->field('001')->data();	
-		print "$matches / $loops - $zero01\n";
-		my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE deleted is false AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!=\$\$##URI##\$\$) and id in(select distinct lead_bibid from m_dedupe.merge_map) and MARC ~ '$zero01' ";
-		my @results = @{$dbHandler->query($query)};
-		my $found=0;
-		foreach(@results)
-		{
-			print "Found one!\n";
-			$found=1;
-		}
-		if($found)
-		{
-			$ret.=$_->as_usmarc();
-			$matches++;
-		}
-		if($matches>5)
-		{
-			return $ret;
-		}
-	}
-}
-
 sub deleteFiles
 {
 	my $log = @_[0];
@@ -537,7 +546,6 @@ sub moveFile
 sub getmarcFromFolder
 {
 	my $incomingfolder = $conf{'incomingmarcfolder'};
-    my $archivefolder = $conf{'archivefolder'};
     my $log = @_[2];
 	
     my @ret;
@@ -592,15 +600,13 @@ sub getmarcFromFolder
 
 sub getmarcFromFTP
 {
-	my $server = @_[0];
+	my $server = $conf{'server'};
 	$server=~ s/http:\/\///gi;
 	$server=~ s/ftp:\/\///gi;
 	
 	my $loops=0;
-	my $login = @_[1];
-	my $password = @_[2];	
-	my $yearstoscrape = @_[3];
-	my $archivefolder = @_[4];
+	my $login = $conf{'login'};
+	my $password = $conf{'password'};    
 	my @ret = ();
 	
 	$log->addLogLine("**********FTP starting -> $server with $login and $password");
@@ -628,8 +634,8 @@ sub getmarcFromFTP
 				# print "remot: $rsize\n";
 				if($size ne $rsize)
 				{
-					$log->addLine("$archivefolder/$filename differes in size remote $filename");
-					unlink("$archivefolder/$filename");
+					$log->addLine("$archivefolder"."$filename differes in size");
+					unlink("$archivefolder"."$filename");
 				}
 				else
 				{
@@ -643,7 +649,18 @@ sub getmarcFromFTP
 			}
 			if($download)
 			{
-				my $worked = $ftp->get($filename,"$archivefolder/$filename");
+                my $path = $archivefolder.$filename;
+                $path = substr($path,0,rindex($path,'/'));
+                # $log->addLine("Path = $path");
+                if(!-d $path)
+                {
+                    $log->addLine("$path doesnt exist - creating directory");
+                    make_path($path, {
+                    verbose => 0,
+                    mode => 0755,
+                    });
+                }
+                my $worked = $ftp->get($filename,$archivefolder.$filename);
 				if($worked)
 				{
 					push (@ret, "$filename");
@@ -697,22 +714,29 @@ sub decideToDownload
     if($conf{'onlyprocess'}) # This is optional but if present, very restrictive
     {
         my $go = 0;
-        my @phrases = split(/\s/,$conf{'onlyprocess'});
-        foreach(@phrases)
-        {
-            my $phrase = lc $_;
-            $go = 1 if ($filename =~ m/$phrase/g );
-        }
+        $go = compareStringToArray($filename,$conf{'onlyprocess'});
+        $log->addLogLine("Ignoring file $filename because it didn't contain one of these: ".$conf{'onlyprocess'}) if !$go;
         return 0 if !$go;
     }
-    my @ignorePhrases = split(/\s/,$conf{'ignorefiles'});
-    foreach(@ignorePhrases)
-    {
-        my $phrase = lc $_;
-        $download = 0 if ($filename =~ m/$phrase/g );
-    }
+    
+    $download = 0 if ( compareStringToArray($filename,$conf{'ignorefiles'}) );
     $log->addLogLine("Ignoring file $filename due to a match in ".$conf{'ignorefiles'}) if !$download;
 	return $download;
+}
+
+sub compareStringToArray
+{
+    my $wholeString = @_[0];
+    my $tphrases = @_[1];
+    my @phrases = split(/\s/,$tphrases);
+    my $ret = 0;
+    $wholeString = lc $wholeString;
+    foreach(@phrases)
+    {
+        my $phrase = lc $_;
+        return 1 if ($wholeString =~ m/$phrase/g);
+    }
+    return $ret;
 }
 
 sub add9
@@ -833,7 +857,7 @@ sub recordAssetCopyMove
 	my $dbHandler = @_[2];
 	my $overdriveMatchString = @_[3];
 	my $log = @_[4];
-	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$)";
+	my $query = "select id from asset.copy where call_number in(select id from asset.call_number where record in($oldbib) and label!=\$\$##URI##\$\$) and not deleted";
 	my @cids;
 	my @results = @{$dbHandler->query($query)};
 	foreach(@results)
@@ -841,22 +865,7 @@ sub recordAssetCopyMove
 		my @row = @{$_};
 		push(@cids,@row[0]);
 	}
-	
-	if($#cids>-1)
-	{		
-		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
-		moveAssetCopyToPreviouslyDedupedBib($oldbib,$overdriveMatchString);		
-	}	
-	
-	#Check again after the attempt to undedupe
-	@cids = ();
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my @row = @{$_};
-		push(@cids,@row[0]);
-	}
-	
+    
 	foreach(@cids)
 	{
 		print "There were asset.copies on $oldbib even after attempting to put them on a deduped bib\n";
@@ -950,37 +959,61 @@ sub removeBibsEvergreen
 	my $dbHandler = @_[2];
 	my $mobUtil = @_[3];
 	my $bibsourceid = @_[4];
-	my $file = MARC::File::USMARC->in( $inputFile );
+    my $removalsViaMARC = @_[5];
+    my @marcOutputRecordsRemove = @{@_[6]};
+	
 	my $r =0;		
 	my $removed = 0;
 	my $loops = 0;
-	my $query;	
+    
+    updateJob("Processing","removeBibsEvergreen");
+    
 	#print "Working on removeBibsEvergreen\n";
-	updateJob("Processing","removeBibsEvergreen");
-	while ( my $marc = $file->next() ) 
-	{
-		# if($loops < 5)
-		# {
-		my $title = getsubfield($marc,'245','a');
-		my $sha1 = calcSHA1($marc);
-		my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
-		if($bibid!=-1) #already exists
-		{	
-			@ret = @{attemptRemoveBibs($bibid, $dbHandler, $title, \@notworked, \@updated, $log)};			
-			$log->addLine("Got attemptRemoveBibs");
-			$log->addLine(Dumper(\@ret));
-			@updated = @{@ret[0]};
-			@notworked = @{@ret[1]};
-			$removed+=$#updated+1;
-		}
-		else
-		{
-			my @copy = ($bibid,$title,"No matching bib in ME");
-			push( @notworked, [@copy] );
-		}
-		$loops++;
-		#}
-	}
+    
+    if( $removalsViaMARC )
+    {
+        my $file = MARC::File::USMARC->in( $inputFile );
+        while ( my $marc = $file->next() ) 
+        {
+            my $title = getsubfield($marc,'245','a');
+            my $sha1 = calcSHA1($marc);
+            my $bibid = findRecord($marc, $dbHandler, $sha1, $bibsourceid, $log);
+            if($bibid!=-1) #already exists
+            {	
+                @ret = @{attemptRemoveBibs($bibid, $dbHandler, $title, \@notworked, \@updated, $log)};			
+                $log->addLine("Got attemptRemoveBibs");
+                $log->addLine(Dumper(\@ret));
+                @updated = @{@ret[0]};
+                @notworked = @{@ret[1]};
+                $removed+=$#updated+1;
+            }
+            else
+            {
+                my @copy = ($bibid,$title,"No matching bib in ME");
+                push( @notworked, [@copy] );
+            }
+            $loops++;
+        }
+    }
+    else
+    {
+        $log->addLine("Removing $#marcOutputRecordsRemove bibs");
+        foreach(@marcOutputRecordsRemove)
+        {
+            my $bib = $_;
+            my @temp = @{$bib};
+            my $marc = @temp[1];
+            my $title = getsubfield($marc,'245','a');
+            $log->addLine("Removing $title");
+            my @pass = ([@{$bib}]);
+            @ret = @{attemptRemoveBibs(\@pass, $dbHandler, $title, \@notworked, \@updated, $log)};            
+            $log->addLine(Dumper(\@ret));
+            @updated = @{@ret[0]};
+            @notworked = @{@ret[1]};
+            $removed+=$#updated+1;
+            $loops++;
+        }
+    }
 	my @ret = ();
 	push(@ret, (\@notworked, \@updated));
 	return \@ret;
@@ -1225,6 +1258,39 @@ sub decideToDeleteOrRemove9
 	
 }
 
+sub findMatchingISBN
+{
+    my $isbn = @_[0];
+    my $bibsourceid = @_[1];
+    my @ret = ();
+    
+    my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE
+    tcn_source~\$\$$importSourceNameDB-script\$\$ AND
+    source=$bibsourceid AND
+    NOT DELETED AND
+    ID IN(
+    select source from metabib.identifier_field_entry
+    WHERE
+    index_vector  @@ to_tsquery(\$\$$isbn\$\$)
+    )
+    ";
+    # $log->addLine($query);
+	my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+        my $id = @row[0];
+        my $marc = @row[1];
+        my $marcobj = $marc;
+        $marcobj =~ s/(<leader>.........)./${1}a/;
+        my $marcobj = MARC::Record->new_from_xml($marcobj);
+        my $score = scoreMARC($marcobj,$log);
+        my @arr = ($id,$marcobj,$score,$marc);
+		push (@ret, [@arr]);
+    }
+    return \@ret;
+}
 
 sub chooseWinnerAndDeleteRest
 {
@@ -1402,25 +1468,26 @@ updateJob("Processing","$query");
 	{
 		$foundIDs="-1";
 	}
-	my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-updateJob("Processing","$query");
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		print "found matching 001: $id\n";
-		my $marc = @row[1];
-		my $prevmarc = $marc;
-		$prevmarc =~ s/(<leader>.........)./${1}a/;	
-		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matched001 = ($id,$prevmarc,$score,$marc);
-		push (@ret, [@matched001]);	
-		$none=0;
-		$count++;
-	}
+    # This is super slow - disabled
+	# my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
+# updateJob("Processing","$query");
+	# my @results = @{$dbHandler->query($query)};
+	# foreach(@results)
+	# {
+		# my $row = $_;
+		# my @row = @{$row};
+		# my $id = @row[0];
+		# print "found matching 001: $id\n";
+		# my $marc = @row[1];
+		# my $prevmarc = $marc;
+		# $prevmarc =~ s/(<leader>.........)./${1}a/;	
+		# $prevmarc = MARC::Record->new_from_xml($prevmarc);
+		# my $score = scoreMARC($prevmarc,$log);
+		# my @matched001 = ($id,$prevmarc,$score,$marc);
+		# push (@ret, [@matched001]);	
+		# $none=0;
+		# $count++;
+	# }
 	if($none)
 	{
 		return -1;
@@ -1770,7 +1837,6 @@ sub findPBrecordInME
 sub findMatchInArchive
 {
 	my @matchList = @{@_[0]};
-	my $archiveFolder = @_[1];
 	my @files;
 	#Get all files in the directory path
 	@files = @{dirtrav(\@files,$archiveFolder)};

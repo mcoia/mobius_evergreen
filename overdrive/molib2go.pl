@@ -128,7 +128,7 @@ use File::stat;
 					}
 					else
 					{
-                        push (@removalFiles,$thisfilename);
+                        push (@removalFiles,$files[$b]);
                         if(! ( ($thisfilename =~ m/csv/) || ($thisfilename =~ m/tsv/) ) )
                         {
                             $log->addLogLine("Parsing: $archivefolder".$files[$b]);
