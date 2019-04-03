@@ -93,6 +93,7 @@ sub setupTable
     my $insertFile = @_[2];
     my $insertString = '';
 	
+    my $emptyHeaderName = 'ghost';
     my $header = shift @lines;
     $log->addLine($header);
     my @cols = split(/\t/,$header);
@@ -102,6 +103,10 @@ sub setupTable
         @cols[$i] =~ s/[\.\/\s\$!\-\(\)]/_/g;
         @cols[$i] =~ s/\_{2,50}/_/g;
         @cols[$i] =~ s/\_$//g;
+        
+        # Catch those naughty columns that don't have anything left to give
+        $emptyHeaderName.='t' if(length(@cols[$i]) == 0);
+        @cols[$i]=$emptyHeaderName if(length(@cols[$i]) == 0);
 	}
 	print "Gathering $tablename....";
 	$log->addLine(Dumper(\@cols));
