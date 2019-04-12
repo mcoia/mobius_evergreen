@@ -79,6 +79,11 @@ while ( my $marc = $file->next())
             foreach(@subfields)
             {
                 my @b = @{$_};
+                @b[0] = lc(@b[0]);
+                @b[0] =~ s/"//g;
+                @b[0] =~ s/\+//g;
+                @b[0] =~ s/\s//g;
+                @b[0] =~ s/\-//g;
                 my $append = 1;
                 while($subcount{$tag.@b[0]."_".$append})
                 {
@@ -106,6 +111,9 @@ while ( my $marc = $file->next())
                 {
                     push(@marcOutput,"");
                 }
+                @b[1]=~s/\n//g;
+                @b[1]=~s/\t//g;
+                @b[1]=~s/\r//g;
                 @marcOutput[$found]=@b[1];
             }
             push(@allOutCSV,[@marcOutput]);
@@ -231,7 +239,7 @@ sub setupTable
                     $value =~ s/[\x{80}-\x{ffff}]//go;
                     $thisline.=$value;
                     #print "$value\n";
-                    $query.='$$'.$value.'$$,';
+                    $query.='$data$'.$value.'$data$,';
                     $valcount++;
                 }
             }
@@ -239,8 +247,8 @@ sub setupTable
             my $pad = $#header - $#thisrow - 1;
             for my $i (0..$pad)
             {
-                $thisline.='$$$$,';
-                $query.='$$$$,';
+                $thisline.='$data$$data$,';
+                $query.='$data$$data$,';
             }
             # $log->addLine( "final line $thisline");
             $query=substr($query,0,-1)."),\n";
