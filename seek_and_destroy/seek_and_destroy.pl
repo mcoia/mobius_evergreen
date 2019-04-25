@@ -24,58 +24,64 @@ use Getopt::Long;
 
 
 
-# 007 byte 4: v=DVD b=VHS s=Blueray
-# substr(007,4,1)
-# Blue-ray:
-# http://missourievergreen.org/eg/opac/record/586602?query=c;qtype=keyword;fi%3Asearch_format=blu-ray;locg=1
-# vd uscza-
-# DVD:
-# missourievergreen.org/eg/opac/record/1066653?query=c;qtype=keyword;fi%3Asearch_format=dvd;locg=1
-# vd mvaizu
-# VHS:
-# http://missourievergreen.org/eg/opac/record/604075?query=c;qtype=keyword;fi%3Asearch_format=vhs;locg=1
-# vf-cbahou
-
-# Playaway query chunk:
-# (
-		# (
-		# split_part(marc,$$tag="007">$$,3) ~ 'sz' 
-		# and 
-		# split_part(marc,$$tag="007">$$,2) ~ 'cz' 
-		# )
-	# or
-		# (
-		# split_part(marc,$$tag="007">$$,2) ~ 'sz' 
-		# and 
-		# split_part(marc,$$tag="007">$$,3) ~ 'cz' 
-		# )
-	# )
-	
-	# Find Biblio.record_entry without opac icons:
-# select id from biblio.record_entry where not deleted and 
-# id not in(select id from metabib.record_attr_flat where attr='icon_format')
-# 32115 rows
-
 my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
 our $dryrun=0;
 our $debug=0;
 our $reportonly=0;
+our $runCleamMetarecords=0;
+our $runElectronic=0;
+our $runAudioBook=0;
+our $runVideo=0;
+our $runLargePrint=0;
+our $runMusic=0;
+our $runMoveElectronicBooks=0;
+our $runMoveElectronicAudioBooks=0;
+our $runMoveAudioBooks=0;
+our $runDedupe=0;
+our $runFindElectronic856TOC=0;
+
+                    
+our $resetScores=0;
 
 
 GetOptions (
 "config=s" => \$configFile,
 "xmlconfig=s" => \$xmlconf,
 "dryrun" => \$dryrun,
-"debug" => \$debug,
+"runCleamMetarecords" => \$runCleamMetarecords,
+"runElectronic" => \$runElectronic,
+"runAudioBook" => \$runAudioBook,
+"runVideo" => \$runVideo,
+"runLargePrint" => \$runLargePrint,
+"runMusic" => \$runMusic,
+"runMoveElectronicBooks" => \$runMoveElectronicBooks,
+"runMoveElectronicAudioBooks" => \$runMoveElectronicAudioBooks,
+"runMoveAudioBooks" => \$runMoveAudioBooks,
+"runDedupe" => \$runDedupe,
+"runFindElectronic856TOC" => \$runFindElectronic856TOC,
+"resetScores" => \$resetScores,
 "reportonly" => \$reportonly
 )
 or die("Error in command line arguments\nYou can specify
---config configfilename (required)
---xmlconfig pathto_opensrf.xml
---debug flag
---dryrun flag
---reportonly flag\n");
+--config configfilename                       [Path to the config file - required]             
+--xmlconfig pathto_opensrf.xml                [Defaults to /openils/conf/opensrf.xml]
+--debug flag                                  [Cause more output - not implemented yet]
+--dryrun flag                                 [Cause no production table updates]
+--runCleamMetarecords flag                    [Run the Metarecord clean routine]
+--runElectronic flag                          [Find bibs that are possibly Electronic (wave cleanup)]
+--runAudioBook flag                           [Find bibs that are possibly AudioBook (wave cleanup)]
+--runVideo flag                               [Find bibs that are possibly DVD/BluRay/VHS (wave cleanup)]
+--runLargePrint flag                          [Find bibs that are possibly Large Print (wave cleanup)]
+--runMusic flag                               [Find bibs that are possibly Music (wave cleanup)]
+--runMoveElectronicBooks flag                 [Find items attached to electronic bibs and attempt to move items to non-electronic version]
+--runMoveElectronicAudioBooks flag            [Find items attached to electronic AudioBook bibs and attempt to move items to non-electronic version]
+--runMoveAudioBooks flag                      [Find items attached to AudioBook bibs and attempt to move items to non-AudioBook version]
+--runDedupe flag                              [Find Duplicate bibs and merge those that are close enough]
+--runFindElectronic856TOC flag                [Find Electronic 856 links that have indicators that cause URL's to be clickable but they are the Table of Contents]
+--resetScores flag                            [Empty out the schema table of any bib scores - recommended when running dedupe]
+--reportonly flag                             [Skip everything and only run a report - Reports are always run at the end]
+\n");
 
 if(! -e $xmlconf)
 {
@@ -188,13 +194,34 @@ if(! -e $xmlconf)
 					print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 					
 					
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH");
-					# $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE");
-					#tag902s();
-# Before we do anything, we really gotta clean up that metabib schema!
-					# cleanMetaRecords();
-					 
-					 
+                    $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH") if $resetScores;
+                    $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE") if $resetScores;
+					
+
+
+					cleanMetaRecords() if $runCleamMetarecords;
+                    findInvalidElectronicMARC() if $runElectronic;
+                    findInvalidAudioBookMARC() if $runAudioBook;
+                    findInvalidDVDMARC() if $runVideo;
+                    findInvalidLargePrintMARC() if $runLargePrint;
+                    findInvalidMusicMARC() if $runMusic;
+	
+					findPhysicalItemsOnElectronicBooks() if $runMoveElectronicBooks;
+                    findPhysicalItemsOnElectronicAudioBooks() if $runMoveElectronicAudioBooks;
+                    findItemsCircedAsAudioBooksButAttachedNonAudioBib() if $runMoveAudioBooks;
+                    findItemsNotCircedAsAudioBooksButAttachedAudioBib() if $runMoveAudioBooks;
+
+                    findPossibleDups() if $runDedupe;
+                    findInvalid856TOCURL() if $runFindElectronic856TOC;
+
+                    
+                    #######################################################
+                    #
+                    # Custom Hack code
+                    #
+                    #######################################################
+
+                    # tag902s();
 					# my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
 					# my $subQueryConvert = $queries{"non_audiobook_bib_convert_to_audiobook"};
 					# $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
@@ -203,48 +230,66 @@ if(! -e $xmlconf)
 					# my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
 					# $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
-					
-					# findInvalidElectronicMARC();
-					# findInvalidAudioBookMARC();
-					# findInvalidDVDMARC();
-					# findInvalidLargePrintMARC();
-					# findInvalidMusicMARC();
-					
-					# findPhysicalItemsOnElectronicBooksUnDedupe();
-					# findPhysicalItemsOnElectronicAudioBooksUnDedupe();				
-					# findPhysicalItemsOnElectronicBooks();
-					# findPhysicalItemsOnElectronicAudioBooks();
-					
-					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
-					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
-					#findInvalid856TOCURL();
-                    updateScoreCache();
-					# findPossibleDups();
+
 					# my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
-# determineWhichVideoFormat(1362462,$results->[0]);
- # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(244015)"); 
- # exit;
-					# updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from 
-# (
-# select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
-# union
-# select distinct bib2 as \"bibid\" from SEEKDESTROY.BIB_MATCH
-# ) as a");
+                    # determineWhichVideoFormat(1362462,$results->[0]);
+                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(244015)"); 
+                    # exit;
+                    # updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from 
+                    # (
+                    # select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
+                    # union
+                    # select distinct bib2 as \"bibid\" from SEEKDESTROY.BIB_MATCH
+                    # ) as a");
 					# updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
 					# and lower(marc) ~ \$\$abridge\$\$");
-					
-					 # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-					 # (select record from 
-					 # SEEKDESTROY.bib_score where score_time < now() - '5 days'::interval) and not deleted
-					 # ");
-					 # exit;
-					
-					 # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
-					 # (select record from 
-					 # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
-					 # updateScoreWithQuery("select id,marc from biblio.record_entry where id=243577");
-					
-					#updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");				
+
+                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
+                    # (select record from 
+                    # SEEKDESTROY.bib_score where score_time < now() - '5 days'::interval) and not deleted
+                    # ");
+                    # exit;
+
+                    # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
+                    # (select record from 
+                    # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
+                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id=243577");
+
+                    #updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");
+
+					#findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
+					#findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
+                    # updateScoreCache();
+
+                    # 007 byte 4: v=DVD b=VHS s=Blueray
+                    # substr(007,4,1)
+                    # Blue-ray:
+                    # vd uscza-
+                    # DVD:
+                    # vd mvaizu
+                    # VHS:
+                    # vf-cbahou
+
+                    # Playaway query chunk:
+                    # (
+                            # (
+                            # split_part(marc,$$tag="007">$$,3) ~ 'sz' 
+                            # and 
+                            # split_part(marc,$$tag="007">$$,2) ~ 'cz' 
+                            # )
+                        # or
+                            # (
+                            # split_part(marc,$$tag="007">$$,2) ~ 'sz' 
+                            # and 
+                            # split_part(marc,$$tag="007">$$,3) ~ 'cz' 
+                            # )
+                        # )
+                        
+                        # Find Biblio.record_entry without opac icons:
+                    # select id from biblio.record_entry where not deleted and 
+                    # id not in(select id from metabib.record_attr_flat where attr='icon_format')
+                    # 32115 rows
+
 					
 				}
 			}
@@ -1792,6 +1837,7 @@ sub updateBibCopyLocationsScore
 sub findPhysicalItemsOnElectronicBooksUnDedupe
 {
 	# Find Electronic bibs with physical items and in the dedupe project
+    # This function is site specific. No calls to it
 	
 	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
@@ -2194,6 +2240,8 @@ sub findPhysicalItemsOnElectronicBooks
 sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
 {
 	# Find Electronic bibs with physical items but and in the dedupe project
+    # This function is site specific. No calls to it
+    
 	my $query = "
 	select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
 	and id in
@@ -2248,7 +2296,7 @@ sub findPhysicalItemsOnElectronicAudioBooks
 	}
 	
 	return $success;
-	
+
 }
 
 
@@ -3277,20 +3325,6 @@ sub recordAssetCopyMove
 	}
 	
 	if($#cids>-1)
-	{		
-		#attempt to put those asset.copies back onto the previously deleted bib from m_dedupe
-		moveAssetCopyToPreviouslyDedupedBib($oldbib);		
-	}
-	
-	#Check again after the attempt to undedupe
-	@cids = ();
-	my @results = @{$dbHandler->query($query)};
-	foreach(@results)
-	{
-		my @row = @{$_};
-		push(@cids,@row[0]);
-	}
-	if($#cids>-1)
 	{
 		attemptMovePhysicalItemsOnAnElectronicBook($oldbib);
 	}
@@ -3313,6 +3347,7 @@ sub recordAssetCopyMove
 
 sub moveAssetCopyToPreviouslyDedupedBib
 {
+    # This function is site specific. No calls to it
 	my $currentBibID = @_[0];
 	my %possibles;	
 	my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre 
