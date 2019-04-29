@@ -103,6 +103,7 @@ sub setupTable
         @cols[$i] =~ s/[\.\/\s\$!\-\(\)]/_/g;
         @cols[$i] =~ s/\_{2,50}/_/g;
         @cols[$i] =~ s/\_$//g;
+        @cols[$i] =~ s/,//g;
         
         # Catch those naughty columns that don't have anything left to give
         $emptyHeaderName.='t' if(length(@cols[$i]) == 0);
