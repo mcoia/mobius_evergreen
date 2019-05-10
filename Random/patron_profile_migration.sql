@@ -1,6 +1,19 @@
 
-
-CREATE TABLE IF NOT EXISTS m_coo.patron_profile_move (id serial, usr bigint, home_ou bigint, home_ou_system bigint, profile bigint,new_profile bigint,usr_dob date,home_ou_system_name text, old_profile_name text,new_profile_name text);
+DROP TABLE IF EXISTS m_coo.patron_profile_move;
+CREATE TABLE IF NOT EXISTS m_coo.patron_profile_move (
+id serial,
+usr bigint,
+home_ou bigint,
+home_ou_system bigint,
+profile bigint,
+new_profile bigint,
+usr_dob date,
+home_ou_system_name text,
+old_profile_name text,
+new_profile_name text,
+done boolean default false,
+default_map boolean default false
+ );
 
 CREATE INDEX m_coo_patron_profile_move_idx
   ON m_coo.patron_profile_move
@@ -30,152 +43,152 @@ truncate   m_coo.patron_profile_move;
 -- Cumberland
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(58) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(58) AND
+pgt_new.id=26 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(30,57) and
-pgt_new.id=32 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(30,57) AND
+pgt_new.id=32 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(56) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(56) AND
+pgt_new.id=78 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(26) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(26) AND
+pgt_new.id=27 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(59) and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(59) AND
+pgt_new.id=30 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=42 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=42 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=27 AND
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
@@ -186,38 +199,38 @@ au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 ----------------------------
 -- Appalachian
 ----------------------------
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=36 and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=36 AND
+pgt_new.id=78 AND
 au.home_ou in(126, 128, 132, 133, 137, 139);
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=38 and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=38 AND
+pgt_new.id=30 AND
 au.home_ou in(126, 128, 132, 133, 137, 139);
 
 \echo BHM 
@@ -225,39 +238,39 @@ au.home_ou in(126, 128, 132, 133, 137, 139);
 -- BHM
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=36 and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=36 AND
+pgt_new.id=25 AND
 au.home_ou in(236, 237, 238, 239, 240, 241, 242, 244, 245, 246, 247);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=38 and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=38 AND
+pgt_new.id=26 AND
 au.home_ou in(236, 237, 238, 239, 240, 241, 242, 244, 245, 246, 247);
 
 \echo BHM DOB SPECIFIC
@@ -266,64 +279,64 @@ au.home_ou in(236, 237, 238, 239, 240, 241, 242, 244, 245, 246, 247);
 -- DOB SPECIFIC
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=22 and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=22 AND
+pgt_new.id=25 AND
 au.home_ou in(236, 237, 238, 239, 240, 241, 242, 244, 245, 246, 247)
-and 
+AND 
 (au.dob < now() - '18 years'::interval or
 au.dob is null
 );
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=22 and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=22 AND
+pgt_new.id=27 AND
 au.home_ou in(236, 237, 238, 239, 240, 241, 242, 244, 245, 246, 247)
-and au.dob between (now() - '18 years'::interval) and (now() - '13 years'::interval);
+AND au.dob between (now() - '18 years'::interval) AND (now() - '13 years'::interval);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=22 and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=22 AND
+pgt_new.id=26 AND
 au.home_ou in(236, 237, 238, 239, 240, 241, 242, 244, 245, 246, 247)
-and au.dob > now() - '13 years'::interval;
+AND au.dob > now() - '13 years'::interval;
 
 
 \echo Bladen
@@ -332,38 +345,38 @@ and au.dob > now() - '13 years'::interval;
 -- Bladen
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=36 and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=36 AND
+pgt_new.id=25 AND
 au.home_ou in(336, 337, 338, 339, 340);
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile=38 and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile=38 AND
+pgt_new.id=30 AND
 au.home_ou in(336, 337, 338, 339, 340);
 
 
@@ -373,56 +386,56 @@ au.home_ou in(336, 337, 338, 339, 340);
 ----------------------------
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(41,64) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(41,64) AND
+pgt_new.id=27 AND
 au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124);
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(39,21,36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(39,21,36) AND
+pgt_new.id=25 AND
 au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124);
 
 \echo Buncombe DOB SPECIFIC
@@ -431,65 +444,65 @@ au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 1
 -- DOB SPECIFIC
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=78 AND
 au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124)
-and 
+AND 
 (au.dob < now() - '18 years'::interval or
 au.dob is null
 );
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=32 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=32 AND
 au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124)
-and 
-au.dob between (now() - '18 years'::interval) and (now() - '13 years'::interval);
+AND 
+au.dob between (now() - '18 years'::interval) AND (now() - '13 years'::interval);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=30 AND
 au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124)
-and 
+AND 
 au.dob > now() - '13 years'::interval;
 
 
@@ -498,39 +511,39 @@ au.dob > now() - '13 years'::interval;
 -- Caldwell
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(188, 189, 190, 194);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(188, 189, 190, 194);
 
 
@@ -540,21 +553,21 @@ au.home_ou in(188, 189, 190, 194);
 -- Cleveland
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(39) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(39) AND
+pgt_new.id=25 AND
 au.home_ou in(2, 4, 101, 103);
 
 \echo Cleveland DOB SPECIFIC
@@ -564,65 +577,65 @@ au.home_ou in(2, 4, 101, 103);
 ----------------------------
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(16) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(16) AND
+pgt_new.id=25 AND
 au.home_ou in(2, 4, 101, 103)
-and 
+AND 
 (au.dob < now() - '18 years'::interval or
 au.dob is null
 );
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(16) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(16) AND
+pgt_new.id=27 AND
 au.home_ou in(2, 4, 101, 103)
-and 
-au.dob between (now() - '18 years'::interval) and (now() - '13 years'::interval);
+AND 
+au.dob between (now() - '18 years'::interval) AND (now() - '13 years'::interval);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(16) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(16) AND
+pgt_new.id=26 AND
 au.home_ou in(2, 4, 101, 103)
-and 
+AND 
 au.dob > now() - '13 years'::interval;
 
 
@@ -634,45 +647,45 @@ au.dob > now() - '13 years'::interval;
 ----------------------------
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(16) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(16) AND
+pgt_new.id=25 AND
 au.home_ou in(102)
-and 
+AND 
 (au.dob < now() - '13 years'::interval or
 au.dob is null
 );
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(16) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(16) AND
+pgt_new.id=26 AND
 au.home_ou in(102)
-and 
+AND 
 au.dob > now() - '13 years'::interval;
 
 
@@ -683,39 +696,39 @@ au.dob > now() - '13 years'::interval;
 -- Davidson
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(28) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(28) AND
+pgt_new.id=26 AND
 au.home_ou in(104, 105, 106, 107, 108, 109, 110);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(21) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(21) AND
+pgt_new.id=25 AND
 au.home_ou in(104, 105, 106, 107, 108, 109, 110);
 
 
@@ -724,58 +737,58 @@ au.home_ou in(104, 105, 106, 107, 108, 109, 110);
 -- Davie
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(165, 166, 167);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(41) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(41) AND
+pgt_new.id=27 AND
 au.home_ou in(165, 166, 167);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(165, 166, 167);
 
 
@@ -786,65 +799,65 @@ au.home_ou in(165, 166, 167);
 ----------------------------
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=78 AND
 au.home_ou in(165, 166, 167)
-and 
+AND 
 (au.dob < now() - '18 years'::interval or
 au.dob is null
 );
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=32 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=32 AND
 au.home_ou in(165, 166, 167)
-and 
-au.dob between (now() - '18 years'::interval) and (now() - '13 years'::interval);
+AND 
+au.dob between (now() - '18 years'::interval) AND (now() - '13 years'::interval);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=30 AND
 au.home_ou in(165, 166, 167)
-and 
+AND 
 au.dob > now() - '13 years'::interval;
 
 
@@ -853,78 +866,78 @@ au.dob > now() - '13 years'::interval;
 -- Fontana
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(41) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(41) AND
+pgt_new.id=27 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(58) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(58) AND
+pgt_new.id=26 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164);
 
 
@@ -936,65 +949,65 @@ au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164);
 ----------------------------
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=78 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164)
-and 
+AND 
 (au.dob < now() - '18 years'::interval or
 au.dob is null
 );
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=32 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=32 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164)
-and 
-au.dob between (now() - '18 years'::interval) and (now() - '13 years'::interval);
+AND 
+au.dob between (now() - '18 years'::interval) AND (now() - '13 years'::interval);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=30 AND
 au.home_ou in(155, 157, 158, 159, 160, 161, 162, 163, 164)
-and 
+AND 
 au.dob > now() - '13 years'::interval;
 
 
@@ -1004,111 +1017,111 @@ au.dob > now() - '13 years'::interval;
 -- Forsyth
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(62) and
-pgt_new.id=32 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(62) AND
+pgt_new.id=32 AND
 au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 250);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(41) and
-pgt_new.id=27 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(41) AND
+pgt_new.id=27 AND
 au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 250);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(57) and
-pgt_new.id=30 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(57) AND
+pgt_new.id=30 AND
 au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 250);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(56) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(56) AND
+pgt_new.id=78 AND
 au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 250);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 250);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 250);
 
 
@@ -1118,39 +1131,39 @@ au.home_ou in(222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 2
 -- Franklin
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(141, 142, 144, 150, 151, 154);
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(141, 142, 144, 150, 151, 154);
 
 
@@ -1159,40 +1172,40 @@ au.home_ou in(141, 142, 144, 150, 151, 154);
 -- Granville
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(341, 342, 343, 344, 345, 346, 347, 348);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(341, 342, 343, 344, 345, 346, 347, 348);
 
 \echo Harnett
@@ -1200,40 +1213,40 @@ au.home_ou in(341, 342, 343, 344, 345, 346, 347, 348);
 -- Harnett
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(263, 264, 265, 266, 267, 268, 269, 270, 349);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(263, 264, 265, 266, 267, 268, 269, 270, 349);
 
 
@@ -1243,40 +1256,40 @@ au.home_ou in(263, 264, 265, 266, 267, 268, 269, 270, 349);
 -- Haywood
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(173, 174, 175, 176, 177, 178);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(173, 174, 175, 176, 177, 178);
 
 
@@ -1287,40 +1300,40 @@ au.home_ou in(173, 174, 175, 176, 177, 178);
 -- Iredell
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(305, 306, 307, 308, 372);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(305, 306, 307, 308, 372);
 
 
@@ -1330,40 +1343,40 @@ au.home_ou in(305, 306, 307, 308, 372);
 -- Johnston
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323);
 
 
@@ -1373,40 +1386,40 @@ au.home_ou in(313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323);
 -- Lee
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(169, 170, 171);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(169, 170, 171);
 
 
@@ -1415,21 +1428,21 @@ au.home_ou in(169, 170, 171);
 -- McDowell
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(40) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=78 AND
 au.home_ou in(195, 196, 197);
 
 
@@ -1438,21 +1451,21 @@ au.home_ou in(195, 196, 197);
 -- Neuse
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(288, 289, 290, 291, 292, 293, 294, 295, 296);
 
 
@@ -1461,40 +1474,40 @@ au.home_ou in(288, 289, 290, 291, 292, 293, 294, 295, 296);
 -- Perry
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(369, 370);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(369, 370);
 
 
@@ -1503,21 +1516,21 @@ au.home_ou in(369, 370);
 -- Rockingham
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(56) and
-pgt_new.id=78 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(56) AND
+pgt_new.id=78 AND
 au.home_ou in(253, 254, 257, 258, 259, 260, 261);
 
 
@@ -1527,50 +1540,269 @@ au.home_ou in(253, 254, 257, 258, 259, 260, 261);
 -- Wayne
 ----------------------------
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(36) and
-pgt_new.id=25 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36) AND
+pgt_new.id=25 AND
 au.home_ou in(183, 184, 185, 186, 187);
 
 
 
-insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
-from
+FROM
 actor.usr au,
 actor.org_unit aou_sys,
 actor.org_unit aou_branch,
 permission.grp_tree pgt_old,
 permission.grp_tree pgt_new
-where
-au.home_ou=aou_branch.id and
-aou_branch.parent_ou=aou_sys.id and
-pgt_old.id=au.profile and
-au.profile in(38) and
-pgt_new.id=26 and
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38) AND
+pgt_new.id=26 AND
 au.home_ou in(183, 184, 185, 186, 187);
 
 
 
 
 
+\echo Defaults
+----------------------------
+-- Defaults
+----------------------------
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(36,52,16,46,39,21) AND
+pgt_new.id=25 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
+
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(56,22) AND
+pgt_new.id=78 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
+
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(17,34,29) AND
+pgt_new.id=37 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
+
+
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(38,28) AND
+pgt_new.id=26 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
 
 
 
 
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(57,44,58,59,31) AND
+pgt_new.id=30 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
+
+
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(60,61,62) AND
+pgt_new.id=32 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
+
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(40) AND
+pgt_new.id=42 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
+
+
+INSERT INTO  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name,default_map )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name,true
+FROM
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+WHERE
+au.home_ou=aou_branch.id AND
+aou_branch.parent_ou=aou_sys.id AND
+pgt_old.id=au.profile AND
+au.profile in(41,64) AND
+pgt_new.id=27 AND
+au.id in
+(
+select au.id
+FROM
+actor.usr au left join m_coo.patron_profile_move mppm on au.id=mppm.usr,
+permission.grp_tree pgt
+WHERE
+mppm.usr is null AND
+au.profile in (36, 56, 52, 16, 34, 17, 38, 57, 44, 22, 58, 59, 31, 60, 61, 46, 29, 39, 21, 28, 40, 41, 64, 62)
+);
 
 
 
@@ -1578,14 +1810,68 @@ au.home_ou in(183, 184, 185, 186, 187);
 
 -- MAKE SURE WE DIDN'T STAGE TWO OF THE SAME PATRON
 
--- select usr,count(*) from  m_coo.patron_profile_move group by 1 having count(*) > 1;
+-- select usr,count(*) FROM  m_coo.patron_profile_move group by 1 having count(*) > 1;
 
 
 
 
+CREATE OR REPLACE FUNCTION m_coo.patron_migration_update()
+RETURNS void AS
+$bodyy$
+DECLARE
+updatecount          INT := 0;
+totalcount           INT := 0;
+totalupdated         INT := 0;
+BEGIN
+
+SELECT INTO totalcount count(*) FROM m_coo.patron_profile_move;
+
+LOOP
+   WITH updated_rows AS 
+    (   
+        UPDATE actor.usr au SET profile = mppm.new_profile
+        FROM m_coo.patron_profile_move mppm
+        WHERE 
+        au.id = mppm.usr AND
+        au.id in
+        (
+            SELECT usr FROM (SELECT id,usr FROM m_coo.patron_profile_move mppm WHERE not done order by id LIMIT 100000) as a
+        )
+        returning au.id
+    )
+
+ SELECT INTO updatecount count(*) FROM updated_rows;
+ 
+ totalupdated = totalupdated + updatecount;
+ 
+ RAISE NOTICE 'Updated % / %',totalupdated,totalcount;
+ 
+ UPDATE m_coo.patron_profile_move SET done = TRUE
+ WHERE
+ id in(select id FROM m_coo.patron_profile_move WHERE not done ORDER BY id LIMIT 100000);
+ 
+   IF updatecount = 0 THEN EXIT;
+   END IF;
+END LOOP;
+END;
+$bodyy$
+LANGUAGE 'plpgsql';
+
+
+
+
+-- turn off the auditor trigger
+
+ALTER TABLE actor.usr DISABLE TRIGGER audit_actor_usr_update_trigger;
 
 -- Finally perform the migration
-begin;
+BEGIN;
 
+SELECT * FROM m_coo.patron_migration_update();
 
-commit;
+COMMIT;
+
+-- turn on the auditor trigger
+ALTER TABLE actor.usr ENABLE TRIGGER audit_actor_usr_update_trigger;
+
+DROP FUNCTION m_coo.patron_migration_update();
