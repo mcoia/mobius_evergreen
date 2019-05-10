@@ -100,6 +100,25 @@ where
 au.home_ou=aou_branch.id and
 aou_branch.parent_ou=aou_sys.id and
 pgt_old.id=au.profile and
+au.profile in(36) and
+pgt_new.id=25 and
+au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
+
+
+
+insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
+select
+au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
+from
+actor.usr au,
+actor.org_unit aou_sys,
+actor.org_unit aou_branch,
+permission.grp_tree pgt_old,
+permission.grp_tree pgt_new
+where
+au.home_ou=aou_branch.id and
+aou_branch.parent_ou=aou_sys.id and
+pgt_old.id=au.profile and
 au.profile in(26) and
 pgt_new.id=27 and
 au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
@@ -121,8 +140,7 @@ aou_branch.parent_ou=aou_sys.id and
 pgt_old.id=au.profile and
 au.profile in(59) and
 pgt_new.id=30 and
-au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221)
-and au.id not in(select usr from m_coo.patron_profile_move);
+au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
@@ -140,8 +158,7 @@ aou_branch.parent_ou=aou_sys.id and
 pgt_old.id=au.profile and
 au.profile in(40) and
 pgt_new.id=42 and
-au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221)
-and au.id not in(select usr from m_coo.patron_profile_move);
+au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
@@ -159,8 +176,7 @@ aou_branch.parent_ou=aou_sys.id and
 pgt_old.id=au.profile and
 au.profile in(38) and
 pgt_new.id=27 and
-au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221)
-and au.id not in(select usr from m_coo.patron_profile_move);
+au.home_ou in(207, 208, 209, 210, 211, 212, 213, 214, 219, 220, 221);
 
 
 
@@ -356,6 +372,7 @@ au.home_ou in(336, 337, 338, 339, 340);
 -- Buncombe
 ----------------------------
 
+
 insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
 au.id,au.home_ou,aou_sys.id,au.profile,pgt_new.id,au.dob,aou_sys.name,pgt_old.name,pgt_new.name
@@ -371,7 +388,7 @@ aou_branch.parent_ou=aou_sys.id and
 pgt_old.id=au.profile and
 au.profile in(41,64) and
 pgt_new.id=27 and
-au.home_ou in(336, 337, 338, 339, 340);
+au.home_ou in(111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124);
 
 insert into  m_coo.patron_profile_move (usr, home_ou , home_ou_system, profile ,new_profile ,usr_dob ,home_ou_system_name, old_profile_name ,new_profile_name )
 select
