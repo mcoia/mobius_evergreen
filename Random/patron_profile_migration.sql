@@ -1827,11 +1827,11 @@ BEGIN
 SELECT INTO totalcount count(*) FROM m_coo.patron_profile_move;
 
 LOOP
-   WITH updated_rows AS 
-    (   
+   WITH updated_rows AS
+    (
         UPDATE actor.usr au SET profile = mppm.new_profile
         FROM m_coo.patron_profile_move mppm
-        WHERE 
+        WHERE
         au.id = mppm.usr AND
         au.id in
         (
@@ -1875,3 +1875,49 @@ COMMIT;
 ALTER TABLE actor.usr ENABLE TRIGGER audit_actor_usr_update_trigger;
 
 DROP FUNCTION m_coo.patron_migration_update();
+
+
+\echo FINAL DATABASE REMOVALS
+----------------------------
+-- FINAL DATABASE REMOVALS
+----------------------------
+
+
+-- delete any matrix limit sets referencing the old permission groups
+delete from config.circ_matrix_limit_set_map where matchpoint in
+(
+select id from config.circ_matrix_matchpoint where grp
+in
+(36,56,52,16,34,17,38,57,44,22,58,59,31,60,61,46,29,39,21,28,40,41,64,62) and not active
+);
+-- DELETE 19
+
+-- Remove any lingering GPTs
+delete from permission.grp_penalty_threshold a where grp in(36,56,52,16,34,17,38,57,44,22,58,59,31,60,61,46,29,39,21,28,40,41,64,62);
+-- DELETE 7
+
+-- remove hold policies
+delete from config.hold_matrix_matchpoint where usr_grp in
+(36,56,52,16,34,17,38,57,44,22,58,59,31,60,61,46,29,39,21,28,40,41,64,62) and not active;
+-- DELETE 20
+
+-- remove circ policies
+delete from config.circ_matrix_matchpoint 
+where grp
+in
+(36,56,52,16,34,17,38,57,44,22,58,59,31,60,61,46,29,39,21,28,40,41,64,62) and not active
+-- DELETE 54
+
+-- finally - eliminate permission groups
+delete from permission.grp_tree where id in
+(36,56,52,16,34,17,38,57,44,22,58,59,31,60,61,46,29,39,21,28,40,41,64,62);
+
+
+-- Clean up auxillary hold/circ policies that are disabled as per 
+-- https://3.basecamp.com/3986049/buckets/8536501/messages/1393633949
+
+delete from config.hold_matrix_matchpoint where not active;
+-- DELETE 8
+
+delete from config.hold_matrix_matchpoint where not active;
+-- DELETE 8
