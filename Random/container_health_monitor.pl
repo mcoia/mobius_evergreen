@@ -48,8 +48,7 @@ if($conf)
         @grepOpensrfPhrases = split(/,/,$conf{'osrfsys_log_grep'}) if $conf{'osrfsys_log_grep'};
         my @grepSecondFilePhrases = () if !$conf{'second_file_log_grep'};
         @grepSecondFilePhrases = split(/,/,$conf{'second_file_log_grep'}) if $conf{'second_file_log_grep'};
-        my $deathOutputFolder = '/mnt/evergreen';
-        $deathOutputFolder = $conf{'death_output_folder'};
+        my $deathOutputFolder = $conf{'death_output_folder'} || '/mnt/evergreen';
 
        
         # Setup timestamp
@@ -159,7 +158,20 @@ if($conf)
                     undef $found;
                 }
             }
+            if($conf{'check_websocketd'} && ($conf{'check_websocketd'} ne 'no') && ($conf{'check_websocketd'} ne 'false') )
+            {
             
+                if(`ps -aef | grep -v grep | grep websocketd`) 
+                {
+                    print "websocketd is running!\n";
+                }
+                else
+                {
+                    print "websocketd is NOT running!\n";
+                    system( "machinename=`uname -a | awk '{print \$2}'` && echo websocketd died > $deathOutputFolder/os_`echo \$machinename`_websocketd_died.log" );
+                    exit 1;
+                }
+            }
             # Clean memory            
             # -------------
             
