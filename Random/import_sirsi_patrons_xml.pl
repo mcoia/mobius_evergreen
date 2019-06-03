@@ -82,7 +82,7 @@ use Getopt::Long;
     foreach(@{$inputFiles})
     {
         my $startingUser = 1;
-        my $chunkSize = 5;
+        my $chunkSize = 50;
         my $chunk = getChunk($_,$startingUser,$chunkSize);
         while($chunk)
         {
@@ -111,8 +111,8 @@ use Getopt::Long;
                     {
                         my %s;
                         my $all = xmlLoop($_, "", \%s);
-                        #$log->addLine("Done Looping");
-                        #$log->addLine(Dumper($all));
+                        # $log->addLine("Done Looping");
+                        # $log->addLine(Dumper($all));
                         while ((my $internal, my $value ) = each(%{$all}))
                         {
                             $columns{$internal} = 0;
