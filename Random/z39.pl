@@ -12,7 +12,56 @@ use DateTime::Format::Duration;
 
 my $logfile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
+
+
+
+# Query to get a list of popular UPCS
+
+# select split_part(value,' ',1)||',' from metabib.identifier_field_entry where field=20 and source
+# in
+# (
+# select record from
+# (
+# select 
+# acn.record,count(*)
+# from
+# asset.call_number acn,
+# asset.copy ac,
+# action.circulation acirc
+# where
+# acirc.target_copy=ac.id and
+# acn.id=ac.call_number and
+# not acn.deleted and
+# not ac.deleted
+# group by 1
+# having count(*) > 140
+# ) as b
+# limit 100
+# )
+
  
+ my $host = 'olc1.ohiolink.edu:210/INNOPAC';
+ my $searchType = '1007'; # 4 = title
+ my @searchArray = (
+ '024543110361',
+'733961144772',
+'678149191523',
+'024543527527',
+'025195016674',
+'025195004831',
+'097368014541',
+'053939613926',
+'027616861436',
+'043396005020',
+'043396097452',
+'025193328625',
+'085391142560',
+'025192038365',
+'013132154893',
+'097363500643',
+'012569593503',
+'786936213843'
+ );
 
 if(@ARGV[1])
 {
@@ -60,9 +109,13 @@ if($valid)
 	else
 	{
 		my $mobutil = new Mobiusutil();
-		#my @res = @{$mobutil->getMarcFromZ3950("towers.searchmobius.org:210/INNOPAC",'@attr 1=4 harry potter',$log)};
-		my @res = @{$mobutil->getMarcFromZ3950("104.197.226.239:210/KANSAS",'@attr 1=4 "harry potter"',$log)};
-		$log->addLine(Dumper(\@res));
+        foreach(@searchArray)
+        {
+            $log->addLine("Searching $_");
+            my @res = @{$mobutil->getMarcFromZ3950($host,'@attr 1='.$searchType.' @attr 4=1 @attr 5=1 "'.$_.'"',$log)};
+            $log->addLine("No Results") if($#res == -1);
+            $log->addLine(Dumper(\@res)) if($#res > -1);
+        }
 	}
 }
 
