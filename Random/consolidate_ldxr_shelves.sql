@@ -1,49 +1,45 @@
 BEGIN;
-DROP TABLE IF EXISTS newshelves;
-CREATE table newshelves (
-name text,
-holdable boolean,
-hold_verify boolean,
-opac_visible boolean,
-circulate boolean,
-checkin_alert boolean
-);
 
---populate little_dixie.csv from: https://docs.google.com/spreadsheets/d/1FzcJzEwJNdNbaWZr-K1khcq7R8SnG552v9EmSzHvD2M/edit?usp=sharing
-\copy newshelves(name,holdable,hold_verify,opac_visible,circulate,checkin_alert) from /mnt/evergreen/tmp/little_dixie.csv
---COPY 46
-COMMIT;
+
+-- Make system shelving locations
+
+INSERT INTO asset.copy_location(name,owning_lib) 
+  select distinct name,137
+  from asset.copy_location where owning_lib in(select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1) and
+  not deleted and
+  lower(name) not in
+  (select lower(name) from asset.copy_location where owning_lib in(select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou=1) and not deleted);
+  
+-- Flip a few of the shelves based upon the libraries wishes:
+-- https://docs.google.com/spreadsheets/d/1FzcJzEwJNdNbaWZr-K1khcq7R8SnG552v9EmSzHvD2M/edit#gid=0
+
+UPDATE asset.copy_location set
+holdable='f'
+where
+owning_lib=137 and
+name in ('Internet','Main Library','Office','Ready Reference') and
+not deleted;
+
+UPDATE asset.copy_location set
+opac_visible='f'
+where
+owning_lib=137 and
+name in ('Special Reference') and
+not deleted;
+
+UPDATE asset.copy_location set
+opac_visible='t'
+where
+owning_lib=137 and
+name in ('Staff Reference') and
+not deleted;
 
 select acl.name, count(*) from asset.copy_location acl, newshelves ns where owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1) and 
   acl.name = ns.name and not acl.deleted
   group by 1 order by 1 ;
 
-BEGIN;
---make to-be-consolidated branch-level shelves have consistent settings:
-UPDATE asset.copy_location acl
-  SET holdable = ns.holdable,
-    hold_verify = ns.hold_verify,
-    opac_visible = ns.opac_visible,
-    circulate = ns.circulate,
-    checkin_alert = ns.checkin_alert
-  FROM newshelves ns
-  WHERE
-  owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1) and 
-  acl.name = ns.name and not deleted;
---UPDATE 180
-
-select * from asset.copy_location where not deleted and owning_lib = 137;
---21 rows (on upgrade)
-
---create system-level shelves for Little Dixie.
-INSERT INTO asset.copy_location(name,owning_lib,holdable,hold_verify,opac_visible,circulate,checkin_alert) 
-  select distinct name,137,holdable,hold_verify,opac_visible,circulate,checkin_alert 
-  from newshelves ns;
---INSERT 0 46 (on upgrade)
-
-select * from asset.copy_location where not deleted and owning_lib = 137;
---67 rows (mig1)
-
+  
+  
     --look for branch-level shelf names which aren't system-level shelf names (should be zero now)
     select distinct name from asset.copy_location where not deleted and 
     owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1) and 
@@ -61,76 +57,78 @@ select * from asset.copy_location where not deleted and owning_lib = 137;
 
 
 --system-level shelving map
-drop table if exists ld_shelves;
-create table ld_shelves as 
-    select name, id as oldid from asset.copy_location where name in 
-    (select name from asset.copy_location where owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou=1)) 
-    and id not in 
-    (select id from asset.copy_location where owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou=1)) 
-    and owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR') 
-    and not deleted order by 1;
+
+create temp table ld_shelves as 
+    select 
+    acl_branch.id as old_id,
+    acl_sys.id as new_id
+    from 
+    asset.copy_location acl_sys,
+    asset.copy_location acl_branch
+    where 
+    acl_branch.owning_lib in
+    (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1) 
+    and
+    acl_sys.owning_lib in
+    (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou=1)
+    and
+    not acl_sys.deleted and
+    acl_sys.name=acl_branch.name;
 --SELECT 184
 
---add new ID's to map
-alter table ld_shelves add column newid integer;
-UPDATE ld_shelves lds 
-  SET newid = a.newid
-  FROM 
-   (select name,id as newid from asset.copy_location acl where 
-    owning_lib in (select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou=1)) a
-  WHERE
-  a.name=lds.name;
---UPDATE 184
+-- See how the map looks
 
+select acl_new.id,acl_new.name,acl_old.name,acl_old.id
+from
+asset.copy_location acl_new,
+asset.copy_location acl_old,
+ld_shelves lds
+where
+lds.new_id=acl_new.id and
+lds.old_id=acl_old.id;
+
+
+-- Change the name temporarily for the old shelving locations
+UPDATE asset.copy_location acl
+set name=name||'_old'
+where
+id in(select old_id from ld_shelves);
 
 --update item shelving locations for Little Dixie items.
 UPDATE asset.copy ac
-  SET location = lds.newid
+  SET location = lds.new_id
   FROM ld_shelves lds
   WHERE 
-  lds.oldid = ac.location and 
-  ac.circ_lib in (137,138,139,140,141) and 
-  not deleted
-  and
-  ac.location in(
-    select id from asset.copy_location 
-      where 
-      owning_lib in(
-          select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1
-          )
-      );
+  lds.old_id = ac.location;
 
 --UPDATE 180935
 
 --update circulation shelving locations for Little Dixie items.
 UPDATE action.circulation acirc
-  SET copy_location = lds.newid
+  SET copy_location = lds.new_id
   FROM ld_shelves lds
   WHERE 
-      lds.oldid = acirc.copy_location and 
-      acirc.circ_lib in (137,138,139,140,141) 
-    and
-    acirc.copy_location in(
-      select id from asset.copy_location 
-        where 
-        owning_lib in(
-            select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1
-            )
-        );
+      lds.old_id = acirc.copy_location ;
 --UPDATE 672999
 
-    select location from asset.copy 
+    select distinct location from asset.copy 
       WHERE 
       not deleted and 
-      circ_lib in (137,138,139,140,141) and 
+      circ_lib in (select id from actor.org_unit where shortname ~ 'LDXR') and 
       location in(
-      select id from asset.copy_location 
-        where 
-        owning_lib in(
-            select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1
-            )
+      
+        select old_id from ld_shelves
         )
      ; 
+     
+         select distinct location from asset.copy 
+      WHERE 
+      not deleted and 
+      circ_lib in (select id from actor.org_unit where shortname ~ 'LDXR') and 
+      location in(select id from asset.copy_location where not deleted and owning_lib in(select id from actor.org_unit where shortname ~ 'LDXR' and parent_ou!=1))
+     ; 
+     
+     
     select distinct ac.location as ac_location, lds.newid as lds_newid, acl.id as acl_id, acl.name, ac.circ_lib,ac.id as ac_id from 
     ld_shelves lds, 
     asset.copy_location acl, 
@@ -148,4 +146,7 @@ UPDATE action.circulation acirc
             )
         )
        ;
+       
+       UPDATE asset.copy_location set deleted='t' where id in(select old_id from ld_shelves);
+       
 COMMIT;
