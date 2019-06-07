@@ -4927,6 +4927,7 @@ sub setupSchema
 		job  bigint NOT NULL,
 		CONSTRAINT bib_item_circ_mods_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+        $dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.bib_item_call_labels(
 		id serial,
 		record bigint,
@@ -4935,6 +4936,7 @@ sub setupSchema
 		job  bigint NOT NULL,
 		CONSTRAINT bib_item_call_labels_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+        $dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.bib_item_locations(
 		id serial,
 		record bigint,
@@ -4987,6 +4989,7 @@ sub setupSchema
 		job  bigint NOT NULL,
 		CONSTRAINT bib_marc_update_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
+        $dbHandler->update($query);
 		$query = "CREATE TABLE seekdestroy.metarecord_change(
 		id serial,
 		metarecord bigint,
