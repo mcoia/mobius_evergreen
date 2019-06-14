@@ -1,0 +1,33 @@
+layout new 
+# no welcome message
+startup_message off
+
+# keep running processes on detach
+#autodetach on
+
+# start windows at 1 instead of 0
+bind c screen 1
+bind ^c screen 1
+bind 0 select 10
+screen 1
+
+# large scrollback buffer
+defscrollback 5000
+
+# on split screen, switch window focus by clicking
+mousetrack on
+
+# refresh screen after closing a program
+altscreen on
+
+## NOW SETUP WINDOWS
+screen top -d 15
+title "top"
+split -h
+focus bottom
+title "stats"
+screen 2
+stuff "watch -n 60 /mnt/evergreen/statpath/stats.sh^M"
+focus top
+resize 60%
+detach

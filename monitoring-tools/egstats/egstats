@@ -1,0 +1,2 @@
+#!/bin/bash
+source /mnt/evergreen/statpath/screen_setup.sh
