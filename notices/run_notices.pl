@@ -97,7 +97,7 @@ if($conf)
 			(CASE WHEN lower(delay::TEXT)!~'day' THEN (SELECT delay FROM action_trigger.event_definition WHERE owner=ated.owner AND reactor='MarkItemLost' AND hook='checkout.due' LIMIT 1) else delay end)
 			FROM action_trigger.event_definition ated
 			WHERE
-			(ated.granularity=\$\$".$conf{"granularity_name"}."\$\$
+			(ated.granularity~\$\$".$conf{"granularity_name"}."\$\$
             OR
             (ated.reactor=\$\$ProcessTemplate\$\$ AND ated.hook in (\$\$lost.auto\$\$,\$\$longoverdue.auto\$\$) AND ated.granularity in(\$\$long_overdue_to_lost\$\$,\$\$overdue_to_long_overdue\$\$))
             )";
