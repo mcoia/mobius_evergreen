@@ -1,0 +1,6 @@
+#!/bin/bash
+# SETUP SCREEN
+source /mnt/evergreen/statpath/screen_setup.sh
+
+# RESTORE SCREEN
+echo Type \'screen -r node\' to restore screen
