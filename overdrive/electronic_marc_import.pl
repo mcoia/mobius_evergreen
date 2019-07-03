@@ -24,18 +24,35 @@ use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
 use Digest::SHA1;
 use File::stat;
+use Getopt::Long;
 
- my $configFile = @ARGV[0];
- if(!$configFile)
- {
-	print "Please specify a config file\n";
-	exit;
- }
+our $configFile;
+our $debug = 0;
+our $reprocess = -1;
+our $searchDeepMatch = 0;
+our $reportOnly = -1;
+ 
+ 
+GetOptions (
+"config=s" => \$configFile,
+"reprocess=s" => \$reprocess,
+"search_deep" => \$searchDeepMatch,
+"report_only" => \$reportOnly,
+"debug" => \$debug,
+)
+or die("Error in command line arguments\nYou can specify
+--config configfilename                       [Path to the config file - required]
+--reprocess jobID                             [Optional: Skip the import process and re-process provided job ID]
+--search_deep                                 [Optional: Cause the software to spend more time searching for BIB matches]
+--report_only jobID                           [Optional: Only email the report for a previous job. Provide the job ID]
+--debug flag                                  [Cause more output - not implemented yet]
+\n");
+
 
  our $mobUtil = new Mobiusutil(); 
  our $conf = $mobUtil->readConfFile($configFile);
  our %conf;
- our $jobid=-1;
+ our $jobid = -1;
  our $log;
  our $archivefolder;
  our $importSourceName;
@@ -44,10 +61,16 @@ use File::stat;
  our $remotefolder;
  our $dbHandler;
  our $domainname = '';
- our $bibsourceid=-1;
- our $debug = @ARGV[1] || 0;
+ our $bibsourceid = -1;
+ 
  our @shortnames;
  
+ if(!$configFile)
+ {
+	print "Please specify a config file\n";
+	exit;
+ }
+
  if($conf)
  {
 	%conf = %{$conf};
@@ -88,11 +111,7 @@ use File::stat;
 		}
 		#remove trailing slash
 		$archivefolder =~ s/\/$//;
-		my $finalImport = 0;
-		my @info;
-		my @infoRemoval;
-		my $count=0;
-		my $countremoval=0;
+		
 		my @files;
 		
 		if($valid)
@@ -114,25 +133,41 @@ use File::stat;
             }
 
 			setupSchema($dbHandler);
-			
-            @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
-            @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} ne 'folder');
+
+			my $doSomething = 0;
             
-			if($#files!=-1)
-			{
+            if($reprocess != -1)
+            {
                 $bibsourceid = getbibsource();
-                $jobid = createNewJob('processing');
-                if($jobid==-1)
+                $jobid = $reprocess;
+                $doSomething = resetJob($reprocess);
+            }
+            elsif($reportOnly == -1) ## Make sure we are not just running reports
+            {
+                @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
+                @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} ne 'folder');
+                if($#files!=-1)
                 {
-                    $errorMessage = "Could not create a new job number in the schema - ";
-                    $log->addLogLine($errorMessage);
-                    deleteFiles(\@files);
-                    $errorMessage."\n$_" foreach(@files);
-                    alertErrorEmail($errorMessage);
-                    exit;
+                    $bibsourceid = getbibsource();
+                    $jobid = createNewJob('processing');
+                    if($jobid==-1)
+                    {
+                        $errorMessage = "Could not create a new job number in the schema - ";
+                        $log->addLogLine($errorMessage);
+                        deleteFiles(\@files);
+                        $errorMessage."\n$_" foreach(@files);
+                        alertErrorEmail($errorMessage);
+                        exit;
+                    }
+                    $doSomething = prepFiles(\@files);
                 }
-               
-                if(prepFiles(\@files)) # File prep resulted in stuff we need to do
+            }
+            $doSomething = 1 if $reportOnly != -1;
+            $jobid = $reportOnly if $reportOnly != -1;
+
+            if($doSomething) # File prep resulted in stuff we need to do or it's a re-process
+            {
+                if ($reportOnly == -1)
                 {
                     ## Imports
                     my $query = "SELECT id,title,z01,sha1,marc_xml,filename from e_bib_import.import_status where type=\$\$import\$\$ and job=$jobid order by id";
@@ -151,33 +186,33 @@ use File::stat;
                     foreach(@results)
                     {
                         my @row = @{$_};
-                        my $isbnRemoval = 0;
-                        $isbnRemoval = 1 if @row[6] eq 'isbn_remove';
-                        removeBibsEvergreen(@row[0],@row[1],@row[2],@row[3],@row[4],$isbnRemoval);
-                    }
-                    
-                    ## Reporting
-                    my $fileCount = $#files+1;
-                    my $afterProcess = DateTime->now(time_zone => "local");
-                    my $difference = $afterProcess - $dt;
-                    my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
-                    my $duration =  $format->format_duration($difference);
-                        
-                       
-                        my @tolist = ($conf{"alwaysemail"});
-                        my $email = new email($conf{"fromemail"},\@tolist,$valid,1,\%conf);
-                        my $reports = gatherOutputReport($log,$dbHandler);
-                        
-                        $email->send("Evergreen Utility - $importBIBTagName Import Report Job # $jobid","Connected to: \r\n ".$conf{"server"}."\r\nGathered:\r\n adds and removals from $fileCount file(s)\r\n Duration: $duration
-                                \r\n\r\nFiles:\r\n
-                            Unsuccessful Removals:
-                            
-                                These could have failed because there are copies attached which are listed above.\r\n
-                            Successful Removals:
-                            \r\n\r\n
-                            $reports\r\nSuccessful Imports:\r\n\r\n\r\n\r\nSuccessful Updates:\r\n\r\n\r\nUnsuccessful:\r\n\r\n\r\n-Evergreen Perl Squad-");
+                        my $removalViaMARAC = 1;
+                        $removalViaMARAC = 0 if @row[6] eq 'isbn_remove';
+                        print "Removal Type: @row[6]  isbnRemoval = $removalViaMARAC\n" if $debug;
+                        removeBibsEvergreen(@row[0],@row[1],@row[2],@row[3],@row[4],$removalViaMARAC);
                     }
                 }
+
+                my $report = runReports();
+                
+                my $afterProcess = DateTime->now(time_zone => "local");
+                my $difference = $afterProcess - $dt;
+                my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
+                my $duration =  $format->format_duration($difference);
+
+                my $body = 
+                    "Import Type: ".$conf{"recordsource"}."
+                    Connected to: ".$conf{"server"}.
+                    "\r\nDuration: $duration".
+                    "\r\n$report".
+                    "\r\n\r\n\r\n-Evergreen Perl Squad-";
+
+                updateJob("Processing","Email sending:\n$body");
+
+                my @tolist = ($conf{"alwaysemail"});
+                my $email = new email($conf{"fromemail"},\@tolist,$valid,1,\%conf);
+                $email->send("Evergreen Utility - $importBIBTagName Import Report Job # $jobid",$body);
+                
 				updateJob("Completed","");
 			}
 			else
@@ -192,6 +227,96 @@ use File::stat;
             print "Config file does not define 'logfile'\n";		
         }
 	}
+
+sub runReports
+{
+    ## Reporting
+    my $ret = "";
+    
+    
+    ### Overall Totals
+    my $query = "select count(*),filename from e_bib_import.import_status where job = $jobid group by 2";
+    
+    my @results = @{$dbHandler->query($query)};
+    
+    $ret .= "File Breakdown:\n\r";
+    my $totalrows = 0;
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $ret .= @row[0] . "records in ".@row[1] . "\r\n";
+        $totalrows += @row[0];
+    }
+    $ret .= "\r\nTotal: $totalrows\r\n";
+    undef @results;
+    
+    
+    
+    ### Import summary
+    my %status = ();
+    
+    $query = "select z01,title,status,bib from e_bib_import.import_status where job = $jobid and type = \$\$import\$\$ ";
+
+    my @results = @{$dbHandler->query($query)};
+    
+    $ret .= "Import Summary:\n\r";
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $status{@row[2]} = () if !$status{@row[2]};
+        push $status{@row[2]}, [(@row[0],@row[1],@row[3])];
+    }
+    my $interestingImports = "";
+    while ( (my $key, my $value) = each(%status) )
+    {
+        $ret .= "$key: ". scalar $status{$key} . "occurrences\r\n";
+        if($key ne 'inserted' || $key ne 'matched and overlayed')
+        {
+            my @v = @{$value};
+            $interestingImports .= $key . " - " . @v[0] . " " . @v[1] . " BIB:" . @v[2];
+            undef @v;
+        }
+    }
+    
+    $ret .= "Interesting imports\r\n$interestingImports" if ( length($interestingImports) > 0);
+    undef @results;
+    
+    
+    ### Removal summary
+    my %status = ();
+    
+    $query = "select z01,title,status from e_bib_import.import_status where job = $jobid and type = \$\$removal\$\$ ";
+
+    my @results = @{$dbHandler->query($query)};
+    
+    $ret .= "Import Summary:\n\r";
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $status{@row[2]} = () if !$status{@row[2]};
+        push $status{@row[2]}, [(@row[0],@row[1])];
+    }
+    my $interestingImports = "";
+    while ( (my $key, my $value) = each(%status) )
+    {
+        $ret .= "$key: ". scalar $status{$key} . "occurrences\r\n";
+        if($key ne 'removed bib' || $key ne 'removed related 856')
+        {
+            my @v = @{$value};
+            $interestingImports .= $key . " - " . @v[0] . " " . @v[1];
+            undef @v;
+        }
+    }
+    
+    $ret .= "Interesting Removals\r\n$interestingImports" if ( length($interestingImports) > 0);
+    undef @results;
+
+
+    $ret .= gatherOutputReport();
+
+    return $ret;
+
+}
 
 sub prepFiles
 {
@@ -329,6 +454,7 @@ sub dumpRowsIfFull
         my $readyForStatusUpdate = $debug ? $dbInserts : '';
         if($debug) #slow slow slow - only debug mode
         {
+            $readyForStatusUpdate = "\n";
             my $i = 1;
             foreach(@vals)
             {
@@ -338,7 +464,7 @@ sub dumpRowsIfFull
                 $i++;
             }
         }
-        updateJob("Processing","Dumping memory to DB $count\n $readyForStatusUpdate");
+        updateJob("Processing","Dumping memory to DB $count $readyForStatusUpdate");
         $dbHandler->updateWithParameters($dbInserts,\@vals);
         undef $dbInserts;
         my $dbInserts = $insertTop;
@@ -348,6 +474,29 @@ sub dumpRowsIfFull
     }
 
     return @ret;
+}
+
+sub resetJob
+{
+    my $resetJob = shift;
+    my $ret = 0;
+    my $query = "select count(*) from e_bib_import.import_status where job=$jobid";
+    my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+		my $row = $_;
+		my @row = @{$row};
+		$ret=@row[0];
+	}
+    if($ret)
+    {
+        $query = "update e_bib_import.import_status set status=\$1 , processed = false , bib = null , row_change_time = now() where job= \$2";
+        updateJob("Processing","--Reset Job - \n$query");
+        my @vals = ('new',$jobid);
+        $dbHandler->updateWithParameters($query,\@vals);
+    }
+    
+    return $ret;
 }
 
 sub alertErrorEmail
@@ -371,8 +520,6 @@ sub truncateOutput
 
 sub gatherOutputReport
 {
-	my $log = @_[0];
-	my $dbHandler = @_[1];
 	my $newRecordCount=0;
 	my $updatedRecordCount=0;
 	my $mergedRecords='';
@@ -443,8 +590,7 @@ sub gatherOutputReport
 
 sub deleteFiles
 {
-	my $log = @_[0];
-	my @files = @{@_[1]};
+	my @files = @{@_[0]};
 	foreach(@files)
 	{
 		my $t = new Loghandler("$archivefolder/$_");
@@ -737,11 +883,11 @@ sub add9
 	return $marc;
 }
 
+## All calls to this function have been removed because the database functions seem to babysit this pretty well
 sub removeOldCallNumberURI
 {
 	my $bibid = @_[0];
-	my $dbHandler = @_[1];
-    
+
     my $uriids = '';
     my $query = "select uri from asset.uri_call_number_map WHERE call_number in 
 	(
@@ -824,12 +970,13 @@ sub recordBIBMARCChanges
 	my $bibID = @_[0];
 	my $oldMARC = @_[1];
 	my $newMARC = @_[2];
-	
-		 my $query = "
-		INSERT INTO e_bib_import.bib_marc_update(record,prev_marc,changed_marc,job)
-		VALUES ($bibID,\$1,\$2,$jobid)";
-		my @values = ($oldMARC,$newMARC);
-		$dbHandler->updateWithParameters($query,\@values);
+    my $newRecord = @_[3];
+   
+     my $query = "
+    INSERT INTO e_bib_import.bib_marc_update(record,prev_marc,changed_marc,job,new_record)
+    VALUES (\$1,\$2,\$3,\$4,\$5)";
+    my @values = ($bibID,$oldMARC,$newMARC,$jobid,$newRecord);
+    $dbHandler->updateWithParameters($query,\@values);
 }
 
 sub mergeBIBs
@@ -839,18 +986,23 @@ sub mergeBIBs
 	my $newbib = @_[1];
 	my $overdriveMatchString = @_[2];
     my $statusID = @_[3];
-updateJob("Processing","mergeBIBs oldbib: $oldbib newbib=$newbib overdriveMatchString=$overdriveMatchString");
-	my $log = @_[4];	
+    
+    updateJob("Processing","mergeBIBs oldbib: $oldbib newbib=$newbib overdriveMatchString=$overdriveMatchString");
+	
 	recordAssetCopyMove($oldbib,$newbib,$overdriveMatchString,$statusID);
 	my $query = "INSERT INTO e_bib_import.bib_merge(leadbib,subbib,statusid,job) VALUES($newbib,$oldbib,$statusID,$jobid)";
 	#$log->addLine("MERGE:\t$newbib\t$oldbib");
-updateJob("Processing","mergeBIBs  $query");	
-	$log->addLine($query);
+    
+    updateJob("Processing","mergeBIBs  $query");	
+	
+    $log->addLine($query);
 	$dbHandler->update($query);	
 	#print "About to merge assets\n";
 	$query = "SELECT asset.merge_record_assets($newbib, $oldbib)";
-updateJob("Processing","mergeBIBs  $query");
-	$log->addLine($query);
+    
+    updateJob("Processing","mergeBIBs  $query");
+	
+    $log->addLine($query);
 	$dbHandler->query($query);
 	#print "Merged\n";
 }
@@ -891,7 +1043,6 @@ sub getsubfield
 
 sub removeBibsEvergreen
 {
-
     my $statusID = @_[0];
     my $title = @_[1]; # will be filled in with the ISBN number if it's a removal via ISBN
     my $z01 = @_[2];
@@ -899,6 +1050,7 @@ sub removeBibsEvergreen
     my $marcXML = @_[4];
     my $removalsViaMARC = @_[5];
 	
+    print "removeBibsEvergreen removalsViaMARC = $removalsViaMARC\n" if $debug;
     my $query;	
 	
 	my $r =0;		
@@ -921,7 +1073,7 @@ sub removeBibsEvergreen
         }
         else
         {
-            $query = "update e_bib_import.import_status set status = \$1 , processed = true, row_changed_time = now() where id = \$2";
+            $query = "update e_bib_import.import_status set status = \$1 , processed = true, row_change_time = now() where id = \$2";
             my @values = ('No matching bib in ME', $statusID);
             $dbHandler->updateWithParameters($query,\@values);
         }
@@ -963,7 +1115,7 @@ sub importMARCintoEvergreen
     $marc =~ s/(<leader>.........)./${1}a/;
 	$marc = MARC::Record->new_from_xml($marc);
 
-    $query = "update e_bib_import.import_status set status = \$\$processing\$\$, row_changed_time = now() where id=$statusID";
+    $query = "update e_bib_import.import_status set status = \$\$processing\$\$, row_change_time = now() where id=$statusID";
     my @vals = ();
     $dbHandler->updateWithParameters($query,\@vals);
     
@@ -979,24 +1131,25 @@ sub importMARCintoEvergreen
     else  ##need to insert new bib instead of update
     {
         my $starttime = time;
-        my $max = getEvergreenMax($dbHandler);
+        my $max = getEvergreenMax();
         my $thisXML = convertMARCtoXML($marc);
         my @values = ($thisXML);
         $query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$1,null,$bibsourceid,\$\$$importBIBTagName-script $sha1\$\$,null,null)";
         $log->addLine($query);
         my $res = $dbHandler->updateWithParameters($query,\@values);
         #print "$res";
-        my $newmax = getEvergreenMax($dbHandler);
+        my $newmax = getEvergreenMax();
         if($newmax != $max)
         {
             $log->addLine("$newmax\thttp://$domainname/eg/opac/record/$newmax?locg=157;expand=marchtml#marchtml");
-            $query = "update e_bib_import.import_status set status = \$1 , bib = \$2 , processed = true, row_changed_time = now() where id = \$3";
+            $query = "update e_bib_import.import_status set status = \$1 , bib = \$2 , processed = true, row_change_time = now() where id = \$3";
             @values = ('inserted', $newmax, $statusID);
             $dbHandler->updateWithParameters($query,\@values);
+            updateDBSHA1($sha1, $newmax, $bibsourceid);
         }
         else
         {
-            $query = "update e_bib_import.import_status set status = \$1 , processed = true, row_changed_time = now() where id = \$2";
+            $query = "update e_bib_import.import_status set status = \$1 , processed = true, row_change_time = now() where id = \$2";
             @values = ('failed to insert', $statusID);
             $dbHandler->updateWithParameters($query,\@values);
         }
@@ -1005,12 +1158,12 @@ sub importMARCintoEvergreen
 
 sub attemptRemoveBibs
 {
-#attemptRemoveBibs($bibid, $statusID);
+
     my @list = @{@_[0]};	
     my $statusID = @_[1];
     
     # Reset the status column to be blank as we loop through all of the related bibs, appending results to status
-	my $query = "update e_bib_import.import_status set status = \$\$\$\$ , row_changed_time = now() where id = \$1";
+	my $query = "update e_bib_import.import_status set status = \$\$\$\$ , row_change_time = now() where id = \$1";
     my @values = ($statusID);
     $dbHandler->updateWithParameters($query,\@values);
 	foreach(@list)
@@ -1021,7 +1174,7 @@ sub attemptRemoveBibs
 		my $score = @attrs[2];
 		my $marcxml = @attrs[3];
 		my $answer = decideToDeleteOrRemove9($marcobj);
-		if($answer==1)
+		if( $answer eq '1' )
 		{
 			my $query = "SELECT ID,BARCODE FROM ASSET.COPY WHERE CALL_NUMBER IN
 			(SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$id) AND NOT DELETED";
@@ -1029,26 +1182,25 @@ sub attemptRemoveBibs
 			my @results = @{$dbHandler->query($query)};
 			if($#results > -1) # There are non-deleted copies attached
 			{
-				$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , processed = true, row_changed_time = now() where id = \$3";
+				$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , processed = true, row_change_time = now() where id = \$3";
                 my @values = ('failed to removed bib due to copies attached', $id, $statusID);
                 $dbHandler->updateWithParameters($query,\@values);
 			}
 			if($#results == -1)
 			{
-				removeOldCallNumberURI($id,$dbHandler);
 				my $query = "UPDATE BIBLIO.RECORD_ENTRY SET DELETED=\$\$t\$\$ WHERE ID = \$1";
 				$log->addLine($query);
 				my @values = ($id);
 				my $res = $dbHandler->updateWithParameters($query,\@values);
 				if($res)
 				{
-					$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_changed_time = now() where id = \$3";
+					$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_change_time = now() where id = \$3";
                     @values = ('removed bib', $id, $statusID);
                     $dbHandler->updateWithParameters($query,\@values);
 				}
 				else
 				{
-					$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_changed_time = now() where id = \$3";
+					$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_change_time = now() where id = \$3";
                     @values = ('failed to removed bib', $id, $statusID);
                     $dbHandler->updateWithParameters($query,\@values);
 				}
@@ -1057,28 +1209,30 @@ sub attemptRemoveBibs
 		else
 		{
 			my $finalMARCXML = convertMARCtoXML($answer);
-			recordBIBMARCChanges($id, $marcxml, $finalMARCXML);
+			recordBIBMARCChanges($id, $marcxml, $finalMARCXML,0);
 			my @values = ($finalMARCXML);
 			my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 WHERE ID=$id";
-		updateJob("Processing","chooseWinnerAndDeleteRest   $query");
+
+            updateJob("Processing","chooseWinnerAndDeleteRest   $query");
+
 			$log->addLine($query);
-			$log->addLine("$id\thttp://$domainname/eg/opac/record/$id?query=yellow;qtype=keyword;locg=4;expand=marchtml#marchtml\thttp://$domainname/eg/opac/record/$id?query=yellow;qtype=keyword;locg=157;expand=marchtml#marchtml\t0");
+			$log->addLine("$id\thttp://$domainname/eg/opac/record/$id?locg=4;expand=marchtml#marchtml\thttp://$domainname/eg/opac/record/$id?locg=157;expand=marchtml#marchtml\t0");
 			my $res = $dbHandler->updateWithParameters($query,\@values);
 			if($res)
 			{
-				$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_changed_time = now() where id = \$3";
+				$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_change_time = now() where id = \$3";
                 @values = ('removed related 856', $id, $statusID);
                 $dbHandler->updateWithParameters($query,\@values);
 			}
 			else
 			{
-				$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_changed_time = now() where id = \$3";
+				$query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_change_time = now() where id = \$3";
                 @values = ('failed to remove related 856', $id, $statusID);
                 $dbHandler->updateWithParameters($query,\@values);
 			}
 		}
 	}
-	$query = "update e_bib_import.import_status set processed = true , row_changed_time = now() where id = \$1";
+	$query = "update e_bib_import.import_status set processed = true , row_change_time = now() where id = \$1";
     @values = ($statusID);
     $dbHandler->updateWithParameters($query,\@values);
     
@@ -1127,7 +1281,7 @@ sub decideToDeleteOrRemove9
 					{
 						$found=1;
 					}
-				}					
+				}
 				if($found)
 				{
 					push(@delete9s, @ninposes[$ninePos]);
@@ -1159,7 +1313,7 @@ sub decideToDeleteOrRemove9
 	}
 	#There were some 9s for other groups, just remove ours and preserve the record
 	return $marc;
-	
+
 }
 
 sub findMatchingISBN
@@ -1231,28 +1385,29 @@ sub chooseWinnerAndDeleteRest
 	{
 		my @attrs = @{$_};	
 		my $id = @attrs[0];
-		removeOldCallNumberURI($id, $dbHandler);
 		my $marc = @attrs[1];
 		my $marcxml = @attrs[3];
 		if($i!=$chosenWinner)
 		{	
-			$finalMARC = mergeMARC856($finalMARC, $marc, $log);
+			$finalMARC = mergeMARC856($finalMARC, $marc);
 			$finalMARC = fixLeader($finalMARC);			
-			mergeBIBs($id, $winnerBibID, $overdriveMatchString, $statusID);			
+			mergeBIBs($id, $winnerBibID, $overdriveMatchString, $statusID);
 		}
 		$i++;
 	}
 	# melt the incoming e_bib_import 856's retaining the rest of the marc from the DB
 	# At this point, the 9's have been added to the newMarc (data from e_bib_import)
-	$finalMARC = mergeMARC856($finalMARC, $newMarc, $log);
+	$finalMARC = mergeMARC856($finalMARC, $newMarc);
 	$finalMARC = fixLeader($finalMARC);
 	my $newmarcforrecord = convertMARCtoXML($finalMARC);
-	recordBIBMARCChanges($winnerBibID, $winnerOGMARCxml, $newmarcforrecord);
+    print "Headed into recordBIBMARCChanges\n" if $debug;
+	recordBIBMARCChanges($winnerBibID, $winnerOGMARCxml, $newmarcforrecord,0);
     
 	my $thisXML = convertMARCtoXML($finalMARC);
-	my @values = ($thisXML, "$importBIBTagName-script $sha1", $bibsourceid, $winnerBibID);
-	my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1, tcn_source=\$2, source=\$3 WHERE ID=\$4";
+	my @values = ("$importBIBTagName-script $sha1", $bibsourceid, $thisXML, $winnerBibID);
+	my $query = "UPDATE BIBLIO.RECORD_ENTRY SET tcn_source = \$1 , source = \$2 , marc = \$3  WHERE ID = \$4";
     
+    print "Updating MARC XML in DB BIB $winnerBibID\n" if $debug;
     updateJob("Processing","chooseWinnerAndDeleteRest   $query");
     
 	# $log->addLine($thisXML);
@@ -1261,32 +1416,19 @@ sub chooseWinnerAndDeleteRest
 	#print "$res\n";
 	if($res)
 	{
-        $query = "update e_bib_import.import_status set status = \$1, processed = true , bib = \$2 , row_changed_time = now() where id = \$3";
+        $query = "update e_bib_import.import_status set status = \$1, processed = true , bib = \$2 , row_change_time = now() where id = \$3";
         my @vals = ('matched and overlayed',$winnerBibID,$statusID);
         $dbHandler->updateWithParameters($query,\@vals);
 	}
 	else
 	{
-        $query = "update e_bib_import.import_status set status = \$1, processed = true, row_changed_time = now() where id = \$2";
+        $query = "update e_bib_import.import_status set status = \$1, processed = true, row_change_time = now() where id = \$2";
         my @vals = ('failed',$statusID);
         $dbHandler->updateWithParameters($query,\@vals);
 	}
 
 }
 
-sub moveHolds
-{
-	my $dbHandler = @_[0];	
-	my $oldBib = @_[1];
-	my $newBib = @_[2];
-	my $log = @_[3];	
-	my $query = "UPDATE ACTION.HOLD_REQUEST SET TARGET=$newBib WHERE TARGET=$oldBib AND HOLD_TYPE=\$\$T\$\$ AND current_copy IS NULL AND fulfillment_time IS NULL AND capture_time IS NULL"; 
-	$log->addLine($query);
-	updateJob("Processing","moveHolds  $query");
-	#print $query."\n";
-	$dbHandler->update($query);
-}	
-	
 sub determineElectric
 {
 	my $marc = @_[0];
@@ -1332,6 +1474,8 @@ sub findRecord
 	my $marcsearch = @_[0];
     my $sha1 = @_[1];
 	my $zero01 = @_[2];
+    
+    print "Searching for sha1 match $sha1\n" if $debug;
 	my $query = "
     select 
     bre.id,
@@ -1342,8 +1486,24 @@ sub findRecord
     bre.id=ebs.bib and
     ebs.sha1 = \$sha\$$sha1\$sha\$ and
     ebs.bib_source=$bibsourceid and 
-    not bre.deleted";
-updateJob("Processing","$query");
+    not bre.deleted
+    ";
+    
+    $query.="
+    union all
+    
+    select bre.id,bre.marc
+    from
+    biblio.record_entry bre left join e_bib_import.bib_sha1 ebs on(ebs.bib=bre.id)
+    where
+    not bre.deleted and
+    bre.source=$bibsourceid and
+    bre.tcn_source~\$sha\$$sha1\$sha\$ and
+    ebs.bib is null
+    " if $searchDeepMatch;
+    
+    updateJob("Processing","$query") if $debug;
+    
 	my @results = @{$dbHandler->query($query)};
 	my @ret;
 	my $none=1;
@@ -1355,50 +1515,55 @@ updateJob("Processing","$query");
 		my @row = @{$row};
 		my $id = @row[0];
 		my $marc = @row[1];
-		print "found matching sha1: $id\n";		
 		my $prevmarc = $marc;
 		$prevmarc =~ s/(<leader>.........)./${1}a/;	
 		$prevmarc = MARC::Record->new_from_xml($prevmarc);
-		my $score = scoreMARC($prevmarc,$log);
-		my @matchedsha = ($id,$prevmarc,$score,$marc);
-		$foundIDs.="$id,";
-		push (@ret, [@matchedsha]);
-		$none=0;
-		$count++;
+        print "found matching sha1: $id\n" if $debug;
+        my $score = scoreMARC($prevmarc);
+        my @matchedsha = ($id,$prevmarc,$score,$marc);
+        $foundIDs.="$id,";
+        push (@ret, [@matchedsha]);
+        $none=0;
+        $count++;
 	}
-	# $foundIDs = substr($foundIDs,0,-1);
-	# if(length($foundIDs)<1)
-	# {
-		# $foundIDs="-1";
-	# }
-    # This is super slow - disabled
-	# my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-# updateJob("Processing","$query");
-	# my @results = @{$dbHandler->query($query)};
-	# foreach(@results)
-	# {
-		# my $row = $_;
-		# my @row = @{$row};
-		# my $id = @row[0];
-		# print "found matching 001: $id\n";
-		# my $marc = @row[1];
-		# my $prevmarc = $marc;
-		# $prevmarc =~ s/(<leader>.........)./${1}a/;	
-		# $prevmarc = MARC::Record->new_from_xml($prevmarc);
-		# my $score = scoreMARC($prevmarc,$log);
-		# my @matched001 = ($id,$prevmarc,$score,$marc);
-		# push (@ret, [@matched001]);	
-		# $none=0;
-		# $count++;
-	# }
+    
+    if($searchDeepMatch)  ## This matches other bibs based upon the vendor's 001 which is usually moved to the 035, hence MARC ~ 
+    {
+        $foundIDs = substr($foundIDs,0,-1);
+        if(length($foundIDs)<1)
+        {
+            $foundIDs="-1";
+        }
+        my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
+        updateJob("Processing","$query");
+        my @results = @{$dbHandler->query($query)};
+        foreach(@results)
+        {
+            my $row = $_;
+            my @row = @{$row};
+            my $id = @row[0];
+            print "found matching 001: $id\n";
+            my $marc = @row[1];
+            my $prevmarc = $marc;
+            $prevmarc =~ s/(<leader>.........)./${1}a/;	
+            $prevmarc = MARC::Record->new_from_xml($prevmarc);
+            my $score = scoreMARC($prevmarc,$log);
+            my @matched001 = ($id,$prevmarc,$score,$marc);
+            push (@ret, [@matched001]);	
+            $none=0;
+            $count++;
+        }
+    }
+    
 	if($none)
 	{
+        print "Didn't find one\n" if $debug;
 		return -1;
 	}
-	print "Count matches: $count\n";
-updateJob("Processing","Count matches: $count");
+	print "Count matches: $count\n" if $debug;
+    updateJob("Processing","Count matches: $count");
+
 	return \@ret;
-	
 }
 
 sub readyMARCForInsertIntoME
@@ -1487,7 +1652,6 @@ sub mergeMARC856
 {
 	my $marc = @_[0];
 	my $marc2 = @_[1];
-	my $log = @_[2];
 	my @eight56s = $marc->field("856");
 	my @eight56s_2 = $marc2->field("856");
 	my @eights;
@@ -1585,8 +1749,6 @@ sub mergeMARC856
 
 sub getEvergreenMax
 {
-	my $dbHandler = @_[0];
-	
 	my $query = "SELECT MAX(ID) FROM BIBLIO.RECORD_ENTRY";
 	#return 1000;
 	my @results = @{$dbHandler->query($query)};
@@ -1599,40 +1761,6 @@ sub getEvergreenMax
 	}
 	#print "DB Max: $dbmax\n";
 	return $dbmax;
-}
-
-sub getTCN
-{
-	my $log = @_[0];
-	my $dbHandler = @_[1];
-	my $dbmax=getEvergreenMax($dbHandler);
-	$dbmax++;
-	my $result = 1;
-	my $seed=0;
-	my $ap="";
-	my $trys = 0;
-	while($result==1)
-	{
-		my $query = "SELECT COUNT(*) FROM BIBLIO.RECORD_ENTRY WHERE TCN_VALUE = 'od$dbmax$ap'";
-		my @results = @{$dbHandler->query($query)};
-		foreach(@results)
-		{
-			my $row = $_;
-			my @row = @{$row};
-			if(@row[0]==0)
-			{
-				$result=0;
-			}
-		}
-		$ap = "_".$seed;
-		$seed++;
-		$trys++;
-	}
-	if($trys>1)
-	{
-		$log->addLogLine("Needed to change tcn $trys times to find: 'od$dbmax$ap'");
-	}
-	return "od$dbmax$ap";
 }
 
 sub convertMARCtoXML
@@ -1709,26 +1837,7 @@ sub updateJob
 	return $results;
 }
 
-sub findPBrecordInME
-{
-	my $dbHandler = @_[0];	
-	#my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ '\"9\">PB' limit 14";
-	my $query = "select id,marc from biblio.record_entry where marc ~* 'overdrive' AND marc ~* 'ebook' AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!=\$\$##URI##\$\$ and deleted is false)";
-	my @results = @{$dbHandler->query($query)};
-	my @each;
-	my @ret;
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my $id = @row[0];
-		my $marc = @row[1];
-		@each = ($id,$marc);
-		push(@ret,[@each]);	
-	}
-	return \@ret;
-}
-
+## Leaving this function for debugging purposes. It's not called anywhere but could be useful
 sub findMatchInArchive
 {
 	my @matchList = @{@_[0]};
@@ -1813,27 +1922,26 @@ sub fixLeader
 sub scoreMARC
 {
 	my $marc = shift;
-	my $log = shift;
 	
 	my $score = 0;
-	$score+= score($marc,2,100,400,$log,'245');
-	$score+= score($marc,1,1,150,$log,'100');
-	$score+= score($marc,1,1.1,150,$log,'110');
-	$score+= score($marc,0,50,200,$log,'6..');
-	$score+= score($marc,0,50,100,$log,'02.');
+	$score+= score($marc,2,100,400,'245');
+	$score+= score($marc,1,1,150,'100');
+	$score+= score($marc,1,1.1,150,'110');
+	$score+= score($marc,0,50,200,'6..');
+	$score+= score($marc,0,50,100,'02.');
 	
-	$score+= score($marc,0,100,200,$log,'246');
-	$score+= score($marc,0,100,100,$log,'130');
-	$score+= score($marc,0,100,100,$log,'010');
-	$score+= score($marc,0,100,200,$log,'490');
-	$score+= score($marc,0,10,50,$log,'830');
+	$score+= score($marc,0,100,200,'246');
+	$score+= score($marc,0,100,100,'130');
+	$score+= score($marc,0,100,100,'010');
+	$score+= score($marc,0,100,200,'490');
+	$score+= score($marc,0,10,50,'830');
 	
-	$score+= score($marc,1,.5,50,$log,'300');
-	$score+= score($marc,0,1,100,$log,'7..');
-	$score+= score($marc,2,2,100,$log,'50.');
-	$score+= score($marc,2,2,100,$log,'52.');
+	$score+= score($marc,1,.5,50,'300');
+	$score+= score($marc,0,1,100,'7..');
+	$score+= score($marc,2,2,100,'50.');
+	$score+= score($marc,2,2,100,'52.');
 	
-	$score+= score($marc,2,.5,200,$log,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
+	$score+= score($marc,2,.5,200,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
 
 	return $score;
 }
@@ -1844,7 +1952,6 @@ sub score
 	my ($type) = shift;
 	my ($weight) = shift;
 	my ($cap) = shift;
-	my ($log) = shift;
 	my @tags = @_;
 	my $ou = Dumper(@tags);
 	#$log->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
@@ -1852,17 +1959,17 @@ sub score
 	if($type == 0) #0 is field count
 	{
 		#$log->addLine("Calling count_field");
-		$score = count_field($marc,$log,\@tags);
+		$score = count_field($marc,\@tags);
 	}
 	elsif($type == 1) #1 is length of field
 	{
 		#$log->addLine("Calling field_length");
-		$score = field_length($marc,$log,\@tags);
+		$score = field_length($marc,\@tags);
 	}
 	elsif($type == 2) #2 is subfield count
 	{
 		#$log->addLine("Calling count_subfield");
-		$score = count_subfield($marc,$log,\@tags);
+		$score = count_subfield($marc,\@tags);
 	}
 	$score = $score * $weight;
 	if($score > $cap)
@@ -1877,8 +1984,7 @@ sub score
 sub count_subfield
 {
 	my ($marc) = $_[0];
-	my $log = $_[1];
-	my @tags = @{$_[2]};
+	my @tags = @{$_[1]};
 	my $total = 0;
 	#$log->addLine("Starting count_subfield");
 	foreach my $tag (@tags) 
@@ -1903,8 +2009,7 @@ sub count_subfield
 sub count_field 
 {
 	my ($marc) = $_[0];
-	my $log = $_[1];
-	my @tags = @{$_[2]};
+	my @tags = @{$_[1]};
 	my $total = 0;
 	foreach my $tag (@tags) 
 	{
@@ -1917,8 +2022,7 @@ sub count_field
 sub field_length 
 {
 	my ($marc) = $_[0];
-	my $log = $_[1];
-	my @tags = @{$_[2]};
+	my @tags = @{$_[1]};
 
 	my @f = $marc->field(@tags[0]);
 	return 0 unless @f;
@@ -1947,15 +2051,32 @@ sub updateDBSHA1
 	if($count>0)
 	{
 		$query = "update e_bib_import.bib_sha1 set sha1=\$1 where bib=\$2";
-        @values = ($sha1);
+        updateJob($query);
+        @values = ($sha1, $bibid);
 	}
     else
     {
-		$query = "insert into e_bib_import.bib_sha1(bib,bib_source,sha1) values(\$1,\$2,\$3 ";
+		$query = "insert into e_bib_import.bib_sha1(bib,bib_source,sha1) values(\$1,\$2,\$3 )";
+        updateJob($query);
         @values = ($bibid,$source,$sha1);
 	}
     $dbHandler->updateWithParameters($query,\@values);
 
+}
+
+sub reingest
+{
+    my $bibid = shift;
+    my $query = 
+    "SELECT metabib.reingest_metabib_field_entries(bib_id := \$1, skip_facet := FALSE, skip_browse := FALSE, skip_search := FALSE, skip_display := FALSE)";
+    my @vals = ($bibid);
+    $dbHandler->updateWithParameters($query, \@vals);
+    
+    $query = "SELECT metabib.reingest_record_attributes(rid := id, prmarc := marc)
+    FROM biblio.record_entry
+    WHERE id = \$1
+    ";
+    $dbHandler->updateWithParameters($query, \@vals);
 }
 
 
@@ -1982,7 +2103,7 @@ sub setupSchema
 		$dbHandler->update($query);
         
         $query = "CREATE TABLE e_bib_import.import_status(
-		id serial,
+		id bigserial NOT NULL,
         filename text,
 		z01 text,
         title text,
@@ -1994,6 +2115,7 @@ sub setupSchema
         marc_xml text,
         bib bigint,
         job  bigint NOT NULL,
+        CONSTRAINT import_status_pkey PRIMARY KEY (id),
         CONSTRAINT import_status_fkey FOREIGN KEY (job)
 		REFERENCES e_bib_import.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
@@ -2014,7 +2136,7 @@ sub setupSchema
 		$dbHandler->update($query);
         
 		$query = "CREATE TABLE e_bib_import.bib_marc_update(
-		id serial,
+		id bigserial NOT NULL,
 		record bigint,
 		prev_marc text,
 		changed_marc text,
@@ -2026,7 +2148,7 @@ sub setupSchema
 		$dbHandler->update($query);
         
 		$query = "CREATE TABLE e_bib_import.bib_merge(
-		id serial,
+		id bigserial NOT NULL,
 		leadbib bigint,
 		subbib bigint,
         statusid bigint,
@@ -2039,7 +2161,7 @@ sub setupSchema
 		$dbHandler->update($query);
         
 		$query = "CREATE TABLE e_bib_import.nine_sync(
-		id serial,
+		id bigserial NOT NULL,
 		record bigint,
 		nines_synced text,
 		url text,
