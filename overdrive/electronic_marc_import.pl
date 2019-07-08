@@ -336,7 +336,12 @@ sub prepFiles
         updateJob("Processing","Parsing: $archivefolder/".$files[$b]);
         if(! ( ($thisfilename =~ m/csv/) || ($thisfilename =~ m/tsv/) ) )
         {
-            my $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]);
+            my @fsp = split('\.',$thisfilename);
+            my $fExtension = pop @fsp;
+            $fExtension = lc $fExtension
+            my $file;
+            $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]) if $fExtension !=~ m/xml/;
+            $file = MARC::File::XML->in("$archivefolder/".$files[$b]) if $fExtension =~ m/xml/;
             my $isRemoval = compareStringToArray($thisfilename,$conf{'removalfiles'});
             while ( my $marc = $file->next() )
             {
@@ -760,6 +765,236 @@ sub getmarcFromFTP
 	$log->addLogLine("**********FTP session closed ***************");
 	$log->addLine(Dumper(\@ret));
 	return \@ret;
+}
+
+
+sub getMarcFromCloudlibrary
+{
+	my $startDate = '0001-01-01';
+	my $lastRemovalDate = '0001-01-01';
+	if( -e $lastDateRunFilePath)
+	{
+		my $previousRunDateTimeFile = new Loghandler($lastDateRunFilePath);
+		my @previousRunTime = @{$previousRunDateTimeFile->readFile()};
+		
+		# It's always going to be the first line in the file
+		my $previousRunTime = @previousRunTime[0];
+		$previousRunTime =~ s/\n$//g;
+		my $lastRemovalRunTime = @previousRunTime[1];
+		$lastRemovalRunTime =~ s/\n$//g;
+		$log->addLine("reading last run file and got $previousRunTime and $lastRemovalRunTime");
+		my ($y,$m,$d) = $previousRunTime =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
+			or die;
+		$startDate = $y.'-'.$m.'-'.$d;
+		my ($y,$m,$d) = $lastRemovalRunTime =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
+			or die;
+		$lastRemovalDate = $y.'-'.$m.'-'.$d;
+	}
+	
+	my $dateNow = DateTime->now(time_zone => "GMT");
+	
+	my $endDate = $dateNow->ymd();
+	
+	my @newRecords = @{_getMarcFromCloudlibrary($startDate, $endDate)};
+	# Done gathering up new records.
+	
+	# Decide if it's been long enough to check for deletes
+	my $dateNow = DateTime->today( time_zone => "GMT" );
+	my ($y,$m,$d) = $lastRemovalDate =~ /^([0-9]{4})\-([0-9]{2})\-([0-9]{2})\z/
+		or die;
+	my $previousDate = new DateTime({ year => $y, month=> $m, day => $d });
+    $previousDate->truncate( to => 'day' );
+    my $difference = $dateNow - $previousDate;
+    my $format = DateTime::Format::Duration->new(pattern => '%Y %m %e');
+    my $duration =  $format->format_duration($difference);
+    $log->addLine("duration raw = $duration");
+    my ($y,$m,$d) = $duration =~ /^([^\s]*)\s([^\s]*)\s([^\s]*)/;
+    
+    
+	$log->addLine("Duration from last deletes: $dateNow minus $previousDate = $y years, $m months $d days apart");
+    $duration = $y*365;
+    $duration+= $m*30;
+    $duration+= $d;
+    $log->addLine("Duration = ".$duration);
+    $duration = $duration*1;
+	my $removeOutput = '';
+	if($duration > 30)
+	{
+		my $bib_sourceid = getbibsource();
+		my $queryDB = "SELECT record,value,(select marc from biblio.record_entry where id=a.record) from metabib.real_full_rec a where 
+		record in(select id from biblio.record_entry where not deleted and 
+		source in($bib_sourceid) and create_date < '$startDate') and
+		tag='035'";
+        updateJob("Processing",$queryDB);
+		my @results = @{$dbHandler->query($queryDB)};
+		foreach(@results)
+		{
+			my @row = @{$_};
+			my $bib = @row[0];
+			my $itemID = @row[1];
+            $itemID =~ s/^[^\s]*\s([^\s]*)/\1/g;
+            $log->addLine("Item ID = $itemID");
+			my $marcxml = @row[2];
+			my @checkIfRemoved = @{_getMarcFromCloudlibrary($startDate, $endDate, $itemID)};
+			# not found in the cloudlibrary collection, add it to the remove array
+			if($#checkIfRemoved == -1)
+			{
+				$marcxml =~ s/(<leader>.........)./${1}a/;
+				my $marcobj = MARC::Record->new_from_xml($marcxml);
+				$removeOutput.= convertMARCtoXML($marcobj);;
+			}
+		}
+	}
+	
+	
+	my $outputFileName = $mobUtil->chooseNewFileName($archivefolder,"import$endDate","xml");
+	my $outputFileRemove = $mobUtil->chooseNewFileName($archivefolder,"import$endDate"."remove","xml");
+	
+	my @ret = ();
+	
+	my $newOutput = '';
+	foreach(@newRecords)
+	{
+		$newOutput .= convertMARCtoXML($_);
+	}
+	
+	if(length($newOutput) > 0)
+	{
+		my $outputFile = new Loghandler($outputFileName);
+		$outputFile->appendLine($newOutput);
+		$outputFileName =~ s/$archivefolder//;
+		push (@ret, $outputFileName);
+	}
+	
+	if(length($removeOutput) > 0)
+	{
+		my $outputFile = new Loghandler($outputFileRemove);
+		$outputFile->appendLine($removeOutput);
+		$outputFileRemove =~ s/$archivefolder//;
+		push (@ret, $outputFileRemove);
+	}
+	
+	$log->addLine(Dumper(\@ret));
+	return \@ret;
+}
+
+sub _getMarcFromCloudlibrary
+{
+	my $baseURL = $conf{"server"};
+	my $library = $conf{"login"};
+	my $apikey = $conf{"password"};
+	my $startDate = @_[0];
+	my $endDate = @_[1];
+	my $recordID = @_[2];
+	my $uri = "/cirrus/library/$library/data/marc";
+    
+updateJob("Processing","Starting API connection");
+	my $records = 1;
+	my $offset = 1;
+	my $resultGobLimit = 50;
+	my @allRecords = ();
+	my $stop = 0;
+	while( ($records && !$stop) )
+	{
+		$records = 0;
+		my $query = "?startdate=$startDate&enddate=$endDate&offset=$offset&limit=$resultGobLimit";
+		$uri .= "/$recordID" if $recordID;
+		$query = '' if $recordID;
+		my $date = DateTime->now(time_zone => "GMT");
+
+		my $dayofmonth = $date->day();
+		$dayofmonth = '0'.$dayofmonth if length($dayofmonth) == 1;
+
+		my $timezonestring = $date->time_zone_short_name();
+		$timezonestring =~ s/UTC/GMT/g;
+		my $dateString = $date->day_abbr().", ".
+		$dayofmonth." ".
+		$date->month_abbr()." ".
+		$date->year()." ".
+		$date->hms()." ".
+		$timezonestring;
+		
+		my $digest = hmac_sha256_base64($dateString."\nGET\n".$uri.$query, $apikey);
+		while (length($digest) % 4) {
+			$digest .= '=';
+		}
+
+		my $client = REST::Client->new({
+			 host    => $baseURL,
+			 cert    => $cert,
+			 key     => $certKey,
+		 });
+updateJob("Processing","API query: GET, $uri$query");
+		my $answer = $client->request('GET',$uri.$query,'',
+			{
+			'3mcl-Datetime'=>$dateString,
+			'3mcl-Authorization'=>"3MCLAUTH library.$library:".$digest,
+			'3mcl-apiversion'=>"3mcl-apiversion: 2.0"
+			}
+		);
+		my $allXML = $answer->responseContent();
+        # $log->addLine($allXML);
+        my @unparsableEntities = ("ldquo;","\"","rdquo;","\"","ndash;","-","lsquo;","'","rsquo;","'","mdash;","-","supl;","");
+        my $i = 0;
+        while(@unparsableEntities[$i])
+        {
+            my $loops = 0;
+            while(index($allXML,@unparsableEntities[$i]) != -1)
+            {
+                my $index = index($allXML,@unparsableEntities[$i]);
+                my $find = @unparsableEntities[$i];
+                my $findlength = length($find);
+                my $first = substr($allXML,0,$index);
+                $index+=$findlength;
+                my $last = substr($allXML,$index);
+                my $rep = @unparsableEntities[$i+1];
+                #$log->addLine("Found at $index and now replacing $find");
+                $allXML = $first.$rep.$last;
+                # $allXML =~ s/(.*)&?$find(.*)/$1$rep$2/g;
+                #$log->addLine("just replaced\n$allXML");
+                $loops++;
+                exit if $loops > 15;
+            }
+            $i+=2;
+        }
+        #$log->addLine("after scrubbed\n$allXML");
+		$allXML = decode_entities($allXML);
+		$allXML =~ s/(.*)<\?xml[^>]*>(.*)/$1$2/;
+		$allXML =~ s/(<marc:collection[^>]*>)(.*)/$2/;
+		$allXML =~ s/(.*)<\/marc:collection[^>]*>(.*)/$1$2/;
+		my @records = split("marc:record",$allXML);
+updateJob("Processing","Received ".$#records." records");
+		foreach (@records)
+		{
+			# Doctor the xml
+			my $thisXML = $_;
+			$thisXML =~ s/^>//;
+			$thisXML =~ s/<\/?$//;
+			$thisXML =~ s/<(\/?)marc\:/<$1/g;
+			if(length($thisXML) > 0)
+			{	
+				$thisXML =~ s/>\s+</></go;	
+				$thisXML =~ s/\p{Cc}//go;
+				$thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
+				$thisXML =~ s/[\x00-\x1f]//go;
+				$thisXML =~ s/^\s+//;
+				$thisXML =~ s/\s+$//;
+				$thisXML =~ s/<record><leader>/<leader>/;
+				$thisXML =~ s/<collection/<record/;	
+				$thisXML =~ s/<\/record><\/collection>/<\/record>/;	
+				
+				my $record = MARC::Record->new_from_xml("<record>".$thisXML."</record>");
+				push (@allRecords, $record);
+				$offset++;
+			}
+		}
+		$records = 1 if($#records > -1);
+        #$stop = 1 if($#allRecords > 200);
+		$log->addLine("records = $records and stop = $stop");
+		$log->addLine("Record Count: ".$#allRecords);
+	}
+	return \@allRecords;
+
 }
 
 sub ftpRecurse
