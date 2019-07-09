@@ -25,6 +25,11 @@ use DateTime::Format::Duration;
 use Digest::SHA1;
 use File::stat;
 use Getopt::Long;
+use REST::Client;
+use LWP::UserAgent;
+use Digest::SHA qw(hmac_sha256_base64);
+use HTML::Entities;
+
 
 our $configFile;
 our $debug = 0;
@@ -62,7 +67,9 @@ or die("Error in command line arguments\nYou can specify
  our $dbHandler;
  our $domainname = '';
  our $bibsourceid = -1;
- 
+ our $lastDateRunFilePath;
+ our $cert;
+ our $certKey; 
  our @shortnames;
  
  if(!$configFile)
@@ -83,8 +90,12 @@ or die("Error in command line arguments\nYou can specify
 		$log = new Loghandler($conf->{"logfile"});
 		#$log->truncFile("");
 		$log->addLogLine(" ---------------- Script Starting ---------------- ");
-		my @reqs = ("server","login","password","remotefolder","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","incomingmarcfolder","recordsource","ignorefiles","removalfiles","bibtag"); 
-		my $valid = 1;
+		my @reqs = ("server","login","password","remotefolder","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","incomingmarcfolder","recordsource","ignorefiles","removalfiles","bibtag");
+
+        # There are some special directives required when cloudlibrary is selected
+        push(@reqs, ("lastdatefile","certpath","certkeypath")) if( lc ($conf{"recordsource"}) eq 'cloudlibrary');
+
+        my $valid = 1;
 		my $errorMessage="";
 		for my $i (0..$#reqs)
 		{
@@ -95,6 +106,13 @@ or die("Error in command line arguments\nYou can specify
 				$valid = 0;
 			}
 		}
+
+        $lastDateRunFilePath = $conf{"lastdatefile"} if( lc ($conf{"recordsource"}) eq 'cloudlibrary');
+        $cert = $conf{"certpath"} if( lc ($conf{"recordsource"}) eq 'cloudlibrary');
+        $certKey = $conf{"certkeypath"} if( lc ($conf{"recordsource"}) eq 'cloudlibrary');
+
+
+
 		$archivefolder = $conf{"archivefolder"};
 		$importSourceName = $conf{"sourcename"};
 		$remotefolder = $conf{"remotefolder"};
@@ -145,7 +163,8 @@ or die("Error in command line arguments\nYou can specify
             elsif($reportOnly == -1) ## Make sure we are not just running reports
             {
                 @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
-                @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} ne 'folder');
+                @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} eq 'ftp');
+                @files = @{getMarcFromCloudlibrary()}  if(lc$conf{"recordsource"} eq 'cloudlibrary');
                 if($#files!=-1)
                 {
                     $bibsourceid = getbibsource();
@@ -224,9 +243,14 @@ or die("Error in command line arguments\nYou can specify
 		}
         else
         {
-            print "Config file does not define 'logfile'\n";		
+            print "Config file does not define some of the required directives. See Log for details\n";
         }
 	}
+    else
+    {
+        print "Config file: 'logfile' directive is required\n";
+    }
+}
 
 sub runReports
 {
@@ -338,7 +362,7 @@ sub prepFiles
         {
             my @fsp = split('\.',$thisfilename);
             my $fExtension = pop @fsp;
-            $fExtension = lc $fExtension
+            $fExtension = lc $fExtension;
             my $file;
             $file = MARC::File::USMARC->in("$archivefolder/".$files[$b]) if $fExtension !=~ m/xml/;
             $file = MARC::File::XML->in("$archivefolder/".$files[$b]) if $fExtension =~ m/xml/;
@@ -888,7 +912,7 @@ sub _getMarcFromCloudlibrary
 	my $recordID = @_[2];
 	my $uri = "/cirrus/library/$library/data/marc";
     
-updateJob("Processing","Starting API connection");
+    updateJob("Processing","Starting API connection");
 	my $records = 1;
 	my $offset = 1;
 	my $resultGobLimit = 50;
@@ -924,7 +948,7 @@ updateJob("Processing","Starting API connection");
 			 cert    => $cert,
 			 key     => $certKey,
 		 });
-updateJob("Processing","API query: GET, $uri$query");
+        updateJob("Processing","API query: GET, $uri$query");
 		my $answer = $client->request('GET',$uri.$query,'',
 			{
 			'3mcl-Datetime'=>$dateString,
@@ -963,7 +987,7 @@ updateJob("Processing","API query: GET, $uri$query");
 		$allXML =~ s/(<marc:collection[^>]*>)(.*)/$2/;
 		$allXML =~ s/(.*)<\/marc:collection[^>]*>(.*)/$1$2/;
 		my @records = split("marc:record",$allXML);
-updateJob("Processing","Received ".$#records." records");
+        updateJob("Processing","Received ".$#records." records");
 		foreach (@records)
 		{
 			# Doctor the xml
@@ -1128,7 +1152,7 @@ sub removeOldCallNumberURI
 	(
 		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
 	)";
-updateJob("Processing","$query");
+    updateJob("Processing","$query");
     my @results = @{$dbHandler->query($query)};
     foreach(@results)
     {
@@ -1143,14 +1167,14 @@ updateJob("Processing","$query");
 		SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
 	)
 	";
-updateJob("Processing","$query");
+    updateJob("Processing","$query");
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.uri_call_number_map WHERE call_number in 
 	(
 		SELECT id from asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	)";
-updateJob("Processing","$query");
+    updateJob("Processing","$query");
 	$dbHandler->update($query);
     
     if(length($uriids) > 0)
@@ -1162,12 +1186,12 @@ updateJob("Processing","$query");
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
-updateJob("Processing","$query");	
+    updateJob("Processing","$query");	
 	$dbHandler->update($query);
 	$query = "
 	DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
 	";
-updateJob("Processing","$query");
+    updateJob("Processing","$query");
 	$dbHandler->update($query);
 
 }
@@ -1195,7 +1219,7 @@ sub recordAssetCopyMove
 		INSERT INTO e_bib_import.item_reassignment(copy,prev_bib,target_bib,statusid,job)
 		VALUES ($_,$oldbib,$newbib,$statusID, $jobid)";
 		$log->addLine("$query");
-updateJob("Processing","recordAssetCopyMove  $query");
+        updateJob("Processing","recordAssetCopyMove  $query");
 		$dbHandler->update($query);
 	}
 }
@@ -1333,7 +1357,6 @@ sub removeBibsEvergreen
         }
     }
 }
-	
 
 sub importMARCintoEvergreen
 {
@@ -1662,46 +1685,6 @@ sub chooseWinnerAndDeleteRest
         $dbHandler->updateWithParameters($query,\@vals);
 	}
 
-}
-
-sub determineElectric
-{
-	my $marc = @_[0];
-	my @e56s = $marc->field('856');	
-	my $textmarc = $marc->as_formatted();
-	my $score=0;
-	my @phrases = ("electronic resource","ebook","eaudiobook","overdrive","download");
-	my $has856 = 0;
-	my $has245h = getsubfield($marc,'245','h');
-	my $found=0;	
-	foreach(@e56s)
-	{
-		my $field = $_;
-		my $ind2 = $field->indicator(2);
-		if($ind2 eq '0') #only counts if the second indicator is 0 ("Resource") documented here: http://www.loc.gov/marc/bibliographic/bd856.html
-		{	
-			my @subs = $field->subfield('u');
-			foreach(@subs)
-			{
-				#print "checking $_ for http\n";
-				if(m/http/g)
-				{
-					$score++;
-				}
-			}
-		}
-	}	
-	foreach(@phrases)
-	{
-		my $phrase = $_;
-		my @c = split($phrase,lc$textmarc);
-		if($#c>1) # Found more than 1 match on that phrase
-		{
-			$score++;
-		}
-	}
-	#print "Electric score: $score\n";
-	return $score;
 }
 
 sub findRecord
@@ -2433,5 +2416,3 @@ sub setupSchema
 
  exit;
 
- 
- 
