@@ -67,6 +67,7 @@ or die("Error in command line arguments\nYou can specify
  our $dbHandler;
  our $domainname = '';
  our $bibsourceid = -1;
+ our $recurseFTP = 1;
  our $lastDateRunFilePath;
  our $cert;
  our $certKey; 
@@ -120,6 +121,9 @@ or die("Error in command line arguments\nYou can specify
         $importBIBTagNameDB = $conf{"bibtag"};
 		$importBIBTagNameDB =~ s/\s/\-/g;
 		$domainname = $conf{"domainname"} || '';
+        $recurseFTP = $conf{"recurse"} || 1;
+        $recurseFTP = lc $recurseFTP;
+        $recurseFTP = ($recurseFTP eq 'n' ? 0 : 1);
         
 		if(!(-d $archivefolder))
 		{
@@ -188,6 +192,10 @@ or die("Error in command line arguments\nYou can specify
             {
                 if ($reportOnly == -1)
                 {
+                    # Send a comfort message explaining that we have received the files and it might take some time before
+                    # they receive the finished message. Only when it's type folder and deep match searching is configured.
+                    sendWelcomeMessage(\@files) if ( $searchDeepMatch && (lc$conf{"recordsource"} eq 'folder') && $doSomething );
+
                     ## Imports
                     my $query = "SELECT id,title,z01,sha1,marc_xml,filename from e_bib_import.import_status where type=\$\$import\$\$ and job=$jobid order by id";
                     updateJob("Processing",$query);
@@ -219,9 +227,9 @@ or die("Error in command line arguments\nYou can specify
                 my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
                 my $duration =  $format->format_duration($difference);
 
-                my $body = 
-                    "Import Type: ".$conf{"recordsource"}."
-                    Connected to: ".$conf{"server"}.
+                my $body =
+                    "Import Type: ".$conf{"recordsource"}.
+                    "\r\nConnected to: ".$conf{"server"}.
                     "\r\nDuration: $duration".
                     "\r\n$report".
                     "\r\n\r\n\r\n-Evergreen Perl Squad-";
@@ -256,49 +264,57 @@ sub runReports
 {
     ## Reporting
     my $ret = "";
-    
-    
+
     ### Overall Totals
     my $query = "select count(*),filename from e_bib_import.import_status where job = $jobid group by 2";
-    
+
     my @results = @{$dbHandler->query($query)};
-    
+
     $ret .= "File Breakdown:\n\r";
     my $totalrows = 0;
     foreach(@results)
     {
         my @row = @{$_};
-        $ret .= @row[0] . "records in ".@row[1] . "\r\n";
+        $ret .= @row[0] . " records in ".@row[1] . "\r\n";
         $totalrows += @row[0];
     }
-    $ret .= "\r\nTotal: $totalrows\r\n";
+    $ret .= "\r\nTotal: $totalrows\r\n\r\n";
     undef @results;
-    
-    
-    
+
+
     ### Import summary
     my %status = ();
-    
+
     $query = "select z01,title,status,bib from e_bib_import.import_status where job = $jobid and type = \$\$import\$\$ ";
 
     my @results = @{$dbHandler->query($query)};
-    
+
     $ret .= "Import Summary:\n\r";
     foreach(@results)
     {
         my @row = @{$_};
-        $status{@row[2]} = () if !$status{@row[2]};
-        push $status{@row[2]}, [(@row[0],@row[1],@row[3])];
+        my @t = ();
+        $status{@row[2]} = \@t if !$status{@row[2]};
+        @t = @{$status{@row[2]}};
+        my @temp = (@row[0],@row[1],@row[3]);
+        push @t, [@temp];
+        $status{@row[2]} = \@t;
     }
     my $interestingImports = "";
     while ( (my $key, my $value) = each(%status) )
     {
-        $ret .= "$key: ". scalar $status{$key} . "occurrences\r\n";
-        if($key ne 'inserted' || $key ne 'matched and overlayed')
+        my @c = @{$value};
+        my $c = $#c;
+        $c++;
+        $ret .= "$key: $c occurrences\r\n";
+        if($key ne 'inserted' && $key ne 'matched and overlayed')
         {
-            my @v = @{$value};
-            $interestingImports .= $key . " - " . @v[0] . " " . @v[1] . " BIB:" . @v[2];
-            undef @v;
+            my @vv = @{$value};
+            foreach(@vv)
+            {
+                my @v = @{$_};
+                $interestingImports .= $key . " - '" . @v[0] . "' '" . @v[1] . "' BIB: " . @v[2] . "\r\n";
+            }
         }
     }
     
@@ -313,22 +329,32 @@ sub runReports
 
     my @results = @{$dbHandler->query($query)};
     
-    $ret .= "Import Summary:\n\r";
+    $ret .= "Removal Summary:\n\r";
     foreach(@results)
     {
         my @row = @{$_};
-        $status{@row[2]} = () if !$status{@row[2]};
-        push $status{@row[2]}, [(@row[0],@row[1])];
+        my @t = ();
+        $status{@row[2]} = \@t if !$status{@row[2]};
+        @t = @{$status{@row[2]}};
+        my @temp = (@row[0],@row[1]);
+        push @t, [@temp];
+        $status{@row[2]} = \@t;
     }
     my $interestingImports = "";
     while ( (my $key, my $value) = each(%status) )
     {
-        $ret .= "$key: ". scalar $status{$key} . "occurrences\r\n";
-        if($key ne 'removed bib' || $key ne 'removed related 856')
+        my @c = @{$value};
+        my $c = $#c;
+        $c++;
+        $ret .= "$key: $c occurrences\r\n";
+        if($key ne 'removed bib' && $key ne 'removed related 856')
         {
-            my @v = @{$value};
-            $interestingImports .= $key . " - " . @v[0] . " " . @v[1];
-            undef @v;
+            my @vv = @{$value};
+            foreach(@vv)
+            {
+                my @v = @{$_};
+                $interestingImports .= $key . " - '" . @v[0] . "' '" . @v[1] . "'\r\n";
+            }
         }
     }
     
@@ -526,6 +552,28 @@ sub resetJob
     }
     
     return $ret;
+}
+
+
+sub sendWelcomeMessage
+{
+    my @files = @{$_[0]};
+    my $files = join("\r\n",@files);
+    my @tolist = ($conf{"alwaysemail"});
+    my $body = 
+"Hello,
+We have received these files:
+$files
+
+This software is configured to perform deep search matches against the database. This is slow but thorough.
+Depending on the number of records, it could be days before you receive the finished message. FYI.
+\r\n\r\n-Evergreen Perl Squad-";
+
+    $log->addLine("Sending Welcome message:\r\n$body");
+
+    my $email = new email($conf{"fromemail"},\@tolist,1,1,\%conf);
+    $email->send("Evergreen Utility - $importBIBTagName Import Report Job # $jobid - Starting", $body);
+
 }
 
 sub alertErrorEmail
@@ -742,16 +790,16 @@ sub getmarcFromFTP
 		
 		if($download)
 		{
-			if(-e "$archivefolder"."$filename")
+			if(-e "$archivefolder/"."$filename")
 			{
-				my $size = stat("$archivefolder"."$filename")->size; #[7];
-				my $rsize = $ftp->size($filename);
+				my $size = stat("$archivefolder/"."$filename")->size; #[7];
+				my $rsize = findFTPRemoteFileSize($filename, $ftp);
 				# print "Local: $size\n";
 				# print "remot: $rsize\n";
 				if($size ne $rsize)
 				{
-					$log->addLine("$archivefolder"."$filename differes in size");
-					unlink("$archivefolder"."$filename");
+					$log->addLine("$archivefolder/"."$filename differes in size");
+					unlink("$archivefolder/"."$filename");
 				}
 				else
 				{
@@ -765,7 +813,7 @@ sub getmarcFromFTP
 			}
 			if($download)
 			{
-                my $path = $archivefolder.$filename;
+                my $path = $archivefolder."/".$filename;
                 $path = substr($path,0,rindex($path,'/'));
                 # $log->addLine("Path = $path");
                 if(!-d $path)
@@ -776,7 +824,7 @@ sub getmarcFromFTP
                     mode => 0755,
                     });
                 }
-                my $worked = $ftp->get($filename,$archivefolder.$filename);
+                my $worked = $ftp->get($filename,"$archivefolder/$filename");
 				if($worked)
 				{
 					push (@ret, "$filename");
@@ -791,6 +839,52 @@ sub getmarcFromFTP
 	return \@ret;
 }
 
+sub findFTPRemoteFileSize
+{
+    my $filename = shift;
+    my $ftp = shift;
+
+    my $rsize = $ftp->size($filename);
+
+    my $testUsingDirMethod = 0;
+    $testUsingDirMethod = 1 if($rsize =~ m/\D/);
+    $testUsingDirMethod = 1 if( (!$testUsingDirMethod) && (length($rsize) <4) );
+    if($testUsingDirMethod)
+    {
+        my @rsizes = $ftp->dir($filename);
+        $rsize = @rsizes[0] ? @rsizes[0] : '0';
+        #remove the filename from the string
+        my $rfile = $filename;
+        # parenthesis and slashes in the filename screw up the regex
+        $rfile =~ s/\(/\\(/g;
+        $rfile =~ s/\)/\\)/g;
+        $rfile =~ s/\//\\\//g;
+        $rsize =~ s/$rfile//g;
+        $log->addLine($rsize);
+        my @split = split(/\s+/, $rsize);
+        my @timeOutput = @{localtime(time)};
+        my $year = @timeOutput[5];
+        $year += 1900;
+        foreach(@split)
+        {
+            # Looking for something that looks like a filesize in bytes. Example output from ftp server:
+            # -rwxr-x---  1 northkcm System     15211006 Apr 25  2019 Audio_Recorded Books eAudio Adult Subscription_4_25_2019.mrc
+            # -rwxr-x---  1 scenicre System         9731 Apr 09  2018 Zinio_scenicregionalmo_2099_Magazine_12_1_2017.mrc
+            # We can expect a file that contains a single marc record to be reasonable in size ( > 1k)
+            # Therefore, we need to find a string of at lease 4 numeric characters. Need to watch out for "year" numerics
+
+            next if($year eq $_); #ignore year
+            next if($_ =~ m/\D/); #ignore fields containing anything other than numbers
+
+            if(length($_) > 3)
+            {
+                $rsize = $_;
+                continue;
+            }
+        }
+    }
+    return $rsize;
+}
 
 sub getMarcFromCloudlibrary
 {
@@ -1034,7 +1128,7 @@ sub ftpRecurse
         if($ftpOb->cwd($ftpOb->pwd."/".$_)) #it's a directory
         {
             #let's go again
-            @interestingFiles = @{ftpRecurse($ftpOb,\@interestingFiles)};
+            @interestingFiles = @{ftpRecurse($ftpOb,\@interestingFiles)} if $recurseFTP;
             #$log->addLine("going to parent dir from = ".$ftpOb->pwd);
             $ftpOb->cdup();
         }
@@ -1116,7 +1210,7 @@ sub add9
 					my @s7 = @recID[$rec]->subfield( '7' );
 					if($#s7==-1)
 					{
-						@recID[$rec]->add_subfields('7'=>$importBIBTagNameDB);
+						@recID[$rec]->add_subfields('7'=>$importBIBTagName);
 					}
 					my @subfields = @recID[$rec]->subfield( '9' );
 					my $shortnameexists=0;
@@ -1392,7 +1486,7 @@ sub importMARCintoEvergreen
         my $max = getEvergreenMax();
         my $thisXML = convertMARCtoXML($marc);
         my @values = ($thisXML);
-        $query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$1,null,$bibsourceid,\$\$$importBIBTagName-script $sha1\$\$,null,null)";
+        $query = "INSERT INTO BIBLIO.RECORD_ENTRY(fingerprint,last_xact_id,marc,quality,source,tcn_source,owner,share_depth) VALUES(null,'IMPORT-$starttime',\$1,null,$bibsourceid,\$\$$importBIBTagNameDB-script $sha1\$\$,null,null)";
         $log->addLine($query);
         my $res = $dbHandler->updateWithParameters($query,\@values);
         #print "$res";
@@ -1580,7 +1674,7 @@ sub findMatchingISBN
     my @ret = ();
     
     my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE
-    tcn_source~\$\$$importBIBTagName-script\$\$ AND
+    tcn_source~\$\$$importBIBTagNameDB-script\$\$ AND
     source=$bibsourceid AND
     NOT DELETED AND
     ID IN(
@@ -1662,7 +1756,7 @@ sub chooseWinnerAndDeleteRest
 	recordBIBMARCChanges($winnerBibID, $winnerOGMARCxml, $newmarcforrecord,0);
     
 	my $thisXML = convertMARCtoXML($finalMARC);
-	my @values = ("$importBIBTagName-script $sha1", $bibsourceid, $thisXML, $winnerBibID);
+	my @values = ("$importBIBTagNameDB-script $sha1", $bibsourceid, $thisXML, $winnerBibID);
 	my $query = "UPDATE BIBLIO.RECORD_ENTRY SET tcn_source = \$1 , source = \$2 , marc = \$3  WHERE ID = \$4";
     
     print "Updating MARC XML in DB BIB $winnerBibID\n" if $debug;
@@ -2009,7 +2103,7 @@ sub getbibsource
 	my @results = @{$dbHandler->query($squery)};
 	if($#results==-1)
 	{
-		print "Didnt find e_bib in bib_source, now creating it...\n";
+		print "Didnt find $importSourceName in bib_source, now creating it...\n";
 		my $query = "INSERT INTO CONFIG.BIB_SOURCE(QUALITY,SOURCE) VALUES(90,\$\$$importSourceName\$\$)";
 		my $res = $dbHandler->update($query);
 		print "Update results: $res\n";
