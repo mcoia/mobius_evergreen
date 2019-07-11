@@ -1,5 +1,20 @@
 #!/usr/bin/perl
 
+# ---------------------------------------------------------------
+# Copyright © 2019 MOBIUS
+# Blake Graham-Henderson <blake@mobiusconsortium.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# ---------------------------------------------------------------
+
 # These Perl modules are required:
 # install Email::MIME
 # install Email::Sender::Simple
@@ -165,6 +180,7 @@ or die("Error in command line arguments\nYou can specify
                 @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
                 @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} eq 'ftp');
                 @files = @{getMarcFromCloudlibrary()}  if(lc$conf{"recordsource"} eq 'cloudlibrary');
+
                 if($#files!=-1)
                 {
                     $bibsourceid = getbibsource();
@@ -320,7 +336,7 @@ sub runReports
     ### Removal summary
     my %status = ();
     
-    $query = "select z01,title,status from e_bib_import.import_status where job = $jobid and type = \$\$removal\$\$ ";
+    $query = "select z01,title,status from e_bib_import.import_status where job = $jobid and type ~ \$\$remov\$\$ ";
 
     my @results = @{$dbHandler->query($query)};
     
@@ -390,6 +406,7 @@ sub prepFiles
             while ( my $marc = $file->next() )
             {
                 $dbInserts.="(";
+                $log->addLine($dbInserts);
                 $marc = add9($marc) if !$isRemoval;
                 my $importType = "import";
                 $importType = "removal" if $isRemoval;
@@ -469,7 +486,7 @@ sub prepFiles
                         $dbInserts.="\$$dbValPos,";
                         $dbValPos++;
                         push(@vals,$fullLine);
-                        $dbInserts.="\$$dbValPos,";
+                        $dbInserts.="\$$dbValPos";
                         $dbValPos++;
                         push(@vals,$jobid);
                         $dbInserts.="),\n";
@@ -514,6 +531,7 @@ sub dumpRowsIfFull
             }
         }
         updateJob("Processing","Dumping memory to DB $count $readyForStatusUpdate");
+        $log->addLine("Final insert statement:\n$dbInserts");
         $dbHandler->updateWithParameters($dbInserts,\@vals);
         undef $dbInserts;
         my $dbInserts = $insertTop;
@@ -785,7 +803,7 @@ sub getmarcFromFTP
             if(-e "$archivefolder/"."$filename")
             {
                 my $size = stat("$archivefolder/"."$filename")->size; #[7];
-                my $rsize = findFTPRemoteFileSize($filename, $ftp);
+                my $rsize = findFTPRemoteFileSize($filename, $ftp, $size);
                 # print "Local: $size\n";
                 # print "remot: $rsize\n";
                 if($size ne $rsize)
@@ -835,6 +853,7 @@ sub findFTPRemoteFileSize
 {
     my $filename = shift;
     my $ftp = shift;
+    my $localFileSize = shift;
 
     my $rsize = $ftp->size($filename);
 
@@ -854,8 +873,10 @@ sub findFTPRemoteFileSize
         $rsize =~ s/$rfile//g;
         $log->addLine($rsize);
         my @split = split(/\s+/, $rsize);
-        my @timeOutput = @{localtime(time)};
-        my $year = @timeOutput[5];
+        my $dt = DateTime->now(time_zone => "local");
+        my $fdate = $dt->ymd;        
+        my $year = substr($fdate,0,4);
+        
         $year += 1900;
         foreach(@split)
         {
@@ -871,7 +892,8 @@ sub findFTPRemoteFileSize
             if(length($_) > 3)
             {
                 $rsize = $_;
-                continue;
+                # if we find that one of the values exactly matches local file size, then we just set it to that
+                last if($localFileSize eq $_);
             }
         }
     }
@@ -1419,7 +1441,7 @@ sub removeBibsEvergreen
         else
         {
             $query = "update e_bib_import.import_status set status = \$1 , processed = true, row_change_time = now() where id = \$2";
-            my @values = ('No matching bib in ME', $statusID);
+            my @values = ('No matching bib in DB', $statusID);
             $dbHandler->updateWithParameters($query,\@values);
         }
         $loops++;
@@ -1440,6 +1462,12 @@ sub removeBibsEvergreen
             my @pass = ([@{$bib}]);
             attemptRemoveBibs(\@pass, $statusID);
             $loops++;
+        }
+        if($#marcOutputRecordsRemove == -1)
+        {
+            $query = "update e_bib_import.import_status set processed = true , status = \$1 , row_change_time = now() where id = \$2";
+            my @values = ("No matching bib in DB", $statusID);
+            $dbHandler->updateWithParameters($query,\@values);
         }
     }
 }
@@ -1526,7 +1554,7 @@ sub attemptRemoveBibs
             my @results = @{$dbHandler->query($query)};
             if($#results > -1) # There are non-deleted copies attached
             {
-                $query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , processed = true, row_change_time = now() where id = \$3";
+                $query = "update e_bib_import.import_status set status = status || \$\$[ $id - \$\$ || \$1 || \$\$]\$\$ , bib = \$2 , row_change_time = now() where id = \$3";
                 my @values = ('failed to removed bib due to copies attached', $id, $statusID);
                 $dbHandler->updateWithParameters($query,\@values);
             }
@@ -1579,7 +1607,6 @@ sub attemptRemoveBibs
     $query = "update e_bib_import.import_status set processed = true , row_change_time = now() where id = \$1";
     @values = ($statusID);
     $dbHandler->updateWithParameters($query,\@values);
-    
 }
 
 sub decideToDeleteOrRemove9
