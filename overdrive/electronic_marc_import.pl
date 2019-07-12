@@ -358,7 +358,7 @@ sub runReports
         my $c = $#c;
         $c++;
         $ret .= "$key: $c occurrences\r\n";
-        if($key ne 'removed bib' && $key ne 'removed related 856')
+        if($key ne 'removed bib' && $key ne 'removed related 856' && $key ne 'No matching bib in DB')
         {
             my @vv = @{$value};
             foreach(@vv)
