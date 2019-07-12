@@ -406,7 +406,6 @@ sub prepFiles
             while ( my $marc = $file->next() )
             {
                 $dbInserts.="(";
-                $log->addLine($dbInserts);
                 $marc = add9($marc) if !$isRemoval;
                 my $importType = "import";
                 $importType = "removal" if $isRemoval;
@@ -531,7 +530,7 @@ sub dumpRowsIfFull
             }
         }
         updateJob("Processing","Dumping memory to DB $count $readyForStatusUpdate");
-        $log->addLine("Final insert statement:\n$dbInserts");
+        $log->addLine("Final insert statement:\n$dbInserts") if $debug;
         $dbHandler->updateWithParameters($dbInserts,\@vals);
         undef $dbInserts;
         my $dbInserts = $insertTop;
