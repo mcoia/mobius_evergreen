@@ -20,7 +20,7 @@
 # install Email::Sender::Simple
 # install Digest::SHA1
 
-use lib qw(../../);
+use lib qw(../);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -791,7 +791,7 @@ sub getmarcFromFTP
     $ftp->cwd($remotefolder);
     my @interestingFiles = ();
     @interestingFiles = @{ftpRecurse($ftp, \@interestingFiles)};
-    $log->addLine(Dumper(\@interestingFiles));
+    $log->addLine(Dumper(\@interestingFiles)) if $debug;
     foreach(@interestingFiles)
     {
         my $filename = $_;
@@ -803,10 +803,10 @@ sub getmarcFromFTP
             {
                 my $size = stat("$archivefolder/"."$filename")->size; #[7];
                 my $rsize = findFTPRemoteFileSize($filename, $ftp, $size);
-                # print "Local: $size\n";
-                # print "remot: $rsize\n";
                 if($size ne $rsize)
-                {
+                {   
+                    $log->addLine("Local: $size") if $debug;
+                    $log->addLine("remot: $rsize") if $debug;
                     $log->addLine("$archivefolder/"."$filename differes in size");
                     unlink("$archivefolder/"."$filename");
                 }
@@ -872,27 +872,51 @@ sub findFTPRemoteFileSize
         $rsize =~ s/$rfile//g;
         $log->addLine($rsize);
         my @split = split(/\s+/, $rsize);
+
+        # Build the year string
         my $dt = DateTime->now(time_zone => "local");
         my $fdate = $dt->ymd;        
         my $year = substr($fdate,0,4);
-        
-        $year += 1900;
+        my @years = ();
+        my $i = 0;
+        push @years, $year-- while($i++ < 3);
+        $year = substr($fdate,0,4);
+        $i = 0;
+        push @years, $year++ while($i++ < 3);
+        $year = '';
+        $year.="$_ " foreach(@years);
+
         foreach(@split)
         {
             # Looking for something that looks like a filesize in bytes. Example output from ftp server:
             # -rwxr-x---  1 northkcm System     15211006 Apr 25  2019 Audio_Recorded Books eAudio Adult Subscription_4_25_2019.mrc
             # -rwxr-x---  1 scenicre System         9731 Apr 09  2018 Zinio_scenicregionalmo_2099_Magazine_12_1_2017.mrc
             # We can expect a file that contains a single marc record to be reasonable in size ( > 1k)
-            # Therefore, we need to find a string of at lease 4 numeric characters. Need to watch out for "year" numerics
+            # Therefore, we need to find a string of at least 4 numeric characters. Need to watch out for "year" numerics
 
-            next if($year eq $_); #ignore year
             next if($_ =~ m/\D/); #ignore fields containing anything other than numbers
+            next if index($year,$_) > -1; #ignore fields containing a year value close to current year
 
             if(length($_) > 3)
             {
                 $rsize = $_;
                 # if we find that one of the values exactly matches local file size, then we just set it to that
                 last if($localFileSize eq $_);
+
+                # Need to allow for a small filesize margin to compensate for the ASCII byte count versus UTF-8
+                # This isn't exactly perfect, but I'm going with a margin of 98 percent
+                my $lowerNumber = $localFileSize;
+                my $higherNumber = $_;
+                $lowerNumber = $_ if $_ < $localFileSize;
+                $higherNumber = $localFileSize if $_ < $localFileSize;
+                my $percent = ($lowerNumber / $higherNumber) * 100;
+                $log->addLine("Filesize percentage: $percent") if $debug;
+                if($percent > 98)
+                {
+                    # Make them equal
+                    $rsize = $localFileSize;
+                    last;
+                }
             }
         }
     }
