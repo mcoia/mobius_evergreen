@@ -254,11 +254,7 @@ or die("Error in command line arguments\nYou can specify
                 
                 updateJob("Completed","");
             }
-            else
-            {
-                alertErrorEmail("There were some errors during the getmarc function, we are stopping execution.");
-                exit;
-            }
+
             $log->addLogLine(" ---------------- Script Ending ---------------- ");
         }
         else
