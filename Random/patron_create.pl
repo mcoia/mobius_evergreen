@@ -187,6 +187,8 @@ use email;
                     @rowarray[$colpos] =~ s/^\t+//;
                     @rowarray[$colpos] =~ s/\s+$//;
                     @rowarray[$colpos] =~ s/\t+$//;
+                    # Some bad characters can mess with some processes later. Excel loves these \xA0
+                    @rowarray[$colpos] =~ s/\x{A0}//g;
                                         
                     $thisLineInsertByHand.="\$data\$".@rowarray[$colpos]."\$data\$,";
                     push (@thisLineVals, @rowarray[$colpos]);
