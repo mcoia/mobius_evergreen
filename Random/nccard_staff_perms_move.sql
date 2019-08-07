@@ -10,7 +10,6 @@ new_set boolean default true
 );
 
 -- Insert the old set
-
 insert into m_coo.staff_perm_stage
 (grp_id,perm,depth,grantable,new_set)
 select 
@@ -479,6 +478,14 @@ usr_id bigint,
 grp_id bigint
 );
 
+create table m_coo.permission_usr_perm_map_staff_perm_stage
+(
+usr_id bigint,
+perm_id bigint,
+depth integer,
+grantable boolean default false
+);
+
 
 -- Insert the spreadsheet
 
@@ -518,9 +525,47 @@ pgt.id=mausps.new_secondary_profile and
 pgt.name!=mausps.new_grp_name2;
 
 
+truncate m_coo.permission_usr_perm_map_staff_perm_stage;
+truncate m_coo.permission_usr_grp_map_staff_perm_stage;
 
-
+ROLLBACK;
 BEGIN;
+
+
+-- record the secondary permission assignments
+insert into m_coo.permission_usr_grp_map_staff_perm_stage(usr_id ,grp_id )
+select
+usr,grp from 
+permission.usr_grp_map;
+
+
+-- record the one-off permissions
+insert into m_coo.permission_usr_perm_map_staff_perm_stage(usr_id ,perm_id ,depth ,grantable )
+select usr,perm,depth,grantable from
+permission.usr_perm_map;
+
+-- record the original profile ID for everyone affected
+insert into m_coo.actor_usr_staff_perm_stage (usr_id ,old_profile,new_profile ,usrname)
+select id,profile,5,usrname from
+actor.usr where
+profile in (
+select id from permission.grp_descendants(3)
+where
+id not in(13,14,15,23)
+)
+and
+id not in(select usr_id from m_coo.actor_usr_staff_perm_stage);
+
+
+-- Remove all permission maps for staff
+delete from permission.grp_perm_map where grp in(
+select grp_id from
+m_coo.staff_perm_stage
+);
+
+-- Create the new permissions for staff
+insert into permission.grp_perm_map(grp,perm,depth,grantable)
+select grp_id,perm,depth,grantable from m_coo.staff_perm_stage where new_set;
 
 -- Blanket everyone to Circulator
 UPDATE actor.usr SET profile = 5 WHERE profile in (
@@ -529,10 +574,37 @@ where
 id not in(13,14,15,23)
 );
 
+commit;
 
+begin;
+-- remove all secondary permissions
+truncate permission.usr_grp_map;
 
+-- remove all one-off
+truncate permission.usr_perm_map;
+
+-- Set the new profile for those that need it
+update actor.usr au set profile=mausps.new_profile
+from 
+m_coo.actor_usr_staff_perm_stage mausps
+where
+mausps.usr_id=au.id and
+au.profile!=mausps.new_profile and
+mausps.new_profile is not null;
+
+-- Make the secondary permissions for those that need it
+insert into permission.usr_grp_map (usr,grp)
+select usr_id,new_secondary_profile
+from
+m_coo.actor_usr_staff_perm_stage mausps
+where
+new_secondary_profile is not null;
 
 
 -- Move the two acq groups to delete tree
+update permission.grp_tree set parent=76
+where
+id in(6,7);
 
+commit;
 
