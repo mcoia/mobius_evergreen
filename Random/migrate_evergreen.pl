@@ -84,242 +84,242 @@ if(!$schema)
     
     $evergreenlocationcodes = getRemoteEGIDs();
 	
-  # #get circ mods
-	# my $query = "
-		# select * from config.circ_modifier where code in(select circ_modifier from asset.copy where call_number in(
-        # select id from asset.call_number where owning_lib in($evergreenlocationcodes)
-        # )
-        # )";
-	# setupEGTable($query,"circ_modifier");
+  #get circ mods
+	my $query = "
+		select * from config.circ_modifier where code in(select circ_modifier from asset.copy where call_number in(
+        select id from asset.call_number where owning_lib in($evergreenlocationcodes)
+        )
+        )";
+	setupEGTable($query,"circ_modifier");
 	
     
     
-  # #get location/branches
-	# my $query = "
-		# select * from actor.org_unit where id in($evergreenlocationcodes)
-	# ";
-	# setupEGTable($query,"location_branch_info");
+  #get location/branches
+	my $query = "
+		select * from actor.org_unit where id in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"location_branch_info");
 	
   
-	# #get patrons
-	# my $query = "
-		# select * from actor.usr where home_ou in ($evergreenlocationcodes) 
-	# ";
-	# setupEGTable($query,"actor_usr_legacy","actor_usr");
+	#get patrons
+	my $query = "
+		select * from actor.usr where home_ou in ($evergreenlocationcodes) 
+	";
+	setupEGTable($query,"actor_usr_legacy","actor_usr");
     
-    # #get patron cards
-	# my $query = "
-		# select * from actor.card where usr in(select id from actor.usr where home_ou in ($evergreenlocationcodes)) 
-	# ";
-	# setupEGTable($query,"actor_card_legacy","actor_card");
+    #get patron cards
+	my $query = "
+		select * from actor.card where usr in(select id from actor.usr where home_ou in ($evergreenlocationcodes)) 
+	";
+	setupEGTable($query,"actor_card_legacy","actor_card");
 	
-  # ## get actor.passwd
-	# my $query = "
-		# select * from actor.passwd where usr in(select id from actor.usr where home_ou in ($evergreenlocationcodes)) 
-	# ";
-	# setupEGTable($query,"patron_passwd");
+  ## get actor.passwd
+	my $query = "
+		select * from actor.passwd where usr in(select id from actor.usr where home_ou in ($evergreenlocationcodes)) 
+	";
+	setupEGTable($query,"patron_passwd");
   
-	# #get patron addresses	
-	# my $query = "
-		# select * from actor.usr_address where 
-		# id in
-		# (
-		# select mailing_address from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # or id in
-        # (
-		# select billing_address from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # or usr in
-        # (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"actor_usr_address_legacy","actor_usr_address");
+	#get patron addresses	
+	my $query = "
+		select * from actor.usr_address where 
+		id in
+		(
+		select mailing_address from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        or id in
+        (
+		select billing_address from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        or usr in
+        (
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"actor_usr_address_legacy","actor_usr_address");
 	
-	# #get patron note
-	# my $query = "
-		# select * from actor.usr_note where usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"actor_usr_note_legacy","actor_usr_note");
+	#get patron note
+	my $query = "
+		select * from actor.usr_note where usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"actor_usr_note_legacy","actor_usr_note");
 	
-	# #get patron messages
-	# my $query = "
-		# select * from actor.usr_message where usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"actor_usr_message_legacy","actor_usr_message");
+	#get patron messages
+	my $query = "
+		select * from actor.usr_message where usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"actor_usr_message_legacy","actor_usr_message");
     
-    # #get patron settings
-	# my $query = "
-		# select * from actor.usr_setting where usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"patron_settings");
+    #get patron settings
+	my $query = "
+		select * from actor.usr_setting where usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"patron_settings");
     
-    # #get patron penalty
-	# my $query = "
-		# select * from actor.usr_standing_penalty where usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"actor_usr_standing_penalty_legacy","actor_usr_standing_penalty");
+    #get patron penalty
+	my $query = "
+		select * from actor.usr_standing_penalty where usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"actor_usr_standing_penalty_legacy","actor_usr_standing_penalty");
 	
-	# #get patron checkouts
-	# my $query = "
-		# select * from action.circulation where usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"action_circulation_legacy","action_circulation");
+	#get patron checkouts
+	my $query = "
+		select * from action.circulation where usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"action_circulation_legacy","action_circulation");
     
     
-	# # get patron grocery
-	# my $query = "
-		# select * from money.grocery where usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"money_grocery_legacy","money_grocery");
+	# get patron grocery
+	my $query = "
+		select * from money.grocery where usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"money_grocery_legacy","money_grocery");
     
-    # # get patron fines
-	# my $query = "
-		# select * from money.billing where xact in(
-        # select id from money.billable_xact where xact_finish is null and
-        # usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # )
-	# ";
-	# setupEGTable($query,"money_billing_legacy","money_billing");
+    # get patron fines
+	my $query = "
+		select * from money.billing where xact in(
+        select id from money.billable_xact where xact_finish is null and
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+	";
+	setupEGTable($query,"money_billing_legacy","money_billing");
     
-    # # get patron cash payments
-	# my $query = "
-		# select * from money.cash_payment where xact in(
-        # select id from money.billable_xact where xact_finish is null and
-        # usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # )
-	# ";
-	# setupEGTable($query,"money_cash_payment_legacy","money_cash_payment");
+    # get patron cash payments
+	my $query = "
+		select * from money.cash_payment where xact in(
+        select id from money.billable_xact where xact_finish is null and
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+	";
+	setupEGTable($query,"money_cash_payment_legacy","money_cash_payment");
     
-    # # get patron check payments
-	# my $query = "
-		# select * from money.cash_payment where xact in(
-        # select id from money.billable_xact where xact_finish is null and
-        # usr in
-		# (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # )
-	# ";
-	# setupEGTable($query,"money_check_payment_legacy","money_check_payment");
+    # get patron check payments
+	my $query = "
+		select * from money.cash_payment where xact in(
+        select id from money.billable_xact where xact_finish is null and
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+	";
+	setupEGTable($query,"money_check_payment_legacy","money_check_payment");
     
-    # # get patron stat categories
-	# my $query = "
-		# select * from actor.stat_cat where id in(
-        # select stat_cat from actor.stat_cat_entry_usr_map where target_usr in
-        # (
+    # get patron stat categories
+	my $query = "
+		select * from actor.stat_cat where id in(
+        select stat_cat from actor.stat_cat_entry_usr_map where target_usr in
+        (
 		
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # )
-	# ";
-	# setupEGTable($query,"actor_stat_cat_legacy","actor_stat_cat");
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+	";
+	setupEGTable($query,"actor_stat_cat_legacy","actor_stat_cat");
     
-    # # get patron stat options
-	# my $query = "
-		# select * from actor.stat_cat_entry where stat_cat in(
-        # select id from actor.stat_cat where id in(
-        # select stat_cat from actor.stat_cat_entry_usr_map where target_usr in
-        # (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-        # )
-        # )
-	# ";
-	# setupEGTable($query,"actor_stat_cat_entry_legacy","actor_stat_cat_entry");
+    # get patron stat options
+	my $query = "
+		select * from actor.stat_cat_entry where stat_cat in(
+        select id from actor.stat_cat where id in(
+        select stat_cat from actor.stat_cat_entry_usr_map where target_usr in
+        (
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+        )
+	";
+	setupEGTable($query,"actor_stat_cat_entry_legacy","actor_stat_cat_entry");
         
-    # # get patron stat map
-	# my $query = "
-		# select * from actor.stat_cat_entry_usr_map
-        # where target_usr in
-        # (
-		# select id from actor.usr where home_ou in ($evergreenlocationcodes) 
-		# )
-	# ";
-	# setupEGTable($query,"actor_stat_cat_entry_usr_map_legacy","actor_stat_cat_entry_usr_map");
+    # get patron stat map
+	my $query = "
+		select * from actor.stat_cat_entry_usr_map
+        where target_usr in
+        (
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+	";
+	setupEGTable($query,"actor_stat_cat_entry_usr_map_legacy","actor_stat_cat_entry_usr_map");
     
     
-	# #get patron permission group map
-	# my $query = "
-		# select *
-        # from
-        # permission.grp_perm_map        
-	# ";
-	# setupEGTable($query,"patron_permission_map");
+	#get patron permission group map
+	my $query = "
+		select *
+        from
+        permission.grp_perm_map        
+	";
+	setupEGTable($query,"patron_permission_map");
     
-    # #get patron types
-    # my $query = "
-		# select pgt.*
-        # from
-        # actor.usr au,
-        # permission.grp_tree pgt
-        # where
-        # pgt.id=au.profile and
-        # au.home_ou in($evergreenlocationcodes)
-	# ";
-	# setupEGTable($query,"patron_permission_tree");
+    #get patron types
+    my $query = "
+		select pgt.*
+        from
+        actor.usr au,
+        permission.grp_tree pgt
+        where
+        pgt.id=au.profile and
+        au.home_ou in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"patron_permission_tree");
 	
-    # #get patron work ou map
-    # my $query = "
-		# select puwom.*
-        # from
-        # actor.usr au,
-        # permission.usr_work_ou_map puwom
-        # where
-        # pgt.id=au.profile and
-        # au.home_ou in($evergreenlocationcodes)
-	# ";
-	# setupEGTable($query,"permission_usr_work_ou_map_legacy","permission_usr_work_ou_map");
+    #get patron work ou map
+    my $query = "
+		select puwom.*
+        from
+        actor.usr au,
+        permission.usr_work_ou_map puwom
+        where
+        pgt.id=au.profile and
+        au.home_ou in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"permission_usr_work_ou_map_legacy","permission_usr_work_ou_map");
 	
 	
-	# #get copy location
-	# my $query = "
-    # select * from asset.copy_location where 
-    # id
-    # in(select location from asset.copy where call_number in(
-        # select id from asset.call_number where owning_lib in($evergreenlocationcodes)
-        # )
-        # )
-	# ";
-	# setupEGTable($query,"asset_copy_location_legacy","asset_copy_location");
+	#get copy location
+	my $query = "
+    select * from asset.copy_location where 
+    id
+    in(select location from asset.copy where call_number in(
+        select id from asset.call_number where owning_lib in($evergreenlocationcodes)
+        )
+        )
+	";
+	setupEGTable($query,"asset_copy_location_legacy","asset_copy_location");
   
-	# #get holds
-	# my $query = "
-        # select ahr.* from 
-        # action.hold_request ahr,
-        # actor.usr au        
-        # where 
-        # au.id=ahr.usr and
-        # au.home_ou in($evergreenlocationcodes) and
-        # ahr.cancel_time is null
+	#get holds
+	my $query = "
+        select ahr.* from 
+        action.hold_request ahr,
+        actor.usr au        
+        where 
+        au.id=ahr.usr and
+        au.home_ou in($evergreenlocationcodes) and
+        ahr.cancel_time is null
         
-	# ";
-	# setupEGTable($query,"action_hold_request_legacy","action_hold_request");
+	";
+	setupEGTable($query,"action_hold_request_legacy","action_hold_request");
 	
     #get holds notification
 	my $query = "
