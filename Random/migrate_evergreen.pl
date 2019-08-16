@@ -92,13 +92,44 @@ if(!$schema)
         )";
 	setupEGTable($query,"circ_modifier");
 	
-    
+  ## get coded value map
+	my $query = "
+		select * from config.coded_value_map where lower(value)~\$\$play\$\$
+	";
+	setupEGTable($query,"coded_value_map");
+	  
     
   #get location/branches
 	my $query = "
 		select * from actor.org_unit where id in($evergreenlocationcodes)
 	";
-	setupEGTable($query,"location_branch_info");
+	setupEGTable($query,"actor_org_unit_legacy","actor_org_unit");
+    
+   #get location/branches addresses
+	my $query = "
+		select * from actor.org_address where id in(
+        select ill_address from actor.org_unit where id in($evergreenlocationcodes)
+        union all
+        select holds_address from actor.org_unit where id in($evergreenlocationcodes)
+        union all
+        select mailing_address from actor.org_unit where id in($evergreenlocationcodes)
+        union all
+        select billing_address from actor.org_unit where id in($evergreenlocationcodes)
+        )
+	";
+	setupEGTable($query,"actor_org_address_legacy","actor_org_address");    
+    
+    # actor.org_unit_setting
+    my $query = "
+		select * from actor.org_unit_setting where org_unit in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"actor_org_unit_setting");   
+    
+    # actor.hours_of_operation
+    my $query = "
+		select * from actor.hours_of_operation where id in($evergreenlocationcodes)
+	";
+    setupEGTable($query,"actor_hours_of_operation");
 	
   
 	#get patrons
@@ -274,11 +305,12 @@ if(!$schema)
     
     #get patron types
     my $query = "
-		select pgt.*
+		select distinct pgt.*
         from
         actor.usr au,
         permission.grp_tree pgt
         where
+        not au.deleted and
         pgt.id=au.profile and
         au.home_ou in($evergreenlocationcodes)
 	";
@@ -286,16 +318,20 @@ if(!$schema)
 	
     #get patron work ou map
     my $query = "
-		select puwom.*
+		select * from permission.usr_work_ou_map puwom
+        where usr
+        in
+        (
+        select au.id
         from
-        actor.usr au,
-        permission.usr_work_ou_map puwom
+        actor.usr au
         where
-        pgt.id=au.profile and
         au.home_ou in($evergreenlocationcodes)
+        )
 	";
 	setupEGTable($query,"permission_usr_work_ou_map_legacy","permission_usr_work_ou_map");
-	
+
+    
 	
 	#get copy location
 	my $query = "
@@ -353,22 +389,7 @@ if(!$schema)
 	my $query = "
         select acnote.*
         from 
-        asset.copy_note acnote
-        asset.copy ac,
-        asset.call_number acn
-        where
-        acnote.owning_copy=ac.id and
-        acn.id=ac.call_number and
-        acn.owning_lib in($evergreenlocationcodes)
-        
-	";
-	setupEGTable($query,"asset_copy_note_legacy","asset_copy_note");
-    
-    #get item notes
-	my $query = "
-        select acnote.*
-        from 
-        asset.copy_note acnote
+        asset.copy_note acnote,
         asset.copy ac,
         asset.call_number acn
         where
@@ -382,13 +403,15 @@ if(!$schema)
     
     # get item stat categories
 	my $query = "
-		select ttarget.*        
+		select distinct ttarget.*        
         from 
-        asset.stat_cat ttarget
+        asset.stat_cat ttarget,
         asset.copy ac,
-        asset.call_number acn
+        asset.call_number acn,
+        asset.stat_cat_entry_copy_map ascecm
         where
-        acnote.owning_copy=ac.id and
+        ascecm.stat_cat=ttarget.id and
+        ascecm.owning_copy=ac.id and
         acn.id=ac.call_number and
         acn.owning_lib in($evergreenlocationcodes)
         
@@ -397,13 +420,17 @@ if(!$schema)
     
     # get item stat options
 	my $query = "
-		select ttarget.*        
+		select distinct ttarget.*        
         from 
-        asset.stat_cat_entry ttarget
+        asset.stat_cat assc,
+        asset.stat_cat_entry ttarget,
+        asset.stat_cat_entry_copy_map ascecm,
         asset.copy ac,
         asset.call_number acn
         where
-        acnote.owning_copy=ac.id and
+        ascecm.stat_cat=assc.id and
+        assc.id=ttarget.stat_cat and
+        ascecm.owning_copy=ac.id and
         acn.id=ac.call_number and
         acn.owning_lib in($evergreenlocationcodes)
 	";
@@ -413,48 +440,86 @@ if(!$schema)
 	my $query = "
 		select ttarget.*        
         from 
-        asset.stat_cat_entry_copy_map ttarget
+        asset.stat_cat_entry_copy_map ttarget,
         asset.copy ac,
         asset.call_number acn
         where
-        acnote.owning_copy=ac.id and
+        ttarget.owning_copy=ac.id and
         acn.id=ac.call_number and
         acn.owning_lib in($evergreenlocationcodes)
 	";
-	setupEGTable($query,"asset_stat_cat_entry_usr_map_legacy","asset_stat_cat_entry_usr_map");
+	setupEGTable($query,"asset_stat_cat_entry_copy_map_legacy","asset_stat_cat_entry_copy_map");
+    
+    # get item tags
+	my $query = "
+		select distinct ttarget.*        
+        from 
+        asset.copy_tag ttarget,
+        asset.copy ac,
+        asset.copy_tag_copy_map actcm,
+        asset.call_number acn
+        where
+        ttarget.id=actcm.tag and
+        actcm.copy = ac.id and
+        acn.id=ac.call_number and
+        acn.owning_lib in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"asset_copy_tag_legacy","asset_copy_tag");
+    
+    # get item tag map
+	my $query = "
+		select actcm.*        
+        from 
+        asset.copy ac,
+        asset.copy_tag_copy_map actcm,
+        asset.call_number acn
+        where
+        actcm.copy = ac.id and
+        acn.id=ac.call_number and
+        acn.owning_lib in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"asset_copy_tag_copy_map_legacy","asset_copy_tag_copy_map");
+    
+    
     
      # get bibs
 	my $query = "
-		select bre.*
-        from 
-        biblio.record_entry bre,
+		select * from biblio.record_entry where id in
+        (select record from 
         asset.call_number acn
-        where        
-        acn.record=bre.id and
-        acn.owning_lib in($evergreenlocationcodes)
+        where
+        acn.owning_lib in($evergreenlocationcodes) and not deleted
+        ) and not deleted
 	";
 	setupEGTable($query,"biblio_record_entry_legacy","biblio_record_entry");
      
     # get monograph parts
 	my $query = "
-		select bmp.*
+		select * from biblio.monograph_part bmp
+        where
+        id in
+        (
+        select acpm.part
         from 
-        biblio.monograph_part bmp,
+        biblio.monograph_part bmp2,
         asset.copy_part_map acpm,
         asset.copy ac,
         asset.call_number acn
         where
         acn.id=ac.call_number and
         ac.id=acpm.target_copy and
-        bmp.id=acpm.part and
+        bmp2.id=acpm.part and
         acn.owning_lib in($evergreenlocationcodes)
+        )
 	";
 	setupEGTable($query,"biblio_monograph_part_legacy","biblio_monograph_part");
     
     # get monograph part map
 	my $query = "
-		select acpm.*
-        from 
+		select * from asset.copy_part_map acpm2
+        where
+        id in
+        (select acpm.id from
         biblio.monograph_part bmp,
         asset.copy_part_map acpm,
         asset.copy ac,
@@ -464,10 +529,117 @@ if(!$schema)
         ac.id=acpm.target_copy and
         bmp.id=acpm.part and
         acn.owning_lib in($evergreenlocationcodes)
+        )
 	";
 	setupEGTable($query,"asset_copy_part_map_legacy","asset_copy_part_map");
     
-	
+    
+    # get circ rules
+	my $query = "
+		select * from config.circ_limit_set target
+        where
+        id in
+        (
+        select ccls.id from
+        config.circ_limit_set ccls,
+        config.circ_matrix_matchpoint ccmm,
+        config.circ_matrix_limit_set_map ccmlsm
+        where
+        ccmlsm.matchpoint=ccmm.id and
+        ccmlsm.limit_set=ccls.id and
+        ccmm.org_unit in($evergreenlocationcodes)
+        )
+	";
+	setupEGTable($query,"config_circ_limit_set_legacy","config_circ_limit_set");
+    
+    # get circ rules
+	my $query = "
+		select * from config.circ_limit_set_circ_mod_map target
+        where
+        limit_set in
+        (
+        select ccmlsm.limit_set from
+        config.circ_matrix_matchpoint ccmm,
+        config.circ_matrix_limit_set_map ccmlsm
+        where
+        ccmlsm.matchpoint=ccmm.id and
+        ccmm.org_unit in($evergreenlocationcodes)
+        )
+	";
+	setupEGTable($query,"config_circ_limit_set_circ_mod_map_legacy","config_circ_limit_set_circ_mod_map");
+    
+    # get circ rules
+	my $query = "
+		select * from config.circ_matrix_limit_set_map target
+        where
+        matchpoint in
+        (
+        select ccmm.id from config.circ_matrix_matchpoint ccmm
+        where
+        ccmm.org_unit in($evergreenlocationcodes) and active
+        )
+	";
+	setupEGTable($query,"config_circ_matrix_limit_set_map_legacy","config_circ_matrix_limit_set_map");
+    
+    # get circ rules
+	my $query = "
+		select * from config.circ_matrix_matchpoint ccmm
+        where
+        ccmm.org_unit in($evergreenlocationcodes) and active
+       
+	";
+	setupEGTable($query,"config_circ_matrix_matchpoint_legacy","config_circ_matrix_matchpoint");
+    
+     # get circ rules
+	my $query = "
+		select * from config.rule_circ_duration target
+        where
+        id in
+        (
+        select duration_rule from
+        config.circ_matrix_matchpoint ccmm
+        where
+        ccmm.org_unit in($evergreenlocationcodes)
+        )       
+	";
+	setupEGTable($query,"config_rule_circ_duration_legacy","config_rule_circ_duration");
+    
+    # get circ rules
+	my $query = "
+		select * from config.rule_max_fine target
+        where
+        id in
+        (
+        select max_fine_rule from
+        config.circ_matrix_matchpoint ccmm
+        where
+        ccmm.org_unit in($evergreenlocationcodes)
+        )       
+	";
+	setupEGTable($query,"config_rule_max_fine_legacy","config_rule_max_fine");
+       
+    # get circ rules
+	my $query = "
+		select * from config.rule_recurring_fine target
+        where
+        id in
+        (
+        select recurring_fine_rule from
+        config.circ_matrix_matchpoint ccmm
+        where
+        ccmm.org_unit in($evergreenlocationcodes)
+        )       
+	";
+	setupEGTable($query,"config_rule_recurring_fine_legacy","config_rule_max_fine");
+    
+    # get hold rules
+	my $query = "
+		select * from config.hold_matrix_matchpoint target
+        where
+        target.item_owning_ou in($evergreenlocationcodes) and active
+	";
+	setupEGTable($query,"config_hold_matrix_matchpoint_legacy","config_hold_matrix_matchpoint");
+   
 	$log->addLogLine(" ---------------- Script End ---------------- ");
 	
 	
