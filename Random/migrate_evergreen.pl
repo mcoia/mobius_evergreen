@@ -86,9 +86,15 @@ if(!$schema)
 	
   #get circ mods
 	my $query = "
-		select * from config.circ_modifier where code in(select circ_modifier from asset.copy where call_number in(
+		select * from config.circ_modifier where code 
+        in(
+        select circ_modifier from asset.copy where call_number in(
         select id from asset.call_number where owning_lib in($evergreenlocationcodes)
         )
+        union all
+        select circ_modifier from config.hold_matrix_matchpoint chmm
+        where
+        chmm.item_owning_ou in($evergreenlocationcodes) and active
         )";
 	setupEGTable($query,"circ_modifier");
 	
@@ -106,7 +112,7 @@ if(!$schema)
 	";
 	setupEGTable($query,"config_composite_attr_entry_definition_legacy","config_composite_attr_entry_definition");  
     
-    ## Get billing types
+    # Get billing types
 	my $query = "
 		select * from config.billing_type where id in
         (
@@ -323,22 +329,19 @@ if(!$schema)
 	my $query = "
 		select *
         from
-        permission.grp_perm_map        
+        permission.grp_perm_map
 	";
-	setupEGTable($query,"patron_permission_map");
+	setupEGTable($query,"permission_grp_perm_map_legacy","permission_grp_perm_map");
+    
     
     #get patron types
     my $query = "
-		select distinct pgt.*
-        from
-        actor.usr au,
+		select *
+        from        
         permission.grp_tree pgt
-        where
-        not au.deleted and
-        pgt.id=au.profile and
-        au.home_ou in($evergreenlocationcodes)
+        
 	";
-	setupEGTable($query,"patron_permission_tree");
+	setupEGTable($query,"permission_grp_tree_legacy","permission_grp_tree");
 	
     #get patron work ou map
     my $query = "
@@ -506,13 +509,26 @@ if(!$schema)
     
     
     
-     # get bibs
+     get bibs
 	my $query = "
 		select * from biblio.record_entry where id in
-        (select record from 
+        (
+        
+        select record from 
         asset.call_number acn
         where
         acn.owning_lib in($evergreenlocationcodes) and not deleted
+        
+        union all
+        
+        select ahr.target from 
+        action.hold_request ahr,
+        actor.usr au
+        where
+        au.id=ahr.usr and
+        au.home_ou in($evergreenlocationcodes) and
+        ahr.cancel_time is null and
+        ahr.capture_time is null
         ) and not deleted
 	";
 	setupEGTable($query,"biblio_record_entry_legacy","biblio_record_entry");
@@ -642,7 +658,7 @@ if(!$schema)
 	";
 	setupEGTable($query,"config_rule_max_fine_legacy","config_rule_max_fine");
        
-    # get circ rules
+    get circ rules
 	my $query = "
 		select * from config.rule_recurring_fine target
         where
@@ -654,7 +670,7 @@ if(!$schema)
         ccmm.org_unit in($evergreenlocationcodes)
         )       
 	";
-	setupEGTable($query,"config_rule_recurring_fine_legacy","config_rule_max_fine");
+	setupEGTable($query,"config_rule_recurring_fine_legacy","config_rule_recurring_fine");
     
     # get hold rules
 	my $query = "
@@ -663,6 +679,30 @@ if(!$schema)
         target.item_owning_ou in($evergreenlocationcodes) and active
 	";
 	setupEGTable($query,"config_hold_matrix_matchpoint_legacy","config_hold_matrix_matchpoint");
+    
+     # get report templates folders
+	my $query = "
+		select * from reporter.template_folder
+	";
+	setupEGTable($query,"reporter_template_folder_legacy","reporter_template_folder");
+    
+    # get report templates
+	my $query = "
+		select * from reporter.template
+	";
+	setupEGTable($query,"reporter_template_legacy","reporter_template");
+    
+    # get report output folder
+	my $query = "
+		select * from reporter.output_folder
+	";
+	setupEGTable($query,"reporter_output_folder_legacy","reporter_output_folder");
+    
+    # get report output folder
+	my $query = "
+		select * from reporter.report_folder
+	";
+	setupEGTable($query,"reporter_report_folder_legacy","reporter_report_folder");
    
 	$log->addLogLine(" ---------------- Script End ---------------- ");
 	
