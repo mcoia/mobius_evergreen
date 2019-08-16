@@ -94,10 +94,34 @@ if(!$schema)
 	
   ## get coded value map
 	my $query = "
-		select * from config.coded_value_map where lower(value)~\$\$play\$\$
+		select * from config.coded_value_map where value~\$\$Playaway\$\$
 	";
-	setupEGTable($query,"coded_value_map");
-	  
+	setupEGTable($query,"config_coded_value_map_legacy","config_coded_value_map");
+  
+    ## get composite_attr_entry_definition
+	my $query = "
+		select * from config.composite_attr_entry_definition
+        where
+        coded_value in(select id from config.coded_value_map where value~\$\$Playaway\$\$)
+	";
+	setupEGTable($query,"config_composite_attr_entry_definition_legacy","config_composite_attr_entry_definition");  
+    
+    ## Get billing types
+	my $query = "
+		select * from config.billing_type where id in
+        (
+        select mb.btype from 
+        money.billing mb,
+        money.billable_xact mbx,
+        actor.usr au        
+        where 
+        mb.xact=mbx.id and
+        au.id=mbx.usr and
+        au.home_ou in( $evergreenlocationcodes   )
+        )
+        
+	";
+	setupEGTable($query,"config_billing_type_legacy","config_billing_type");
     
   #get location/branches
 	my $query = "
