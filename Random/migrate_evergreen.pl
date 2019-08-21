@@ -151,7 +151,7 @@ if(!$schema)
     
     # actor.org_unit_setting
     my $query = "
-		select * from actor.org_unit_setting where org_unit in($evergreenlocationcodes)
+		select * from actor.org_unit_setting where org_unit in($evergreenlocationcodes ,1)
 	";
 	setupEGTable($query,"actor_org_unit_setting");   
     
@@ -243,6 +243,33 @@ if(!$schema)
 	";
 	setupEGTable($query,"action_circulation_legacy","action_circulation");
     
+    #get historic circulation counts
+	my $query = "
+		select ac.id,count(*) as count from 
+        action.circulation acirc,
+        asset.copy ac
+        where 
+        acirc.target_copy=ac.id and
+        acirc.target_copy in (select id from asset.copy where call_number in(select id from asset.call_number where owning_lib in($evergreenlocationcodes))) and
+        acirc.usr in
+		(   
+            select id from actor.usr where home_ou in (
+                select id from actor.org_unit where id not in($evergreenlocationcodes)
+            ) 
+		)
+        group by 1
+	";
+	setupEGTable($query,"asset_legacy_circ_count");
+    
+    #get patron in house use
+	my $query = "
+		select * from action.in_house_use where item in
+		(
+		select id from asset.copy where call_number in(select id from asset.call_number where owning_lib in($evergreenlocationcodes))
+		)
+	";
+	setupEGTable($query,"action_in_house_use_legacy","action_in_house_use");
+    
     
 	# get patron grocery
 	my $query = "
@@ -279,7 +306,7 @@ if(!$schema)
     
     # get patron check payments
 	my $query = "
-		select * from money.cash_payment where xact in(
+		select * from money.check_payment where xact in(
         select id from money.billable_xact where xact_finish is null and
         usr in
 		(
@@ -288,6 +315,19 @@ if(!$schema)
         )
 	";
 	setupEGTable($query,"money_check_payment_legacy","money_check_payment");
+    
+    # get patron forgive payments
+	my $query = "
+		select * from money.forgive_payment where xact in(
+        select id from money.billable_xact where xact_finish is null and
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+	";
+	setupEGTable($query,"money_forgive_payment_legacy","money_forgive_payment");
+    
     
     # get patron stat categories
 	my $query = "
@@ -509,7 +549,7 @@ if(!$schema)
     
     
     
-     get bibs
+     # get bibs
 	my $query = "
 		select * from biblio.record_entry where id in
         (
@@ -529,8 +569,20 @@ if(!$schema)
         au.home_ou in($evergreenlocationcodes) and
         ahr.cancel_time is null and
         ahr.capture_time is null
+        
+        union all
+        
+        select cbrebi.target_biblio_record_entry
+        from
+        container.biblio_record_entry_bucket_item cbrebi
+        where cbrebi.bucket in
+        (
+		select id from container.biblio_record_entry_bucket
+        where owner in (select id from actor.usr where home_ou in ($evergreenlocationcodes) )
+        )
+        
         ) and not deleted
-	";
+	";    
 	setupEGTable($query,"biblio_record_entry_legacy","biblio_record_entry");
      
     # get monograph parts
@@ -703,7 +755,117 @@ if(!$schema)
 		select * from reporter.report_folder
 	";
 	setupEGTable($query,"reporter_report_folder_legacy","reporter_report_folder");
-   
+    
+     # get workstations
+	my $query = "
+		select * from actor.workstation where id
+        in
+        (
+        select workstation from action.circulation where        
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        union all
+        select checkin_workstation from action.circulation where        
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+        
+	";
+	setupEGTable($query,"actor_workstation_legacy","actor_workstation");
+    
+    # get copy status
+	my $query = "
+		select * from config.copy_status
+	";
+	setupEGTable($query,"config_copy_status_legacy","config_copy_status");
+    
+    # get sms carriers
+	my $query = "
+		select * from config.sms_carrier
+	";
+	setupEGTable($query,"config_sms_carrier_legacy","config_sms_carrier");
+    
+    # get action triggers
+	my $query = "
+		select * from action_trigger.event_definition
+        where owner in ($evergreenlocationcodes ,1) and active
+	";
+	setupEGTable($query,"action_trigger_event_definition_legacy","action_trigger_event_definition");
+    
+    ## get container buckets
+    my $query = "
+		select * from container.biblio_record_entry_bucket
+        where owner in (select id from actor.usr where home_ou in ($evergreenlocationcodes) )
+	";
+	setupEGTable($query,"container_biblio_record_entry_bucket_legacy","container_biblio_record_entry_bucket");
+    
+     ## get container buckets items
+    my $query = "
+        select * from container.biblio_record_entry_bucket_item
+        where bucket in
+        (
+		select id from container.biblio_record_entry_bucket
+        where owner in (select id from actor.usr where home_ou in ($evergreenlocationcodes) )
+        )
+	";
+	setupEGTable($query,"container_biblio_record_entry_bucket_item_legacy","container_biblio_record_entry_bucket_item");
+    
+     ## get container buckets items notes
+    my $query = "
+        select * from container.biblio_record_entry_bucket_item_note
+        where item in
+        (
+        select id from container.biblio_record_entry_bucket_item
+        where bucket in
+        (
+		select id from container.biblio_record_entry_bucket
+        where owner in (select id from actor.usr where home_ou in ($evergreenlocationcodes) )
+        )
+        )
+	";
+	setupEGTable($query,"container_biblio_record_entry_bucket_item_note_legacy","container_biblio_record_entry_bucket_item_note");
+    
+    ## get container buckets notes
+    my $query = "
+        select * from container.biblio_record_entry_bucket_note
+        where bucket in
+        (
+		select id from container.biblio_record_entry_bucket
+        where owner in (select id from actor.usr where home_ou in ($evergreenlocationcodes) )
+        )
+	";
+	setupEGTable($query,"container_biblio_record_entry_bucket_note_legacy","container_biblio_record_entry_bucket_note");
+    
+    ## get Permission group penalty definitions
+    my $query = "
+        select * from permission.grp_penalty_threshold
+        where org_unit in ($evergreenlocationcodes)
+	";
+	setupEGTable($query,"permission_grp_penalty_threshold_legacy","permission_grp_penalty_threshold");
+    
+    ## get z39.50 stuff
+    my $query = "
+        select * from config.z3950_source
+	";
+	setupEGTable($query,"config_z3950_source_legacy","config_z3950_source");
+    
+    ## get z39.50 stuff
+    my $query = "
+        select * from config.z3950_index_field_map
+	";
+	setupEGTable($query,"config_z3950_index_field_map_legacy","config_z3950_index_field_map");
+    
+    ## get z39.50 stuff
+    my $query = "
+        select * from config.z3950_attr
+	";
+	setupEGTable($query,"config_z3950_attr_legacy","config_z3950_attr");
+    
+    
 	$log->addLogLine(" ---------------- Script End ---------------- ");
 	
 	
@@ -712,6 +874,7 @@ sub setupEGTable
 	my $query = @_[0];
 	my $tablename = @_[1];
     my $inherited = @_[2] || 0;
+    my $append = @_[3] || 0;
     
     my $insertChunkSize = 500;
 	
@@ -731,19 +894,23 @@ sub setupEGTable
 	print $#allRows." rows\n";
 	
 	
-	#drop the table
-	my $query = "DROP TABLE IF EXISTS $schema.$tablename";
-	$log->addLine($query);
-	$dbHandler->update($query);
-	
-	#create the table
-	$query = "CREATE TABLE $schema.$tablename (";
-    $query.=$_." TEXT," for @cols;
-    $query=substr($query,0,-1).")";
-    $query.=" inherits ( $schema.$inherited )" if($inherited);
+    if(!$append)
+    {
+        #drop the table
+        my $query = "DROP TABLE IF EXISTS $schema.$tablename";
+        $log->addLine($query);
+        $dbHandler->update($query);
+        
+        #create the table
+        $query = "CREATE TABLE $schema.$tablename (";
+        $query.=$_." TEXT," for @cols;
+        $query=substr($query,0,-1).")";
+        $query.=" inherits ( $schema.$inherited )" if($inherited);
 
-	$log->addLine($query);
-	$dbHandler->update($query);
+        $log->addLine($query);
+        $dbHandler->update($query);
+    }
+    
     my @vals = ();
     my $valpos = 1;
     my $totalInserted = 0;
