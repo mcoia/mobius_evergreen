@@ -480,7 +480,7 @@ sub reportResults
 	{	
 		my $count = $#results+1;
 		$AudiobooksPossbileEAudiobooks="$count Possible Electronic (see attached bibs_possible_electronic.csv)\r\n\r\n";
-		my @header = ("902","Deleted","BIB ID","OPAC Link","Winning_score","OPAC ICON","Winning Score",
+		my @header = ("903","Deleted","BIB ID","OPAC Link","Winning_score","OPAC ICON","Winning Score",
 		"Winning Score Distance","Second Place Score","Circ Modifiers","Call Numbers","Locations",
 		"Record Quality","record_type","audioformat","videoformat","electronic","audiobook_score",
 		"music_score","playaway_score","largeprint_score","video_score","microfilm_score","microfiche_score");		
@@ -761,11 +761,11 @@ sub tag902s
 		#$log->addLine(length($xmlresult));
 		if(length($xmlresult)!=$check)
 		{		
-			updateMARC($xmlresult,$bibid,'false',"Tagging 902 for $note");
+			updateMARC($xmlresult,$bibid,'false',"Tagging 903 for $note");
 		}
 		else
 		{
-			print "Skipping $bibid - Already had the 902 for $note\n";
+			print "Skipping $bibid - Already had the 903 for $note\n";
 		}
 	}
 }
@@ -1213,7 +1213,7 @@ sub fingerprintScriptMARC
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
 	$marcob = MARC::Record->new_from_xml($marcob);
-	my @n902 = $marcob->field('902');
+	my @n902 = $marcob->field('903');
 	my $altered = 0;
 	my $dt = DateTime->now(time_zone => "local"); 
 	my $fdate = $dt->mdy; 
@@ -1224,16 +1224,16 @@ sub fingerprintScriptMARC
 		my $subd = $field->subfield('d');
 		if($suba && $suba eq 'mobius-catalog-fix' && $subd && $subd eq "$note")
 		{
-			#print "Found a matching 902 for $note - updating that one\n";
+			#print "Found a matching 903 for $note - updating that one\n";
 			$altered = 1;
-			my $new902 = MARC::Field->new( '902',' ',' ','a'=>'mobius-catalog-fix','b'=>"$fdate",'c'=>'formatted','d'=>"$note" );
+			my $new902 = MARC::Field->new( '903',' ',' ','a'=>'mobius-catalog-fix','b'=>"$fdate",'c'=>'formatted','d'=>"$note" );
 			$marcob->delete_field($field);
 			$marcob->append_fields($new902);
 		}
 	}
 	if(!$altered)
 	{
-		my $new902 = MARC::Field->new( '902',' ',' ','a'=>'mobius-catalog-fix','b'=>"$fdate",'c'=>'formatted','d'=>"$note" );
+		my $new902 = MARC::Field->new( '903',' ',' ','a'=>'mobius-catalog-fix','b'=>"$fdate",'c'=>'formatted','d'=>"$note" );
 		$marcob->append_fields($new902);
 	}
 	my $xmlresult = convertMARCtoXML($marcob);
@@ -1433,7 +1433,7 @@ sub findInvalidMARC
  circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
  (select marc from biblio.record_entry where id=outsidesbs.record)
-  from seekdestroy.bib_score outsidesbs where record in( $subQueryConvert )
+  from seekdestroy.bib_score outsidesbs where record in( $subQueryConvert )  
   order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
 	$query =~ s/\$problemphrase/$problemPhrase/g;
@@ -1469,7 +1469,7 @@ sub findInvalidMARC
 	@convertList=();
 	
 	my $query = "select	
-	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"902\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
+	(select lower(split_part(split_part(split_part(marc,\$\$<datafield tag=\"903\"\$\$,2),\$\$<subfield code=\"a\">\$\$,2),\$\$<\$\$,1)) from biblio.record_entry where id= outsidesbs.record),
 	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
  \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
  winning_score,
@@ -1493,7 +1493,7 @@ sub findInvalidMARC
 		$output.=$mobUtil->makeCommaFromArray(\@line,';')."\n";
 		$toCSV.=$mobUtil->makeCommaFromArray(\@line,',')."\n";
 	}	
-	my $header = "\"902\",\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
+	my $header = "\"903\",\"Deleted\",\"BIB ID\",\"OPAC Link\",\"Winning_score\",\"OPAC ICON\",\"Winning Score\",\"Winning Score Distance\",\"Second Place Score\",\"Circ Modifiers\",\"Call Numbers\",\"Locations\",\"Record Quality\",\"record_type\",\"audioformat\",\"videoformat\",\"electronic\",\"audiobook_score\",\"music_score\",\"playaway_score\",\"largeprint_score\",\"video_score\",\"microfilm_score\",\"microfiche_score\"";
 	if(length($toCSV)>0)
 	{
 		my $csv = new Loghandler($baseTemp."Need_Humans_".$typeName."_bibs.csv");
@@ -4609,7 +4609,7 @@ sub populate_marc {
     # date1, date2
     my $my_008 = $record->field('008');
 	my @my_007 = $record->field('007');
-	my @my_902 = $record->field('902');
+	my @my_902 = $record->field('903');
 	my $my_006 = $record->field('006');
     $marc{tag008} = $my_008->as_string() if ($my_008);
     if (defined $marc{tag008}) {
