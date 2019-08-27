@@ -95,6 +95,10 @@ if(!$schema)
         select circ_modifier from config.hold_matrix_matchpoint chmm
         where
         chmm.item_owning_ou in($evergreenlocationcodes) and active
+        union all
+        select circ_modifier from config.hold_matrix_matchpoint target2
+        where
+        target2.user_home_ou in($evergreenlocationcodes) and active
         )";
 	setupEGTable($query,"circ_modifier");
 	
@@ -292,6 +296,18 @@ if(!$schema)
 	";
 	setupEGTable($query,"money_billing_legacy","money_billing");
     
+    # get patron account adjustment
+	my $query = "
+		select * from money.account_adjustment where xact in(
+        select id from money.billable_xact where xact_finish is null and
+        usr in
+		(
+		select id from actor.usr where home_ou in ($evergreenlocationcodes) 
+		)
+        )
+	";
+	setupEGTable($query,"money_account_adjustment_legacy","money_account_adjustment");
+    
     # get patron cash payments
 	my $query = "
 		select * from money.cash_payment where xact in(
@@ -411,9 +427,9 @@ if(!$schema)
 	";
 	setupEGTable($query,"asset_copy_location_legacy","asset_copy_location");
   
-	#get holds
+	# get holds - clever trick to get the bib records for copy level holds that are potientially out of scope
 	my $query = "
-        select ahr.* from 
+        select ahr.*,(select record from asset.call_number where id in(select call_number from asset.copy where id=ahr.id and ahr.hold_type='C')) from 
         action.hold_request ahr,
         actor.usr au        
         where 
@@ -440,7 +456,7 @@ if(!$schema)
 	setupEGTable($query,"action_hold_notification_legacy","action_hold_notification");	
     
        
-    #get full Item table
+    # get full Item table
 	my $query = "
         select ac.*,acn.record,acn.label from 
         asset.copy ac,
@@ -546,13 +562,24 @@ if(!$schema)
         acn.owning_lib in($evergreenlocationcodes)
 	";
 	setupEGTable($query,"asset_copy_tag_copy_map_legacy","asset_copy_tag_copy_map");
+     
     
-    
-    
-     # get bibs
+    # get bibs
 	my $query = "
 		select * from biblio.record_entry where id in
         (
+        
+       select acn2.record from
+        asset.call_number acn2,
+        asset.copy ac2,
+        action.hold_request ahr2
+        where
+        ahr2.target=ac2.id and
+        acn2.id=ac2.call_number and
+        ahr2.hold_type='C' and
+        ahr2.usr in(select id from actor.usr where home_ou in ($evergreenlocationcodes))
+        
+        union all
         
         select record from 
         asset.call_number acn
@@ -584,7 +611,8 @@ if(!$schema)
         ) and not deleted
 	";    
 	setupEGTable($query,"biblio_record_entry_legacy","biblio_record_entry");
-     
+
+
     # get monograph parts
 	my $query = "
 		select * from biblio.monograph_part bmp
@@ -710,7 +738,7 @@ if(!$schema)
 	";
 	setupEGTable($query,"config_rule_max_fine_legacy","config_rule_max_fine");
        
-    get circ rules
+    # get circ rules
 	my $query = "
 		select * from config.rule_recurring_fine target
         where
@@ -726,9 +754,16 @@ if(!$schema)
     
     # get hold rules
 	my $query = "
+    select distinct * from 
+    (
 		select * from config.hold_matrix_matchpoint target
         where
         target.item_owning_ou in($evergreenlocationcodes) and active
+        union all
+        select * from config.hold_matrix_matchpoint target2
+        where
+        target2.user_home_ou in($evergreenlocationcodes) and active
+        ) as a
 	";
 	setupEGTable($query,"config_hold_matrix_matchpoint_legacy","config_hold_matrix_matchpoint");
     
@@ -796,6 +831,26 @@ if(!$schema)
 	";
 	setupEGTable($query,"action_trigger_event_definition_legacy","action_trigger_event_definition");
     
+    # get action trigger environment
+	my $query = "
+    select * from action_trigger.environment where event_def in
+    (
+		select id from action_trigger.event_definition
+        where owner in ($evergreenlocationcodes ,1) and active
+    )
+	";
+	setupEGTable($query,"action_trigger_environment_legacy","action_trigger_environment");
+    
+   # get action trigger event params
+	my $query = "
+    select * from action_trigger.event_params where event_def in
+    (
+		select id from action_trigger.event_definition
+        where owner in ($evergreenlocationcodes ,1) and active
+    )
+	";
+	setupEGTable($query,"action_trigger_event_params_legacy","action_trigger_event_params");
+    
     ## get container buckets
     my $query = "
 		select * from container.biblio_record_entry_bucket
@@ -803,7 +858,7 @@ if(!$schema)
 	";
 	setupEGTable($query,"container_biblio_record_entry_bucket_legacy","container_biblio_record_entry_bucket");
     
-     ## get container buckets items
+     # get container buckets items
     my $query = "
         select * from container.biblio_record_entry_bucket_item
         where bucket in
@@ -864,6 +919,47 @@ if(!$schema)
         select * from config.z3950_attr
 	";
 	setupEGTable($query,"config_z3950_attr_legacy","config_z3950_attr");
+    
+    ## get non catalog types
+    my $query = "
+        select * from config.non_cataloged_type
+        where
+        owning_lib in($evergreenlocationcodes)
+	";
+	setupEGTable($query,"config_non_cataloged_type_legacy","config_non_cataloged_type");
+    
+    ## get copy alert types
+    my $query = "
+        select * from config.copy_alert_type
+        where
+        scope_org in($evergreenlocationcodes,1)
+	";
+	setupEGTable($query,"config_copy_alert_type_legacy","config_copy_alert_type");
+    
+    ## get copy alerts
+    my $query = "
+        select * from asset.copy_alert
+        where
+        copy in( select id from asset.copy where call_number in(select id from asset.call_number where owning_lib in  ($evergreenlocationcodes) ))
+	";
+	setupEGTable($query,"asset_copy_alert_legacy","asset_copy_alert");    
+    
+    ## get action.non_cataloged_circulation
+    my $query = "
+        select * from action.non_cataloged_circulation
+        where
+        circ_lib in( $evergreenlocationcodes)
+	";
+	setupEGTable($query,"action_non_cataloged_circulation_legacy","action_non_cataloged_circulation");
+    
+    ## get action_non_cat_in_house_use
+    my $query = "
+        select * from action.non_cat_in_house_use
+        where
+        org_unit in( $evergreenlocationcodes)
+    ";
+    setupEGTable($query,"action_non_cat_in_house_use_legacy","action_non_cat_in_house_use");
+    
     
     
 	$log->addLogLine(" ---------------- Script End ---------------- ");
