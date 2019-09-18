@@ -9,7 +9,7 @@
 =for comment
 /**
 
- 
+
 */
 
 =cut
@@ -20,7 +20,7 @@ use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
 use File::Path qw(make_path remove_tree);
-use strict; 
+use strict;
 use Loghandler;
 use Mobiusutil;
 use DBhandler;
@@ -44,30 +44,30 @@ use MARC::Batch;
     exit;
  }
 
- our $mobUtil = new Mobiusutil(); 
+ our $mobUtil = new Mobiusutil();
  our $conf = $mobUtil->readConfFile($configFile);
  our %conf;
- 
+
  our $jobid=-1;
  our $log;
  our $archivefolder;
  our $importSourceName;
  our $importSourceNameDB;
  our $dbHandler;
- 
+
  if($conf)
  {
     %conf = %{$conf};
     if ($conf{"logfile"})
     {
-        my $dt = DateTime->now(time_zone => "local"); 
-        my $fdate = $dt->ymd; 
+        my $dt = DateTime->now(time_zone => "local");
+        my $fdate = $dt->ymd;
         my $ftime = $dt->hms;
         my $dateString = "$fdate $ftime";
         $log = new Loghandler($conf->{"logfile"});
         # $log->truncFile("");
         $log->addLogLine(" ---------------- Script Starting ---------------- ");
-        my @reqs = ("server","login","password","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","eg_staged_bib_overlay_dir"); 
+        my @reqs = ("server","login","password","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","eg_staged_bib_overlay_dir");
         my $valid = 1;
         my $errorMessage="";
         for my $i (0..$#reqs)
@@ -83,7 +83,7 @@ use MARC::Batch;
         $importSourceName = $conf{"sourcename"};
         $importSourceNameDB = $importSourceName;
         $importSourceNameDB =~ s/\s/\-/g;
-        
+
         if(!(-d $archivefolder))
         {
             $valid = 0;
@@ -98,15 +98,15 @@ use MARC::Batch;
         my $count=0;
         my $countAuthority=0;
         my @files;
-        
+
         if($valid)
-        {    
+        {
             my @marcOutputRecords;
             my @authorityOutputRecords;
-            
+
             $dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});
             setupSchema($dbHandler);
-            
+
             # @files = ("/2017/06-Jun/test2.mrc");
             # @files = @{dirtrav(\@files,"/mnt/evergreen/utilityscripts/electronic_imports/molib2go_import/archive/2017/FY2017\\ Weeded\\ Titles")};
             # @files = @{dirtrav(\@files,"/mnt/evergreen/tmp/test/marc_records/marcive/archive/output/ftp/YSVMnWrp/test")};
@@ -121,11 +121,11 @@ use MARC::Batch;
                     my $thisfilename = lc($files[$b]);
                     $log->addLogLine("Parsing: $archivefolder".$files[$b]);
                     my $file = MARC::File::USMARC->in("$archivefolder".$files[$b]);
-                    
-                    
+
+
                     if(! ($thisfilename =~ m/all/))
-                    {                    
-                        while ( my $marc = $file->next() ) 
+                    {
+                        while ( my $marc = $file->next() )
                         {
                             push(@marcOutputRecords,$marc);
                         }
@@ -133,17 +133,17 @@ use MARC::Batch;
                     }
                     else
                     {
-                        while ( my $marc = $file->next() ) 
-                        {    
+                        while ( my $marc = $file->next() )
+                        {
                             push(@authorityOutputRecords,$marc);
                         }
                     }
-                    
+
                     $cnt++;
                     $file->close();
                     undef $file;
                 }
-                
+
                 my $outputFile = $mobUtil->chooseNewFileName($conf{"tempspace"},"temp","mrc");
                 my $marcout = new Loghandler($outputFile);
                 $marcout->deleteFile();
@@ -151,9 +151,9 @@ use MARC::Batch;
                 my $marcoutAuthority = new Loghandler($outputFileAuthority);
                 $marcoutAuthority->deleteFile();
 
-                
+
                 my $output;
-                
+
                 foreach(@marcOutputRecords)
                 {
                     my $marc = $_;
@@ -162,7 +162,7 @@ use MARC::Batch;
                 }
                 $log->addLogLine("Outputting $count record(s) into $outputFile");
                 $marcout->appendLineRaw($output);
-                
+
                 $output='';
                 foreach(@authorityOutputRecords)
                 {
@@ -173,9 +173,9 @@ use MARC::Batch;
                 $log->addLogLine("Outputting $countAuthority record(s) into $outputFileAuthority");
                 $marcoutAuthority->appendLineRaw($output);
                 undef $output;
-                
+
                 eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$conf{"dbuser"},$conf{"dbpass"},$conf{"port"});};
-                if ($@) 
+                if ($@)
                 {
                     $log->addLogLine("Could not establish a connection to the database");
                     $log->addLogLine("Deleting $outputFile");
@@ -213,19 +213,19 @@ use MARC::Batch;
             else
             {
                 $log->addLogLine("There were some errors during the getmarc function, we are stopping execution. Any partially downloaded files are deleted.");
-                $errorMessage = "There were some errors during the getmarc function, we are stopping execution. Any partially downloaded files are deleted.";                
+                $errorMessage = "There were some errors during the getmarc function, we are stopping execution. Any partially downloaded files are deleted.";
             }
         }
         if($finalImport)
         {
             my @notworked = @{@info[1]};
             my @updated = @{@info[2]};
-            
+
             $log->addLogLine("Finished importing, moving to reporting");
-            
+
             my $notWorkedCount = $#notworked+1;
             my $updatedCount = $#updated+1;
-            
+
             my $fileCount = $#files+1;
             my $afterProcess = DateTime->now(time_zone => "local");
             my $difference = $afterProcess - $dt;
@@ -245,7 +245,7 @@ use MARC::Batch;
             }
 
             my $csvlines;
-            
+
             foreach(@notworked)
             {
                 my $title = $_;
@@ -268,18 +268,18 @@ use MARC::Batch;
                 $csvline=~s/\r\n//g;
                 $csvlines.="$csvline\n";
             }
-            
+
             my $totalSuccess=1;
             $totalSuccess=0 if($notWorkedCount>0);
-            
+
             @updated = @{@infoAuthority[0]};
             my @worked = @{@infoAuthority[1]};
             @notworked = @{@infoAuthority[2]};
-            
-            $notWorkedCount = $#notworked+1;            
+
+            $notWorkedCount = $#notworked+1;
             $updatedCount = $#updated+1;
             my $newCount = $#worked+1;
-            
+
             $log->addLogLine("Authority notworked");
             foreach(@notworked)
             {
@@ -319,8 +319,8 @@ use MARC::Batch;
                 $csvline=~s/\r\n//g;
                 $csvlines.="$csvline\n";
             }
-            
-            
+
+
             if($conf{"csvoutput"})
             {
                 my $csv = new Loghandler($conf{"csvoutput"});
@@ -332,21 +332,21 @@ use MARC::Batch;
                 my @tolist = ($conf{"alwaysemail"});
                 my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
                 $email->send("Evergreen Utility - $importSourceName Import Report Job # $jobid - ERROR","$errorMessage\r\n\r\n-Evergreen Perl Squad-");
-                
+
             }
             else
             {
                 $successUpdateTitleList = truncateOutput($successUpdateTitleList,5000);
                 $failedTitleList = truncateOutput($failedTitleList,5000);
-                
+
                 $authorityNew = truncateOutput($authorityNew,5000);
                 $authorityUpdate = truncateOutput($authorityUpdate,5000);
                 $authorityFail = truncateOutput($authorityFail,5000);
-                
+
                 $totalSuccess=0 if($notWorkedCount>0);
-                
+
                 $log->addLogLine("Emailing....");
-                
+
                 my @tolist = ($conf{"alwaysemail"});
                 my $email = new email($conf{"fromemail"},\@tolist,$valid,$totalSuccess,\%conf);
                 my $reports = gatherOutputReport($log,$dbHandler);
@@ -368,7 +368,7 @@ Authority failures can be due to \"cancellation authorities\"!!!!!!!!
 -Evergreen Perl Squad-";
                 $body = OpenILS::Application::AppUtils->entityize($body);
                 $body =~ s/[\x00-\x1f]//go;
-                $body =~ s/!!!!/\r\n/go;    
+                $body =~ s/!!!!/\r\n/go;
                 $email->send("Evergreen Utility - $importSourceName Import Report Job # $jobid",$body);
 
             }
@@ -377,7 +377,7 @@ Authority failures can be due to \"cancellation authorities\"!!!!!!!!
     }
     else
     {
-        print "Config file does not define 'logfile'\n";        
+        print "Config file does not define 'logfile'\n";
     }
 }
 
@@ -403,7 +403,7 @@ sub gatherOutputReport
     my $undedupeRecords='';
     #bib_marc_update table report new bibs
     my $query = "select count(*) from molib2go.bib_marc_update where job=$jobid and new_record is true";
-    my @results = @{$dbHandler->query($query)};    
+    my @results = @{$dbHandler->query($query)};
     foreach(@results)
     {
         my $row = $_;
@@ -412,18 +412,18 @@ sub gatherOutputReport
     }
     #bib_marc_update table report non new bibs
     $query = "select count(*) from molib2go.bib_marc_update where job=$jobid and new_record is not true";
-    @results = @{$dbHandler->query($query)};    
+    @results = @{$dbHandler->query($query)};
     foreach(@results)
     {
         my $row = $_;
         my @row = @{$row};
         $updatedRecordCount=@row[0];
     }
-    
+
     #bib_merge table report
     $query = "select leadbib,subbib from molib2go.bib_merge where job=$jobid";
-    @results = @{$dbHandler->query($query)};    
-    my $count=0;    
+    @results = @{$dbHandler->query($query)};
+    my $count=0;
     foreach(@results)
     {
         my $row = $_;
@@ -437,12 +437,12 @@ sub gatherOutputReport
         $mergedRecords="$count records were merged - The left number is the winner\r\n".$mergedRecords;
         $mergedRecords."\r\n\r\n\r\n";
     }
-    
-    
+
+
     #item_reassignment table report
     $query = "select target_bib,prev_bib from molib2go.item_reassignment where job=$jobid";
-    @results = @{$dbHandler->query($query)};    
-    $count=0;    
+    @results = @{$dbHandler->query($query)};
+    $count=0;
     foreach(@results)
     {
         my $row = $_;
@@ -451,16 +451,16 @@ sub gatherOutputReport
         $count++;
     }
     if($count>0)
-    {    
+    {
         $itemsAssignedRecords = truncateOutput($itemsAssignedRecords,5000);
         $itemsAssignedRecords="$count Records had physical items assigned - The left number is where the items were moved\r\n".$itemsAssignedRecords;
         $itemsAssignedRecords."\r\n\r\n\r\n";
     }
-    
+
     #undedupe table report
     $query = "select undeletedbib,oldleadbib,(select label from asset.call_number where id=a.moved_call_number) from molib2go.undedupe a where job=$jobid";
-    @results = @{$dbHandler->query($query)};    
-    $count=0;    
+    @results = @{$dbHandler->query($query)};
+    $count=0;
     foreach(@results)
     {
         my $row = $_;
@@ -469,7 +469,7 @@ sub gatherOutputReport
         $count++;
     }
     if($count>0)
-    {    
+    {
         $undedupeRecords = truncateOutput($undedupeRecords,5000);
         $undedupeRecords="$count records had physical items and were moved onto a previously deduped bib - The left number is the undeleted deduped bib\r\n
         The right is the molib2go bib that had it's items moved onto the undeduped bib.\r\n
@@ -480,7 +480,7 @@ sub gatherOutputReport
     $updatedRecordCount." Record(s) were updated\r\n\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$undedupeRecords;
     #print $ret;
     return $ret;
-    
+
 }
 
 sub deleteFiles
@@ -500,15 +500,15 @@ sub getmarc
     my $server = @_[0];
     $server=~ s/http:\/\///gi;
     $server=~ s/ftp:\/\///gi;
-    
+
     my $loops=0;
     my $login = @_[1];
-    my $password = @_[2];    
+    my $password = @_[2];
     my $archivefolder = @_[3];
     my @ret = ();
-    
+
     $log->addLogLine("**********FTP starting -> $server with $login and $password");
-    
+
     my $ftp = Net::FTP->new($server, Debug => 0, Passive=> 1)
     or die $log->addLogLine("Cannot connect to ".$server);
     $ftp->login($login,$password)
@@ -524,7 +524,7 @@ sub getmarc
     {
         my $download = 1;
         my $filename = $_;
-        
+
         # gotta escape the space character when working on the bash prompt
         my $localfilename = $filename;
         $localfilename =~ s/\s/\\ /g;
@@ -586,7 +586,7 @@ sub getmarc
             }
         }
     }
-    
+
     $ftp->quit
     or die $log->addLogLine("Unable to close FTP connection");
     $log->addLogLine("**********FTP session closed ***************");
@@ -599,7 +599,7 @@ sub ftpRecurse
     my $ftpOb = @_[0];
     my @interestingFiles = @{@_[1]};
     # return \@interestingFiles if($#interestingFiles > 2);
-    
+
     my @remotefiles = $ftpOb->ls();
     foreach(@remotefiles)
     {
@@ -640,9 +640,9 @@ sub removeOldCallNumberURI
 {
     my $bibid = @_[0];
     my $dbHandler = @_[1];
-    
+
     my $uriids = '';
-    my $query = "select uri from asset.uri_call_number_map WHERE call_number in 
+    my $query = "select uri from asset.uri_call_number_map WHERE call_number in
     (
         SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
     )";
@@ -654,9 +654,9 @@ updateJob("Processing","$query");
         $uriids.=@row[0].",";
     }
     $uriids = substr($uriids,0,-1);
-    
+
     my $query = "
-    DELETE FROM asset.uri_call_number_map WHERE call_number in 
+    DELETE FROM asset.uri_call_number_map WHERE call_number in
     (
         SELECT id from asset.call_number WHERE record = $bibid AND label = \$\$##URI##\$\$
     )
@@ -664,13 +664,13 @@ updateJob("Processing","$query");
 updateJob("Processing","$query");
     $dbHandler->update($query);
     $query = "
-    DELETE FROM asset.uri_call_number_map WHERE call_number in 
+    DELETE FROM asset.uri_call_number_map WHERE call_number in
     (
         SELECT id from asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
     )";
 updateJob("Processing","$query");
     $dbHandler->update($query);
-    
+
     if(length($uriids) > 0)
     {
         $query = "DELETE FROM asset.uri WHERE id in ($uriids)";
@@ -680,7 +680,7 @@ updateJob("Processing","$query");
     $query = "
     DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
     ";
-updateJob("Processing","$query");    
+updateJob("Processing","$query");
     $dbHandler->update($query);
     $query = "
     DELETE FROM asset.call_number WHERE  record = $bibid AND label = \$\$##URI##\$\$
@@ -711,7 +711,7 @@ sub getsubfield
     if($marc->field($tag))
     {
         if($tag<10)
-        {    
+        {
             #print "It was less than 10 so getting data\n";
             $ret = $marc->field($tag)->data();
         }
@@ -721,7 +721,7 @@ sub getsubfield
         }
     }
     #print "got $ret\n";
-    return $ret;    
+    return $ret;
 }
 
 
@@ -736,15 +736,15 @@ sub importMARCintoEvergreen
     my $dbHandler = @_[2];
     my $mobUtil = @_[3];
     my $file = MARC::File::USMARC->in( $inputFile );
-    my $r =0;        
+    my $r =0;
     my $overlay = 0;
-    my $query;    
+    my $query;
     #print "Working on importMARCintoEvergreen\n";
     updateJob("Processing","importMARCintoEvergreen");
-    
-    while ( my $marc = $file->next() ) 
+
+    while ( my $marc = $file->next() )
     {
-        
+
         if(1)#$r>8686)#$overlay<16)
         {
             #my $tcn = getTCN($log,$dbHandler);  #removing this because it has an auto created value in the DB
@@ -753,7 +753,7 @@ sub importMARCintoEvergreen
             #print "Importing $title\n";
             my $bibid=-1;
             my $bibid = findRecord($marc, $dbHandler, $log);
-            
+
             if($bibid!=-1) #already exists so update the marc
             {
                 my @comeback = @{chooseWinnerAndDeleteRest($bibid, $dbHandler, $marc, \@notworked, \@updated, $log)};
@@ -788,22 +788,22 @@ sub importAuthority
     my $mobUtil = @_[3];
 
     updateJob("Processing","importAUTHORITYintoEvergreen");
-    
+
     # we are going to use the eg_staged_bib_overlay tool to import the authority records. This tool needs to be available in the directory specified in the config file
     my $bashOutputFile = $conf{"tempspace"}."/authload$jobid";
     my $execScript = $conf{"eg_staged_bib_overlay_dir"}."/eg_staged_bib_overlay";
-    
+
     my $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action stage_auths $inputFile > $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
-    $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action match_auths >> $bashOutputFile";    
+    $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action match_auths >> $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
     $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action load_new_auths >> $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
     $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action overlay_auths_stage1 >> $bashOutputFile";
-    $log->addLogLine($cmd);    
+    $log->addLogLine($cmd);
     system($cmd);
     $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action overlay_auths_stage2 >> $bashOutputFile";
     $log->addLogLine($cmd);
@@ -811,10 +811,10 @@ sub importAuthority
     $cmd = "$execScript --schema auth_load --batch auth$jobid --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action overlay_auths_stage3 >> $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
-    
+
     # Gather up the updated authority bibs with heading
     my $query = "
-        select aaa.auth_id,(select left(string_agg(ash.value,', ' ),20) from authority.simple_heading ash where ash.record=aaa.auth_id) from  
+        select aaa.auth_id,(select left(string_agg(ash.value,', ' ),20) from authority.simple_heading ash where ash.record=aaa.auth_id) from
     auth_load.auths_auth$jobid aaa
     where
     aaa.auth_id is not null and
@@ -830,10 +830,10 @@ sub importAuthority
         my @t = ($id,$heading);
         push @updated, [@t];
     }
-    
+
     # Gather up the new authority bibs with heading
     my $query = "
-        select aaa.new_auth_id,(select left(string_agg(ash.value,', ' ),20) from authority.simple_heading ash where ash.record=aaa.new_auth_id) from  
+        select aaa.new_auth_id,(select left(string_agg(ash.value,', ' ),20) from authority.simple_heading ash where ash.record=aaa.new_auth_id) from
         auth_load.auths_auth$jobid aaa
         where
         aaa.new_auth_id is not null and
@@ -849,8 +849,8 @@ sub importAuthority
         my @t = ($id,$heading);
         push @worked, [@t];
     }
-    
-    
+
+
     # Gather up the non imported authority bibs with heading
     my $query = "select auth_id||' '||new_auth_id||' '||cancelled_auth_id,heading from auth_load.auths_auth$jobid where not imported";
     $log->addLogLine($query);
@@ -865,11 +865,11 @@ sub importAuthority
         my @t = ($id,$heading);
         push @notworked, [@t];
     }
-    
+
     push @ret, [@updated];
     push @ret, [@worked];
     push @ret, [@notworked];
-    
+
     return \@ret;
 }
 
@@ -879,7 +879,7 @@ sub chooseWinnerAndDeleteRest
     my $dbHandler = @_[1];
     my $finalMARC = @_[2];
     my @notworked = @{@_[3]};
-    my @updated = @{@_[4]};    
+    my @updated = @{@_[4]};
     my $log = @_[5];
     my $title;
     my $winnerBibID;
@@ -889,12 +889,12 @@ sub chooseWinnerAndDeleteRest
     $finalMARC = convertMARCtoXML($finalMARC);
     foreach(@list)
     {
-        my @attrs = @{$_};    
+        my @attrs = @{$_};
         my $id = @attrs[0];
         $ogmarcxml = @attrs[3];
         $winnerBibID = $id;
     }
-    
+
     my @values = ($finalMARC);
     my $query = "UPDATE BIBLIO.RECORD_ENTRY SET marc=\$1 , editor=1 WHERE ID=$winnerBibID";
 updateJob("Processing","chooseWinnerAndDeleteRest   $query");
@@ -914,9 +914,9 @@ updateJob("Processing","chooseWinnerAndDeleteRest   $query");
     my @ret;
     push @ret, [@updated];
     push @ret, [@notworked];
-    
+
     return \@ret;
-    
+
 }
 
 sub findRecord
@@ -941,7 +941,7 @@ sub findRecord
             my $marc = @row[1];
             print "found matching: $id\n";
             my $prevmarc = $marc;
-            $prevmarc =~ s/(<leader>.........)./${1}a/;    
+            $prevmarc =~ s/(<leader>.........)./${1}a/;
             $prevmarc = MARC::Record->new_from_xml($prevmarc);
             my $score = scoreMARC($prevmarc,$log);
             my @matchedsha = ($id,$prevmarc,$score,$marc);
@@ -971,7 +971,7 @@ sub mergeMARC856
     my $original856 = $#eight56s + 1;
     @eight56s = (@eight56s,@eight56s_2);
 
-    my %urls;  
+    my %urls;
     foreach(@eight56s)
     {
         my $thisField = $_;
@@ -980,7 +980,7 @@ sub mergeMARC856
         my $u = $thisField->subfield("u");
         my $z = $thisField->subfield("z");
         my $s7 = $thisField->subfield("7");
-        
+
         if($u) #needs to be defined because its the key
         {
             if(!$urls{$u})
@@ -997,7 +997,7 @@ sub mergeMARC856
                 my @nines = $thisField->subfield("9");
                 my $otherField = $urls{$u};
                 my @otherNines = $otherField->subfield("9");
-                my $otherZ = $otherField->subfield("z");        
+                my $otherZ = $otherField->subfield("z");
                 my $other7 = $otherField->subfield("7");
                 if(!$otherZ)
                 {
@@ -1023,7 +1023,7 @@ sub mergeMARC856
                         {
                             $found=1;
                         }
-                    }                    
+                    }
                     if($found==0 && $ind2 eq '0')
                     {
                         $otherField->add_subfields('9' => $looking);
@@ -1034,19 +1034,19 @@ sub mergeMARC856
                     $thisField->delete_subfields('9');
                     $thisField->delete_subfields('z');
                 }
-                
+
                 $urls{$u} = $otherField;
             }
         }
-        
+
     }
-    
+
     my $finalCount = scalar keys %urls;
     if($original856 != $finalCount)
     {
         $log->addLine("There was $original856 and now there are $finalCount");
     }
-    
+
     my $dump1=Dumper(\%urls);
     my @remove = $marc->field('856');
     #$log->addLine("Removing ".$#remove." 856 records");
@@ -1054,7 +1054,7 @@ sub mergeMARC856
 
 
     while ((my $internal, my $mvalue ) = each(%urls))
-    {    
+    {
         $marc->insert_grouped_field( $mvalue );
     }
     return $marc;
@@ -1063,7 +1063,7 @@ sub mergeMARC856
 sub getEvergreenMax
 {
     my $dbHandler = @_[0];
-    
+
     my $query = "SELECT MAX(ID) FROM BIBLIO.RECORD_ENTRY";
     #return 1000;
     my @results = @{$dbHandler->query($query)};
@@ -1114,22 +1114,22 @@ sub getTCN
 
 sub convertMARCtoXML
 {
-    my $marc = @_[0];    
+    my $marc = @_[0];
     my $thisXML =  $marc->as_xml(); #decode_utf8();
-    
+
     #this code is borrowed from marc2bre.pl
-    $thisXML =~ s/\n//sog;    
-    $thisXML =~ s/^<\?xml.+\?\s*>//go;    
-    $thisXML =~ s/>\s+</></go;    
-    $thisXML =~ s/\p{Cc}//go;    
+    $thisXML =~ s/\n//sog;
+    $thisXML =~ s/^<\?xml.+\?\s*>//go;
+    $thisXML =~ s/>\s+</></go;
+    $thisXML =~ s/\p{Cc}//go;
     $thisXML = OpenILS::Application::AppUtils->entityize($thisXML);
     $thisXML =~ s/[\x00-\x1f]//go;
     $thisXML =~ s/^\s+//;
     $thisXML =~ s/\s+$//;
     $thisXML =~ s/<record><leader>/<leader>/;
-    $thisXML =~ s/<collection/<record/;    
-    $thisXML =~ s/<\/record><\/collection>/<\/record>/;    
-    
+    $thisXML =~ s/<collection/<record/;
+    $thisXML =~ s/<\/record><\/collection>/<\/record>/;
+
     #end code
     return $thisXML;
 }
@@ -1166,7 +1166,7 @@ sub updateJob
 
 sub findPBrecordInME
 {
-    my $dbHandler = @_[0];    
+    my $dbHandler = @_[0];
     #my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ '\"9\">PB' limit 14";
     my $query = "select id,marc from biblio.record_entry where marc ~* 'overdrive' AND marc ~* 'ebook' AND ID IN(SELECT RECORD FROM ASSET.CALL_NUMBER WHERE LABEL!=\$\$##URI##\$\$ and deleted is false)";
     my @results = @{$dbHandler->query($query)};
@@ -1179,7 +1179,7 @@ sub findPBrecordInME
         my $id = @row[0];
         my $marc = @row[1];
         @each = ($id,$marc);
-        push(@ret,[@each]);    
+        push(@ret,[@each]);
     }
     return \@ret;
 }
@@ -1192,16 +1192,16 @@ sub findMatchInArchive
     #Get all files in the directory path
     @files = @{dirtrav(\@files,$archiveFolder)};
     my @ret;
-    
+
     for my $b(0..$#files)
     {
-    
+
         my $file = MARC::File::USMARC->in($files[$b]);
-        while ( my $marc = $file->next() ) 
-        {    
+        while ( my $marc = $file->next() )
+        {
             my $t = $marc->leader();
             my $su=substr($marc->leader(),6,1);
-            print "Leader:\n$t\n$su\n";            
+            print "Leader:\n$t\n$su\n";
             if(1)#$su eq 'a')
             {
                 my $all = $marc->as_formatted();
@@ -1229,7 +1229,7 @@ sub dirtrav
     opendir(DIR,"$pwd") or die "Cannot open $pwd\n";
     my @thisdir = readdir(DIR);
     closedir(DIR);
-    foreach my $file (@thisdir) 
+    foreach my $file (@thisdir)
     {
         if(($file ne ".") and ($file ne ".."))
         {
@@ -1239,8 +1239,8 @@ sub dirtrav
                 @files = @{dirtrav(\@files,"$pwd/$file")};
             }
             elsif (-f "$pwd/$file")
-            {            
-                push(@files, "$pwd/$file");            
+            {
+                push(@files, "$pwd/$file");
             }
         }
     }
@@ -1269,25 +1269,25 @@ sub scoreMARC
 {
     my $marc = shift;
     my $log = shift;
-    
+
     my $score = 0;
     $score+= score($marc,2,100,400,$log,'245');
     $score+= score($marc,1,1,150,$log,'100');
     $score+= score($marc,1,1.1,150,$log,'110');
     $score+= score($marc,0,50,200,$log,'6..');
     $score+= score($marc,0,50,100,$log,'02.');
-    
+
     $score+= score($marc,0,100,200,$log,'246');
     $score+= score($marc,0,100,100,$log,'130');
     $score+= score($marc,0,100,100,$log,'010');
     $score+= score($marc,0,100,200,$log,'490');
     $score+= score($marc,0,10,50,$log,'830');
-    
+
     $score+= score($marc,1,.5,50,$log,'300');
     $score+= score($marc,0,1,100,$log,'7..');
     $score+= score($marc,2,2,100,$log,'50.');
     $score+= score($marc,2,2,100,$log,'52.');
-    
+
     $score+= score($marc,2,.5,200,$log,'51.', '53.', '54.', '55.', '56.', '57.', '58.');
 
     return $score;
@@ -1303,7 +1303,7 @@ sub score
     my @tags = @_;
     my $ou = Dumper(@tags);
     #$log->addLine("Tags: $ou\n\nType: $type\nWeight: $weight\nCap: $cap");
-    my $score = 0;            
+    my $score = 0;
     if($type == 0) #0 is field count
     {
         #$log->addLine("Calling count_field");
@@ -1336,7 +1336,7 @@ sub count_subfield
     my @tags = @{$_[2]};
     my $total = 0;
     #$log->addLine("Starting count_subfield");
-    foreach my $tag (@tags) 
+    foreach my $tag (@tags)
     {
         my @f = $marc->field($tag);
         foreach my $field (@f)
@@ -1352,16 +1352,16 @@ sub count_subfield
     }
     #$log->addLine("Total Subfields: $total");
     return $total;
-    
-}    
 
-sub count_field 
+}
+
+sub count_field
 {
     my ($marc) = $_[0];
     my $log = $_[1];
     my @tags = @{$_[2]};
     my $total = 0;
-    foreach my $tag (@tags) 
+    foreach my $tag (@tags)
     {
         my @f = $marc->field($tag);
         $total += scalar(@f);
@@ -1369,7 +1369,7 @@ sub count_field
     return $total;
 }
 
-sub field_length 
+sub field_length
 {
     my ($marc) = $_[0];
     my $log = $_[1];
@@ -1393,17 +1393,17 @@ sub setupSchema
     if($#results==-1)
     {
         $query = "CREATE SCHEMA molib2go";
-        $dbHandler->update($query);    
+        $dbHandler->update($query);
         $query = "CREATE TABLE molib2go.job
         (
         id bigserial NOT NULL,
         start_time timestamp with time zone NOT NULL DEFAULT now(),
         last_update_time timestamp with time zone NOT NULL DEFAULT now(),
-        status text default 'processing',    
+        status text default 'processing',
         current_action text,
         current_action_num bigint default 0,
         CONSTRAINT job_pkey PRIMARY KEY (id)
-          )";          
+          )";
         $dbHandler->update($query);
         $query = "CREATE TABLE molib2go.item_reassignment(
         id serial,
@@ -1460,5 +1460,4 @@ sub setupSchema
 
  exit;
 
- 
- 
+
