@@ -402,6 +402,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$EQUIPMENT$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$MICROFORM$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VIDEO$$)
+ and record not in ( select record from seekdestroy.bib_score  where opac_icon~$$ebook$$)
  and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$  and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ ) 
  ;
@@ -426,6 +427,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$EQUIPMENT$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$MICROFORM$$)
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VIDEO$$)
+ and record not in ( select record from seekdestroy.bib_score  where opac_icon~$$ebook$$)
  and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$  and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score=1)
  and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ ) 
  )
