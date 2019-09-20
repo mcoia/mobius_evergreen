@@ -2197,7 +2197,6 @@ sub findRecord
         my $prevmarc = $marc;
         $prevmarc =~ s/(<leader>.........)./${1}a/;
         $prevmarc = MARC::Record->new_from_xml($prevmarc);
-        print "found matching sha1: $id\n" if $debug;
         my $score = scoreMARC($prevmarc);
         my @matchedsha = ($id,$prevmarc,$score,$marc);
         $foundIDs.="$id,";
