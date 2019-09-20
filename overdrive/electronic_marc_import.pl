@@ -52,6 +52,7 @@ our $reprocess = -1;
 our $searchDeepMatch = 0;
 our $match901c = 0;
 our $reportOnly = -1;
+our $continueJob = 0;
 
 
 GetOptions (
@@ -59,6 +60,7 @@ GetOptions (
 "reprocess=s" => \$reprocess,
 "search_deep" => \$searchDeepMatch,
 "report_only=s" => \$reportOnly,
+"continue=s" => \$continueJob,
 "match_901c" => \$match901c,
 "debug" => \$debug,
 )
@@ -68,6 +70,7 @@ or die("Error in command line arguments\nYou can specify
 --search_deep                                 [Optional: Cause the software to spend more time searching for BIB matches]
 --match_901c                                  [Optional: Cause the software to match existing BIBS using the incoming MARC 901c]
 --report_only jobID                           [Optional: Only email the report for a previous job. Provide the job ID]
+--continue jobID                              [Optional: Cause the software to finish an old job that was not finsihed]
 --debug flag                                  [Cause more output and logging]
 \n");
 
@@ -179,6 +182,20 @@ or die("Error in command line arguments\nYou can specify
                 $jobid = $reprocess;
                 $doSomething = resetJob($reprocess);
             }
+            elsif($continueJob)
+            {
+                # Make sure the provided job exists
+                my $query = "select id from e_bib_import.import_status where job = $continueJob and status=\$\$new\$\$";
+                updateJob("Processing",$query);
+                my @results = @{$dbHandler->query($query)};
+                $jobid = $continueJob if $#results > -1;
+                $doSomething = 1 if $#results > -1;
+                my $t = $#results;
+                $t++; # 0 based to 1 based
+                print "Nothing unfinished for job $continueJob. Nothing to do.\n" if $#results < 0;
+                print "Continuing job $continueJob with $t thing(s) to process\n" if $#results > -1;
+                undef @results;
+            }
             elsif($reportOnly == -1) ## Make sure we are not just running reports
             {
                 @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
@@ -216,7 +233,7 @@ or die("Error in command line arguments\nYou can specify
                     my $displayInterval = 100;
                     my $recalcTimeInterval = 500;
                     ## Bib Imports
-                    my $query = "SELECT id,title,z01,sha1,marc_xml,filename from e_bib_import.import_status where type=\$\$importbib\$\$ and job=$jobid order by id";
+                    my $query = "SELECT id,title,z01,sha1,marc_xml,filename from e_bib_import.import_status where type=\$\$importbib\$\$ and job=$jobid and status=\$\$new\$\$ order by id";
                     updateJob("Processing",$query);
                     my @results = @{$dbHandler->query($query)};
                     my $count = 0;
@@ -232,7 +249,7 @@ or die("Error in command line arguments\nYou can specify
                     undef @results;
 
                     ## Authority Imports
-                    my $query = "SELECT filename from e_bib_import.import_status where type=\$\$importauth\$\$ and job=$jobid order by id";
+                    my $query = "SELECT filename from e_bib_import.import_status where type=\$\$importauth\$\$ and job=$jobid and status=\$\$new\$\$ order by id";
                     updateJob("Processing",$query);
                     my @results = @{$dbHandler->query($query)};
                     my $count = 0;
@@ -248,7 +265,7 @@ or die("Error in command line arguments\nYou can specify
                     undef @results;
 
                     ## Removals
-                    my $query = "SELECT id,title,z01,sha1,marc_xml,filename,type from e_bib_import.import_status where type~\$\$remov\$\$ and job=$jobid order by type,id";
+                    my $query = "SELECT id,title,z01,sha1,marc_xml,filename,type from e_bib_import.import_status where type~\$\$remov\$\$ and job=$jobid and status=\$\$new\$\$ order by type,id";
                     updateJob("Processing",$query);
                     my @results = @{$dbHandler->query($query)};
                     my $count = 0;
@@ -416,6 +433,8 @@ sub runReports
         }
     }
 
+    $interestingImports = truncateOutput($interestingImports, 5000);
+
     $ret .= "Interesting imports\r\n$interestingImports" if ( length($interestingImports) > 0);
     undef @results;
 
@@ -520,6 +539,7 @@ sub runReports
             my $heading = @row[1];
             $interestingImports .= "not worked - " . $id . " - '$heading'\r\n";
         }
+        $interestingImports = truncateOutput($interestingImports, 5000);
         $ret .= "Authority Batch $batchID\r\n$interestingImports" if ( length($interestingImports) > 0);
     }
 
