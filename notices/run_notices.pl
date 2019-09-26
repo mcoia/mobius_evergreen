@@ -247,6 +247,7 @@ sub setupIndexForAffectedDirectories
 		@files = sort @files;
 		
 		my $branchName = "";
+        my $reportName = "";
 		$content.="<ul>\n";
 		foreach(@files)
 		{
@@ -254,13 +255,19 @@ sub setupIndexForAffectedDirectories
 			# We are relying on the file name to be consistent system_short_code branch_short_code-notice_title-date.pdf
 			my @s = split(/\s/,$file);
 			my @s2 = split(/-/,@s[1]);
-			pop @s2;
+			my $reportNameTest = pop @s2;
 			my $bname = getBranchName(join("-",@s2));			
 			if($branchName ne $bname)
 			{
 				$branchName = $bname;
+                $reportName = $reportNameTest;
 				$content.="<h2>$branchName</h2>";
 			}
+            elsif($reportName ne $reportNameTest)
+            {
+                $content.="<br /><br />";
+                $reportName = $reportNameTest;
+            }
 			$content.="<li><a href=\"$file\">$file</a></li>\n";
 		}
 		$content.="</ul>\n";
