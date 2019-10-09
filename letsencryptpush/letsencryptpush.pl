@@ -335,9 +335,9 @@ sub generateCert
 	if( !(-d "/etc/letsencrypt/archive/$domainName") )
 	{
 		
-		print "/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName"."\n";
-		$log->addLine("/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos  -d $domainName");
-		system("/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName");
+		print $conf{"letsencryptgitrepopath"} ."/letsencrypt-auto certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName"."\n";
+		$log->addLine($conf{"letsencryptgitrepopath"} ."/letsencrypt-auto certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos  -d $domainName");
+		system($conf{"letsencryptgitrepopath"} ."/letsencrypt-auto certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName");
 	}
 	my %ret;
 	print "/etc/letsencrypt/archive/$domainName\n";
