@@ -457,7 +457,7 @@ sub installPatron
         'firstName' => 'first_given_name',
         'middleName' => 'second_given_name',
         'dob' => 'dob',
-        'guardian' => 'ident_value2',
+        'guardian' => 'guardian',
         'email' => 'email',
         'phone' => 'day_phone',
         'home_ou' => 'home_ou',
