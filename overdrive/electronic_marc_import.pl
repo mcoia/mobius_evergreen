@@ -1883,11 +1883,11 @@ sub importAuthority
     $cmd = "$execScript --schema auth_load --batch $fullBatchName --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action overlay_auths_stage3 >> $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
-    
+
     $query = "update e_bib_import.import_status set status = \$1 , row_change_time = now() where id = \$2";
     my @values = ('running link_auth_auth', $rowID);
     $dbHandler->updateWithParameters($query,\@values);
-    
+
     $cmd = "$execScript --schema auth_load --batch $fullBatchName --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action link_auth_auth >> $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
