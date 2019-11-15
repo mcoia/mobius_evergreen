@@ -232,6 +232,8 @@ or die("Error in command line arguments\nYou can specify
                     my $startTime = DateTime->now(time_zone => "local");
                     my $displayInterval = 100;
                     my $recalcTimeInterval = 500;
+                    my $bibsImported = 0;
+                    my $authsImported = 0;
                     ## Bib Imports
                     my $query = "SELECT id,title,z01,sha1,marc_xml,filename from e_bib_import.import_status where type=\$\$importbib\$\$ and job=$jobid and status=\$\$new\$\$ order by id";
                     updateJob("Processing",$query);
@@ -245,6 +247,7 @@ or die("Error in command line arguments\nYou can specify
                         $count++;
                         $totalCount++;
                         ($count, $startTime) = displayRecPerSec("Import Bibs", $count, $startTime,  $displayInterval, $recalcTimeInterval, $totalCount, $#results);
+                        $bibsImported = 1 if !$bibsImported;
                     }
                     undef @results;
 
@@ -261,6 +264,7 @@ or die("Error in command line arguments\nYou can specify
                         $count++;
                         $totalCount++;
                         ($count, $startTime) = displayRecPerSec("Import Authority", $count, $startTime,  $displayInterval, $recalcTimeInterval, $totalCount, $#results);
+                        $authsImported = 1 if !$authsImported;
                     }
                     undef @results;
 
@@ -282,6 +286,28 @@ or die("Error in command line arguments\nYou can specify
                         ($count, $startTime) = displayRecPerSec("Bib Removal", $count, $startTime,  $displayInterval, $recalcTimeInterval, $totalCount, $#results);
                     }
                     undef @results;
+
+                    ## Authority linker when there were bibs imported AND Auth imports
+                    if($bibsImported && $authsImported && $conf{'authority_link_script_cmd'})
+                    {
+                        my $query = "SELECT bib from e_bib_import.import_status where type=\$\$importbib\$\$ and job=$jobid and bib is not null order by bib";
+                        updateJob("Processing",$query);
+                        my @results = @{$dbHandler->query($query)};
+                        my $count = 0;
+                        $startTime = DateTime->now(time_zone => "local");
+                        foreach(@results)
+                        {
+                            my @row = @{$_};
+                            $cmd = $conf{'authority_link_script_cmd'} . ' ' . @row[0];
+                            $log->addLogLine($cmd);
+                            system($cmd);
+                            $count++;
+                            $totalCount++;
+                            ($count, $startTime) = displayRecPerSec("Authority Linker", $count, $startTime,  $displayInterval, $recalcTimeInterval, $totalCount, $#results);
+                        }
+                        undef @results;
+                    }
+
                 }
 
                 my $report = runReports();
@@ -1855,6 +1881,14 @@ sub importAuthority
     $dbHandler->updateWithParameters($query,\@values);
 
     $cmd = "$execScript --schema auth_load --batch $fullBatchName --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action overlay_auths_stage3 >> $bashOutputFile";
+    $log->addLogLine($cmd);
+    system($cmd);
+    
+    $query = "update e_bib_import.import_status set status = \$1 , row_change_time = now() where id = \$2";
+    my @values = ('running link_auth_auth', $rowID);
+    $dbHandler->updateWithParameters($query,\@values);
+    
+    $cmd = "$execScript --schema auth_load --batch $fullBatchName --db ".$conf{"db"}." --dbuser ".$conf{"dbuser"}." --dbhost ".$conf{"dbhost"}." --dbpw ".$conf{"dbpass"}." --action link_auth_auth >> $bashOutputFile";
     $log->addLogLine($cmd);
     system($cmd);
 
