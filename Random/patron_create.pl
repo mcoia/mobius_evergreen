@@ -481,12 +481,12 @@ sub installPatron
         push @vals, $insVal;
         $colCount++;
     }
-    $installQuery .= "ident_type = 3, ident_value = E'Student ID Project', 
+    $installQuery .= "ident_type = 2, ident_value = E'Student ID Project', 
     active = true, barred = false, deleted = false, juvenile = true,
     profile = $profileID," if !$newPatron;
     
     $installQuery .= "ident_type, ident_value, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
-    $valuesClause .= "3, E'Student ID Project', true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
+    $valuesClause .= "2, E'Student ID Project', true, false, false, true, $profileID, E'".$patron{"studentID"}."'," if $newPatron;
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $usr" if !$newPatron;
