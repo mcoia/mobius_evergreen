@@ -298,7 +298,7 @@ or die("Error in command line arguments\nYou can specify
                         foreach(@results)
                         {
                             my @row = @{$_};
-                            $cmd = $conf{'authority_link_script_cmd'} . ' ' . @row[0];
+                            my $cmd = $conf{'authority_link_script_cmd'} . ' ' . @row[0];
                             $log->addLogLine($cmd);
                             system($cmd);
                             $count++;
