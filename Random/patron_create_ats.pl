@@ -23,7 +23,6 @@ use email;
     our @inputFiles;
     our $primarykey;
     our $schema;
-    our $profileID;
     our $fromEmail;
     our $toEmail;
     our $inputDirectory;
@@ -37,7 +36,6 @@ use email;
     "xmlconfig=s" => \$xmlconf,
     "schema=s" => \$schema,
     "primarykey" => \$primarykey,
-    "profileid=s" => \$profileID,
     "fromemail=s" => \$fromEmail,
     "toemail=s" => \$toEmail,
     "directory=s" => \$inputDirectory
@@ -47,7 +45,6 @@ use email;
     --xmlconfig  pathto_opensrf.xmlml
     --schema (eg. m_slmpl)
     --primarykey (create id column)
-    --profileid (Databaes ID for the profile \"permission\" group)
     --fromemail spoofed from email address
     --toemail comma separated email addresses for the report
     --directory where to find the input files
@@ -66,11 +63,6 @@ use email;
     if(!$schema)
     {
         print "Please specify a DB schema\n";
-        exit;
-    }
-     if(!$profileID)
-    {
-        print "patron profile Database ID with --profileid\n";
         exit;
     }
     
