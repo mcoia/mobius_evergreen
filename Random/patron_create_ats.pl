@@ -22,6 +22,7 @@ use email;
     our $dbHandler;
     our @inputFiles;
     our $schema;
+    our $table;
     our $fromEmail;
     our $toEmail;
     our $inputDirectory;
@@ -37,17 +38,19 @@ use email;
     "logfile=s" => \$logFile,
     "xmlconfig=s" => \$xmlconf,
     "schema=s" => \$schema,
+    "table=s" => \$table,
     "fromemail=s" => \$fromEmail,
     "toemail=s" => \$toEmail,
-    "defaultprofile=s" => \$defaultProfileID,
+    "defaultprofile:s" => \$defaultProfileID,
     "directory=s" => \$inputDirectory,
     "ensure-tagged" => \$ensureAlreadyExistingPatronsAreTagged,
-    "patron-tag=s" => \$patronTagString
+    "patron-tag:s" => \$patronTagString
     )
     or die("Error in command line arguments\nYou can specify
     --logfile Path to write a log (required)
     --xmlconfig  pathto_opensrf.xml
-    --schema (eg. m_slmpl)
+    --schema (database schema name eg. mymig)
+    --table (database table name eg. patron_import)
     --fromemail spoofed from email address
     --toemail comma separated email addresses for the report
     --defaultprofile an ID number coorisponding to permission.grp_tree.id
@@ -77,8 +80,8 @@ use email;
     
         
     $log = new Loghandler($logFile);
-    $log->truncFile("");
-    $log->addLogLine(" ---------------- Script Starting ---------------- ");		
+    # $log->truncFile("");
+    $log->addLogLine(" ---------------- Script Starting ---------------- ");
 
     
 	my $dt = DateTime->now(time_zone => "local"); 
@@ -172,7 +175,7 @@ use email;
         $inputFileFriendly .= "\r\n" . $bareFilename;
         my $expireDateString = getDateFromFile($bareFilename);
 
-        last;  # short circut when debugging  and data is already imported
+        # last;  # short circut when debugging  and data is already imported
 
 
         checkFileReady($file);
@@ -184,9 +187,9 @@ use email;
         my $accumulatedTotal = 0;
         my $queryByHand = '';
         my $parameterCount = 1;
-        
-        my $queryInserts = "INSERT INTO $schema.patron_import(";
-        $queryByHand = "INSERT INTO $schema.patron_import(";
+
+        my $queryInserts = "INSERT INTO $schema.$table(";
+        $queryByHand = "INSERT INTO $schema.$table(";
         my @order = ();
         my $sanitycheckcolumnnums = 0;
         my @queryValues = ();
@@ -308,8 +311,8 @@ use email;
         $log->addLine("Importing $accumulatedTotal / $rownum") if $success;
         
         $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
-        
-        my $query = "UPDATE $schema.patron_import set file_name = \$data\$$bareFilename\$data\$ WHERE file_name is null";
+
+        my $query = "UPDATE $schema.$table set file_name = \$data\$$bareFilename\$data\$ WHERE file_name is null";
         $log->addLine($query) if $success;
         $dbHandler->update($query) if $success;
         
@@ -324,33 +327,33 @@ use email;
     my %reporting = ();
     
     # First, remove blank student ID's/
-    my $query = "select count(*) from $schema.patron_import where btrim(studentid)=\$\$\$\$ and not dealt_with";
+    my $query = "select count(*) from $schema.$table where btrim(studentid)=\$\$\$\$ and not dealt_with";
     @results = @{$dbHandler->query($query)};
     $reporting{"Blank Student ID"} = $results[0][0] || 0;
-    
-    $query = "delete from $schema.patron_import where btrim(studentid)=\$\$\$\$";
+
+    $query = "delete from $schema.$table where btrim(studentid)=\$\$\$\$";
     $log->addLine($query);
     $dbHandler->update($query);
-    
-    # Delete file header rows    
-    $query = "delete from $schema.patron_import where lower(btrim(studentid))~\$\$studentid\$\$";
+
+    # Delete file header rows
+    $query = "delete from $schema.$table where lower(btrim(studentid))~\$\$studentid\$\$";
     $log->addLine($query);
     $dbHandler->update($query);
 
     # Kick out lines that do not match actor.org_unit
-    $query = "update $schema.patron_import 
+    $query = "update $schema.$table
     set
-    error_message = \$\$Library '\$\$||library||\$\$' does not match anything in the database\$\$ 
+    error_message = \$\$Library '\$\$||library||\$\$' does not match anything in the database\$\$
     where not dealt_with and not imported and lower(library) not in(select lower(shortname) from actor.org_unit)";
     $log->addLine($query);
     $dbHandler->update($query);
 
     # Default DOB to 1/1/1990
-    $query = "select count(*) from $schema.patron_import where btrim(dob)=\$\$\$\$ and not dealt_with";
+    $query = "select count(*) from $schema.$table where btrim(dob)=\$\$\$\$ and not dealt_with";
     @results = @{$dbHandler->query($query)};
     $reporting{"Blank DOB"} = $results[0][0] || 0;
 
-    $query = "update $schema.patron_import pi 
+    $query = "update $schema.$table pi
     set
     dob='1/1/1990'
     where
@@ -363,15 +366,15 @@ use email;
     if($ensureAlreadyExistingPatronsAreTagged)
     {
         # Kick out lines that have matching barcodes in production but are not part of this project
-        $query = "update $schema.patron_import pi 
+        $query = "update $schema.$table pi
         set
         error_message = \$\$Duplicate barcode already in production for non-student\$\$
         from
         actor.card ac,
-        actor.usr au    
-        where 
-        not pi.dealt_with and 
-        not pi.imported and 
+        actor.usr au
+        where
+        not pi.dealt_with and
+        not pi.imported and
         au.id=ac.usr and
         ac.barcode=pi.studentid and
         au.ident_value!=\$tag\$$patronTagString\$tag\$";
@@ -381,13 +384,13 @@ use email;
 
 
     ## Assign the matching home_ou
-    $query = "update $schema.patron_import pi
+    $query = "update $schema.$table pi
     set
     home_ou = aou.id
     from
     actor.org_unit aou
-    where 
-    not pi.dealt_with and not pi.imported and 
+    where
+    not pi.dealt_with and not pi.imported and
     lower(pi.library) = lower(aou.shortname)";
     $log->addLine($query);
     $dbHandler->update($query);
@@ -421,9 +424,8 @@ use email;
     $query.= "id";
     $columnOrder{"id"} = $i;
     # un-sql-comment the limit statement in the query for a much faster execution!
-    $query.=" from $schema.patron_import pi where not dealt_with and error_message = \$\$\$\$ 
-    and id=8
-    limit 1";
+    $query.=" from $schema.$table pi where home_ou is not null and not dealt_with and error_message = \$\$\$\$
+    limit 5";
     $log->addLine($query);
     
     # Loop through them and perform update/inserts and hook up the stat cats
@@ -445,20 +447,20 @@ use email;
 
     ### reporting
 
-    $query = "select count(*) from $schema.patron_import where not dealt_with";
+    $query = "select count(*) from $schema.$table where not dealt_with";
     @results = @{$dbHandler->query($query)};
     $reporting{"Total Lines"} = $results[0][0] || 0;
-    
-    $query = "select school,count(*) from $schema.patron_import where not dealt_with group by 1 order by 1";
-    @results = @{$dbHandler->query($query)};
-    $reporting{"*** School Breakdown ***"} = "\r\n";
-    foreach(@results)
-    {
-        my @row = @{$_};
-        $reporting{"*** School Breakdown ***"} .= @row[0]."   ".@row[1]."\r\n";
-    }
-    
-    $query = "select library,count(*) from $schema.patron_import where not dealt_with group by 1 order by 1";
+
+    # $query = "select school,count(*) from $schema.$table where not dealt_with group by 1 order by 1";
+    # @results = @{$dbHandler->query($query)};
+    # $reporting{"*** School Breakdown ***"} = "\r\n";
+    # foreach(@results)
+    # {
+        # my @row = @{$_};
+        # $reporting{"*** School Breakdown ***"} .= @row[0]."   ".@row[1]."\r\n";
+    # }
+
+    $query = "select library,count(*) from $schema.$table where not dealt_with group by 1 order by 1";
     @results = @{$dbHandler->query($query)};
     $reporting{"*** Library Breakdown ***"} = "\r\n";
     foreach(@results)
@@ -469,7 +471,7 @@ use email;
     
     my $errored = "";
     $reporting{"Total with errors"} = 0;
-    $query = "select studentid, firstname, lastname, library, school, error_message from $schema.patron_import where not dealt_with and error_message!=\$\$\$\$";
+    $query = "select studentid, firstname, lastname, library, school, error_message from $schema.$table where not dealt_with and error_message!=\$\$\$\$";
     @results = @{$dbHandler->query($query)};
     foreach(@results)
     {
@@ -511,7 +513,7 @@ $errored" if $reporting{"Total with errors"} > 0;
     $email->send("Evergreen Utility - Patron import results - $fileCount file(s)",$body);
     
     # Finally, mark all of the rows dealt_with for next execution to ignore
-    $query = "update $schema.patron_import set dealt_with=true where not dealt_with";
+    $query = "update $schema.$table set dealt_with=true where not dealt_with";
     $log->addLine($query);
     $dbHandler->update($query);
     
@@ -556,12 +558,17 @@ sub installPatron
         push @vals, $insVal;
         $colCount++;
     }
-    $installQuery .= "ident_type = 3, ident_value = \$tag\$$patronTagString\$tag\$, 
-    active = true, barred = false, deleted = false, juvenile = true,
+
+    my $active = 'true';
+    # Catch the case when the data suggests that the patron needs to be inactivated
+    $active = 'false' if($patron{"profileid"} eq "0");
+
+    $installQuery .= "ident_type = 3, ident_value = \$tag\$$patronTagString\$tag\$,
+    active = $active, barred = false, deleted = false, juvenile = true,
     profile = $profileID," if !$newPatron;
     
     $installQuery .= "ident_type, ident_value, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
-    $valuesClause .= "3, \$tag\$$patronTagString\$tag\$, true, false, false, true, $profileID, E'".$patron{"studentid"}."'," if $newPatron;
+    $valuesClause .= "3, \$tag\$$patronTagString\$tag\$, $active, false, false, true, $profileID, E'".$patron{"studentid"}."'," if $newPatron;
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $usr" if !$newPatron;
@@ -585,7 +592,12 @@ sub installPatron
         $log->addLine($query);
         $dbHandler->update($query);
     }
-    
+
+    # Add 12 hours to the expiration date to deal with timezone issues
+    $query = "UPDATE actor.usr set expire_date = expire_date + '12 hours'::interval WHERE id = $usr";
+    $log->addLine($query);
+    $dbHandler->update($query);
+
     connectPatronToUsr(\%patron, $usr);
     
     # Ensure that the card is active
@@ -750,8 +762,8 @@ sub setStatCat
     
     ## See if the patron already has this setup
     $found = 0;
-    $query = "select id from actor.stat_cat_entry_usr_map where 
-    stat_cat = (select id from actor.stat_cat where owner=$ouID and name=\$\$$statCat\$\$) and 
+    $query = "select id from actor.stat_cat_entry_usr_map where
+    stat_cat = (select id from actor.stat_cat where owner=$ouID and name=\$\$$statCat\$\$) and
     target_usr = $usr";
     @results = @{$dbHandler->query($query)};
     $found = $results[0][0] foreach(@results);
@@ -811,7 +823,7 @@ sub connectPatronToUsr
     my $p = shift;
     my %patron = %{$p};
     my $usr = shift;
-    $query = "update $schema.patron_import
+    $query = "update $schema.$table
     set
     usr_id = \$1
     where id = ".$patron{"id"};
@@ -825,7 +837,7 @@ sub setImported
     my $p = shift;
     my %patron = %{$p};
     my $usr = shift;
-    $query = "update $schema.patron_import
+    $query = "update $schema.$table
     set
     imported = true
     where id = ".$patron{"id"};
@@ -839,8 +851,8 @@ sub errorPatron
     my %patron = %{$p};
     my $error = shift;
     return 0 if( !$error || length($error)==0 );
-    
-    $query = "update $schema.patron_import
+
+    $query = "update $schema.$table
     set
     error_message = error_message || E' ' || \$1
     where id = ".$patron{"id"};
@@ -903,7 +915,7 @@ sub setupSchema
 {
     my $columns = shift;
     my %columns = %{$columns};
-	my $query = "select * from INFORMATION_SCHEMA.COLUMNS where table_name = 'patron_import' and table_schema='$schema'";
+	my $query = "select * from INFORMATION_SCHEMA.COLUMNS where table_name = '$table' and table_schema='$schema'";
 	my @results = @{$dbHandler->query($query)};
 	if($#results==-1)
 	{
@@ -914,8 +926,8 @@ sub setupSchema
             $query = "CREATE SCHEMA $schema";
             $dbHandler->update($query);
         }
-		
-		$query = "CREATE TABLE $schema.patron_import
+
+		$query = "CREATE TABLE $schema.$table
 		(
 		id bigserial NOT NULL,
         ";
@@ -930,7 +942,7 @@ sub setupSchema
         usr_id bigint,
         file_name text,
         imported boolean default false,
-        error_message text DEFAULT \$\$\$\$,        
+        error_message text DEFAULT \$\$\$\$,
         dealt_with boolean default false,
         insert_date timestamp with time zone NOT NULL DEFAULT now()
         )";
@@ -951,17 +963,17 @@ sub setupSchema
                 
                 my $friendlyColumnName = createDBFriendlyName($value);
                 my $query = "
-                SELECT * 
-                    FROM information_schema.COLUMNS 
-                    WHERE 
-                    TABLE_SCHEMA = '$schema' 
-                    AND TABLE_NAME = 'patron_import' 
+                SELECT *
+                    FROM information_schema.COLUMNS
+                    WHERE
+                    TABLE_SCHEMA = '$schema'
+                    AND TABLE_NAME = '$table'
                     AND lower(COLUMN_NAME) = '$friendlyColumnName'
                     ";
                 my @res = @{$dbHandler->query($query)};
                 if($#res == -1)
                 {
-                    my $query = "ALTER TABLE $schema.patron_import ADD COLUMN $friendlyColumnName text";
+                    my $query = "ALTER TABLE $schema.$table ADD COLUMN $friendlyColumnName text";
                     $log->addLine($query);
                     $dbHandler->update($query);
                 }
