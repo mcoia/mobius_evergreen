@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 
-use lib qw(../); 
+use lib qw(../);
 use Loghandler;
 use Data::Dumper;
 use File::Path qw(make_path remove_tree);
@@ -32,8 +32,8 @@ use email;
     my $logFile;
     my $inputFileFriendly;
     my %fileParsingReport = ();
-    
-    
+
+
     GetOptions (
     "logfile=s" => \$logFile,
     "xmlconfig=s" => \$xmlconf,
@@ -75,23 +75,23 @@ use email;
         print "Please specify a DB schema\n";
         exit;
     }
-    
+
     @inputFiles = @{getFiles($inputDirectory)};
-    
-        
+
+
     $log = new Loghandler($logFile);
     # $log->truncFile("");
     $log->addLogLine(" ---------------- Script Starting ---------------- ");
 
-    
-	my $dt = DateTime->now(time_zone => "local"); 
-	my $fdate = $dt->ymd; 
+
+	my $dt = DateTime->now(time_zone => "local");
+	my $fdate = $dt->ymd;
 	my $ftime = $dt->hms;
 	my $dateString = "$fdate $ftime";
-    
+
     my %dbconf = %{getDBconnects($xmlconf)};
     $dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"}); #$dbconf{"dbhost"}
-    
+
     #"studentID",
     #"lastName",
     #"firstName",
@@ -112,7 +112,7 @@ use email;
     #"expirationDate",
     #"au_statcat1","au_statcat2","au_statcat3","au_statcat4","au_statcat5","au_statcat6","au_statcat7","au_statcat8","au_statcat9","au_statcat10","au_statcat11","au_statcat12",
     #"ats_statcat1","ats_statcat2","ats_statcat3","ats_statcat4","ats_statcat5","ats_statcat6","ats_statcat7","ats_statcat8","ats_statcat9","ats_statcat10","ats_statcat11","ats_statcat12"
-        
+
     my %colmap = (
     0 => 'studentid',
     1 => 'lastname',
@@ -122,7 +122,7 @@ use email;
     5 => 'street1',
     6 => 'city',
     7 => 'state',
-    8 => 'zip',    
+    8 => 'zip',
     9 => 'email',
     10 => 'phone',
     11 => 'library',
@@ -133,7 +133,7 @@ use email;
     16 => 'country',
     17 => 'expirationdate'
     );
-    
+
     our %statcatmap = (
     18 => 'Import Source',
     19 => 'Gender',
@@ -146,7 +146,7 @@ use email;
     26 => 'au_statcat9',
     27 => 'au_statcat10',
     28 => 'au_statcat11',
-    29 => 'au_statcat12',    
+    29 => 'au_statcat12',
     30 => 'User Type',
     31 => 'School Status',
     32 => 'Degree Program',
@@ -160,7 +160,7 @@ use email;
     40 => 'ats_statcat11',
     41 => 'ats_statcat12'
     );
-    
+
     setupSchema(\%colmap);
 
     foreach(@inputFiles)
@@ -168,7 +168,7 @@ use email;
         my $file = $_;
         print "Processing $file\n";
         my $path;
-        my @sp = split('/',$file);       
+        my @sp = split('/',$file);
         $path=substr($file,0,( (length(@sp[$#sp]))*-1) );
         my $bareFilename =  pop @sp;
         $fileParsingReport{"*** $bareFilename ***"} = "\r\n";
@@ -213,16 +213,16 @@ use email;
         $log->addLine("Expected columns: $sanitycheckcolumnnums");
         $queryInserts = substr($queryInserts,0,-1);
         $queryByHand = substr($queryByHand,0,-1);
-        
+
         $queryInserts .= ")\nVALUES \n";
         $queryByHand  .= ")\nVALUES \n";
-        
+
         my $queryInsertsHead = $queryInserts;
         my $queryByHandHead = $queryByHand;
-        
+
         while ( my $row = $csv->getline( $fh ) )
         {
-            
+
             my $valid = 0;
             my @rowarray = @{$row};
             if(scalar @rowarray != $sanitycheckcolumnnums )
@@ -236,7 +236,7 @@ use email;
                 my $thisLineInsert = '';
                 my $thisLineInsertByHand = '';
                 my @thisLineVals = ();
-                
+
                 foreach(@order)
                 {
                     my $colpos = $_;
@@ -250,12 +250,12 @@ use email;
                     @rowarray[$colpos] =~ s/\t+$//;
                     # Some bad characters can mess with some processes later. Excel loves these \xA0
                     @rowarray[$colpos] =~ s/\x{A0}//g;
-                                        
+
                     $thisLineInsertByHand.="\$data\$".@rowarray[$colpos]."\$data\$,";
                     push (@thisLineVals, @rowarray[$colpos]);
                     # $log->addLine(Dumper(\@thisLineVals));
                 }
-                
+
                 if($valid)
                 {
                     $thisLineInsert = substr($thisLineInsert,0,-1);
@@ -272,7 +272,7 @@ use email;
                 undef @thisLineVals;
             }
             $rownum++;
-            
+
             if( ($success % 500 == 0) && ($success != 0) )
             {
                 $accumulatedTotal+=$success;
@@ -290,42 +290,42 @@ use email;
                 $queryByHand = $queryByHandHead;
             }
         }
-        
+
         $queryInserts = substr($queryInserts,0,-2) if $success;
         $queryByHand = substr($queryByHand,0,-2) if $success;
-        
+
         # Handle the case when there is only one row inserted
         if($success == 1)
         {
-            $queryInserts =~ s/VALUES \(/VALUES /;            
+            $queryInserts =~ s/VALUES \(/VALUES /;
             $queryInserts = substr($queryInserts,0,-1);
         }
 
         # $log->addLine($queryInserts);
         $log->addLine($queryByHand);
         # $log->addLine(Dumper(\@queryValues));
-        
+
         close $fh;
         $accumulatedTotal+=$success;
         $fileParsingReport{"*** $bareFilename ***"} .= "\r\nImporting $accumulatedTotal / $rownum"  if $success;
         $log->addLine("Importing $accumulatedTotal / $rownum") if $success;
-        
+
         $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
 
         my $query = "UPDATE $schema.$table set file_name = \$data\$$bareFilename\$data\$ WHERE file_name is null";
         $log->addLine($query) if $success;
         $dbHandler->update($query) if $success;
-        
+
         # # delete the file so we don't read it again
-        # Disabled because we are going to let bash do this 
+        # Disabled because we are going to let bash do this
         # so that we don't halt execution of this script in case of errors
         # unlink $file;
     }
-    
-    ## Now scrub data and compare data to production and apply logic 
+
+    ## Now scrub data and compare data to production and apply logic
 
     my %reporting = ();
-    
+
     # First, remove blank student ID's/
     my $query = "select count(*) from $schema.$table where btrim(studentid)=\$\$\$\$ and not dealt_with";
     @results = @{$dbHandler->query($query)};
@@ -402,7 +402,7 @@ use email;
     my $keyCount = keys %colmap;
     print "Key Count = $keyCount\n";
     $colmap{$keyCount} = "home_ou";
-    
+
     my $i = 0;
     $query = "select ";
     while ( (my $key, my $value) = each(%colmap) )
@@ -427,7 +427,7 @@ use email;
     $query.=" from $schema.$table pi where home_ou is not null and not dealt_with and error_message = \$\$\$\$
     limit 5";
     $log->addLine($query);
-    
+
     # Loop through them and perform update/inserts and hook up the stat cats
     my @results = @{$dbHandler->query($query)};
     foreach(@results)
@@ -468,7 +468,7 @@ use email;
         my @row = @{$_};
         $reporting{"*** Library Breakdown ***"} .= @row[0]."   ".@row[1]."\r\n";
     }
-    
+
     my $errored = "";
     $reporting{"Total with errors"} = 0;
     $query = "select studentid, firstname, lastname, library, school, error_message from $schema.$table where not dealt_with and error_message!=\$\$\$\$";
@@ -479,44 +479,44 @@ use email;
         $errored.="( ".@row[0]." ".@row[1]." ".@row[2]." ".@row[3]." ".@row[4]." ) ERROR = '".@row[5]."\n";
         $reporting{"Total with errors"}++;
     }
-    
+
     my @toEmail = split(/,/,$toEmail);
     my %conf = ();
     $log->addLine("sending email. '$fromEmail' -> ".Dumper(\@toEmail));
     my $email = new email($fromEmail,\@toEmail,0,0,\%conf);
-    
+
     my $body = "
 Dear staff,
 
 Your file(s) have been processed. These are the files:$inputFileFriendly\r\n\r\nHere is a summary:\r\n\r\n";
-    
-    while ( (my $key, my $value) = each(%fileParsingReport) ) 
+
+    while ( (my $key, my $value) = each(%fileParsingReport) )
     {
         $body.=$key.": ".$value;
     }
     $body.="\r\n\r\n";
-    
+
     my $lastReport = "";
-    while ( (my $key, my $value) = each(%reporting) ) 
+    while ( (my $key, my $value) = each(%reporting) )
     {
         $body.=$key.": ".$value."\n" if !($key =~ m/\*/g);
         $lastReport .=$key.": ".$value."\n" if ($key =~ m/\*/g);
     }
     $body.="\r\n$lastReport";
-    
+
     $body.="\r\n\r\nHere are the errored records. Stat cat errors do not prevent the patron from importing.
 $errored" if $reporting{"Total with errors"} > 0;
-    
+
     $body.="\r\n\r\n-MOBIUS Perl Squad-";
     my $fileCount = $#inputFiles;
     $fileCount++;
     $email->send("Evergreen Utility - Patron import results - $fileCount file(s)",$body);
-    
+
     # Finally, mark all of the rows dealt_with for next execution to ignore
     $query = "update $schema.$table set dealt_with=true where not dealt_with";
     $log->addLine($query);
     $dbHandler->update($query);
-    
+
     $log->addLogLine(" ---------------- Script Ending ---------------- ");
 
 sub installPatron
@@ -525,8 +525,8 @@ sub installPatron
     my %patron = %{$p};
     my $newPatron = 0;
     my $query = '';
-    
-    my %prodMap = 
+
+    my %prodMap =
     (
         'studentid'  => 'usrname',
         'lastname' => 'family_name',
@@ -539,7 +539,7 @@ sub installPatron
         'expirationdate' => 'expire_date',
         'alias' => 'alias'
     );
-    
+
     my $usr = findUsrID($patron{"studentid"});
     $newPatron = 1 if !$usr;
     my $profileID = handleProfileID($patron{"profileid"});
@@ -566,7 +566,7 @@ sub installPatron
     $installQuery .= "ident_type = 3, ident_value = \$tag\$$patronTagString\$tag\$,
     active = $active, barred = false, deleted = false, juvenile = true,
     profile = $profileID," if !$newPatron;
-    
+
     $installQuery .= "ident_type, ident_value, active, barred, deleted, juvenile, profile, passwd," if $newPatron;
     $valuesClause .= "3, \$tag\$$patronTagString\$tag\$, $active, false, false, true, $profileID, E'".$patron{"studentid"}."'," if $newPatron;
     $valuesClause = substr($valuesClause,0,-1);
@@ -576,9 +576,9 @@ sub installPatron
     $log->addLine($installQuery);
     $log->addLine($valuesClause);
     $log->addLine(Dumper(\@vals));
-    
+
     $dbHandler->updateWithParameters($installQuery, \@vals);
-    
+
     ## Connect the barcode actor.card when applicable
     if( $newPatron )
     {
@@ -599,12 +599,12 @@ sub installPatron
     $dbHandler->update($query);
 
     connectPatronToUsr(\%patron, $usr);
-    
+
     # Ensure that the card is active
     $query = "UPDATE actor.card SET active = TRUE WHERE usr = $usr AND barcode = \$\$".$patron{"studentid"}."\$\$";
     $log->addLine($query);
     $dbHandler->update($query);
-    
+
      ## Address updates/Inserts
     $query = "SELECT mailing_address from actor.usr where id= $usr";
     my @results = @{$dbHandler->query($query)};
@@ -612,9 +612,9 @@ sub installPatron
     $mailingID = $results[0][0] if $results[0][0];
     $log->addLine("Mailing ID = $mailingID");
     $mailingID = 0 if length($mailingID) == 0;
-   
+
     %prodMap =
-    (   
+    (
         'city'  => 'city',
         'county' => 'county',
         'state' => 'state',
@@ -622,7 +622,7 @@ sub installPatron
         'street1' => 'street1',
         'country' => 'country'
     );
-    
+
     my $installQuery = "INSERT INTO actor.usr_address( ";
     $installQuery = "UPDATE actor.usr_address SET " if $mailingID;
     my $valuesClause = 'VALUES(';
@@ -639,7 +639,7 @@ sub installPatron
         push @vals, $insVal ;
         $colCount++;
     }
-   
+
     $valuesClause = substr($valuesClause,0,-1);
     $installQuery = substr($installQuery,0,-1);
     $installQuery .= " WHERE id = $mailingID" if $mailingID;
@@ -648,7 +648,7 @@ sub installPatron
     # $log->addLine($valuesClause);
     $log->addLine(Dumper(\@vals));
     $dbHandler->updateWithParameters($installQuery, \@vals);
-    
+
     if (!$mailingID) # link the newly inserted address back to actor.usr
     {
         $query = "UPDATE actor.usr SET mailing_address = (SELECT MAX(id) FROM actor.usr_address WHERE usr = $usr) WHERE id = $usr";
@@ -671,14 +671,14 @@ sub installPatron
             }
         }
     }
-    
-    
+
+
     setImported(\%patron);
-    
+
     setPasswd(\%patron, $usr);
-    
+
     return "success";
-    
+
 }
 
 sub handleProfileID
@@ -721,13 +721,13 @@ sub setStatCat
     my $usr = shift;
     my $statCat = shift;
     my $statCatEntry = shift;
-    
+
     return 0 if( !$statCatEntry || length($statCatEntry)==0 || !$statCat || length($statCat)==0);
-    
+
     my $ouID = findUsrSystemID($usr);
-    
+
     return 0 if( !$ouID );
-    
+
     ## Make sure that the stat cat exists
     my $found = 0;
     my $query = "select 1 from actor.stat_cat where owner=$ouID and name=\$\$$statCat\$\$";
@@ -738,8 +738,8 @@ sub setStatCat
     $query = "insert into actor.stat_cat(owner,name,allow_freetext)  values($ouID, \$1 , false)";
     $log->addLine($query) if (!$found);
     $dbHandler->updateWithParameters($query,\@vars) if (!$found);
-    
-    
+
+
     ## Make sure that the stat cat entry exists
     $found = 0;
     $query = "
@@ -758,8 +758,8 @@ sub setStatCat
     values($ouID, \$1 , (select id from actor.stat_cat where owner=$ouID and name=\$\$$statCat\$\$))";
     $log->addLine($query) if (!$found);
     $dbHandler->updateWithParameters($query,\@vars) if (!$found);
-       
-    
+
+
     ## See if the patron already has this setup
     $found = 0;
     $query = "select id from actor.stat_cat_entry_usr_map where
@@ -770,16 +770,16 @@ sub setStatCat
     $log->addLine("stat cat map: found = $found");
     ## If not, insert the stat cat for this patron
     @vars = ($statCatEntry,$usr);
-    
+
     $query = "insert into actor.stat_cat_entry_usr_map(stat_cat,stat_cat_entry,target_usr)
     values((select id from actor.stat_cat where owner=$ouID and name=\$\$$statCat\$\$), \$1 , \$2 )";
-    
+
     $query = "update actor.stat_cat_entry_usr_map set stat_cat_entry = \$1 , target_usr = \$2 where id = $found" if $found;
-    
+
     $log->addLine($query);
     $log->addLine(Dumper(\@vars));
     $dbHandler->updateWithParameters($query,\@vars);
-    
+
     return 1;
 }
 
@@ -805,7 +805,7 @@ sub findUsrID
     my @results = @{$dbHandler->query($query)};
     my $usr = 0;
     $usr = $results[0][0] if $results[0][0];
-    
+
     # Attempt to match on usrname instead of card
     if(!$usr)
     {
@@ -814,9 +814,9 @@ sub findUsrID
         @results = @{$dbHandler->query($query)};
         $usr = $results[0][0] if $results[0][0];
     }
-    
+
     return $usr;
-}  
+}
 
 sub connectPatronToUsr
 {
@@ -872,7 +872,7 @@ sub getDateFromFile
         @s[0] =~ s/(\d{4})(\d{2})(\d{2})/\1-\2-\3/;
         $ret = "\$\$".@s[0]."\$\$::date";
     }
-    print "Expire date set to $ret\n";    
+    print "Expire date set to $ret\n";
     return $ret;
 }
 
@@ -899,7 +899,7 @@ sub getFiles
 	my $path = shift;
     my @ret = ();
 	opendir(DIR, $path) or die $!;
-	while (my $file = readdir(DIR)) 
+	while (my $file = readdir(DIR))
 	{
 		if ( (-e "$path/$file") && !($file =~ m/^\./) )
 		{
@@ -907,7 +907,7 @@ sub getFiles
 			push @ret, "$path/$file"
 		}
 	}
-    
+
 	return \@ret;
 }
 
@@ -946,7 +946,7 @@ sub setupSchema
         dealt_with boolean default false,
         insert_date timestamp with time zone NOT NULL DEFAULT now()
         )";
-        
+
 		$dbHandler->update($query);
         $log->addLine($query);
 	}
@@ -960,7 +960,7 @@ sub setupSchema
             my %thisone = %{$_};
             while ( (my $key, my $value) = each(%thisone) )
             {
-                
+
                 my $friendlyColumnName = createDBFriendlyName($value);
                 my $query = "
                 SELECT *
