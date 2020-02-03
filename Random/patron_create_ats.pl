@@ -425,7 +425,7 @@ use email;
     $columnOrder{"id"} = $i;
     # un-sql-comment the limit statement in the query for a much faster execution!
     $query.=" from $schema.$table pi where home_ou is not null and not dealt_with and error_message = \$\$\$\$
-    limit 5";
+    -- limit 5";
     $log->addLine($query);
 
     # Loop through them and perform update/inserts and hook up the stat cats
