@@ -26,7 +26,7 @@ ALTER TABLE action_trigger.event DROP CONSTRAINT event_template_output_fkey;
 CREATE TEMP TABLE temp_ate ON COMMIT DROP AS
 SELECT *
 FROM action_trigger.event
-WHERE add_time > '2017-12-31 23:59:59';
+WHERE add_time > now() - '14 months'::interval;
 
 -- Copy the output of the above events.
 CREATE TEMP TABLE temp_ato ON COMMIT DROP AS

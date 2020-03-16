@@ -224,7 +224,7 @@ SSLCertificateKeyFile ".$certFiles{"privkey"}->[1]."
 					}
 				}
 			}
-			elsif($line =~ m/^[\s]*<VirtualHost \*:443>/)
+			elsif($line =~ m/^[\s]*<VirtualHost \*:7443>/)
 			{
 				$inside443Clause = 1;
 			}
@@ -246,6 +246,21 @@ SSLCertificateKeyFile ".$certFiles{"privkey"}->[1]."
 	my $temp = new Loghandler($conf->{"pathtosharedvirtualhosts"} . "/$confFileName");
 	$temp->deleteFile();
 	$temp->truncFile($output);
+    # create nginx versions
+    my $domainName = $certFiles{"cert"}->[1];
+    my @splits = split(/\//,$domainName);
+    $domainName = pop @splits;
+    $domainName = pop @splits;
+
+    print "cat " . $certFiles{"fullchain"}->[1] ." ". $certFiles{"cert"}->[1] . " > " . $conf->{"pathtosharedcerts"} . "/$domainName"."_nginx.crt\n";
+    $log->addLine("cat " . $certFiles{"fullchain"}->[1] ." ". $certFiles{"cert"}->[1] . " > " . $conf->{"pathtosharedcerts"} . "/$domainName"."_nginx.crt");
+    system("cat " . $certFiles{"fullchain"}->[1] ." ". $certFiles{"cert"}->[1] . " > " . $conf->{"pathtosharedcerts"} . "/$domainName"."_nginx.crt");
+    
+    print "cat " . $certFiles{"privkey"}->[1] . " > " . $conf->{"pathtosharedcerts"} . "/$domainName"."_nginx.key\n";
+    $log->addLine("cat " . $certFiles{"privkey"}->[1] . " > " . $conf->{"pathtosharedcerts"} . "/$domainName"."_nginx.key");
+    system("cat " . $certFiles{"privkey"}->[1] . " > " . $conf->{"pathtosharedcerts"} . "/$domainName"."_nginx.key");
+    
+    
 }
 
 sub checkoutletsencrypt
@@ -293,11 +308,10 @@ sub getcerts
 						$serverName = $mobUtil->trim($serverName);
 						print "'".$serverName."'\n";
 						my %certs = %{generateCert($serverName)};
-						#my %certs = %{generateCert('devpolk.missourievergreen.org')};
 						virtualHostConf($file,\%certs);
 					}
 				}
-				elsif($line =~ m/^[\s]*<VirtualHost \*:443>/)
+				elsif($line =~ m/^[\s]*<VirtualHost \*:7443>/)
 				{
 					$insideSSLClause = 1;
 				}
@@ -321,9 +335,9 @@ sub generateCert
 	if( !(-d "/etc/letsencrypt/archive/$domainName") )
 	{
 		
-		print "/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName"."\n";
-		$log->addLine("/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos  -d $domainName");
-		system("/root/.local/share/letsencrypt/bin/letsencrypt certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName");
+		print $conf{"letsencryptgitrepopath"} ."/letsencrypt-auto certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName"."\n";
+		$log->addLine($conf{"letsencryptgitrepopath"} ."/letsencrypt-auto certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos  -d $domainName");
+		system($conf{"letsencryptgitrepopath"} ."/letsencrypt-auto certonly --webroot  --webroot-path ".$conf{"pathtosharedwebroot"}." --renew-by-default --email ".$conf{"emailaddress"}." --text --agree-tos -d $domainName");
 	}
 	my %ret;
 	print "/etc/letsencrypt/archive/$domainName\n";

@@ -1,3 +1,0 @@
-call_num    999 a
-req_field   999 s m:required
-multi_field 999 x m:multi
