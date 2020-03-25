@@ -128,7 +128,7 @@ and record not in(select record from seekdestroy.bib_score where opac_icon = $$k
 and record not in(select record from seekdestroy.bib_score where opac_icon = $$casaudiobook$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
 and record not in(select record from seekdestroy.bib_score where (lower(call_labels)~$$music$$ or lower(copy_locations)~$$music$$ ) )
-and record not in(select record from seekdestroy.bib_score where winning_score_score=1 and circ_mods is null and opac_icon is null	)
+and record not in(select record from seekdestroy.bib_score where winning_score_score=1 and circ_mods is null and	opac_icon is null	)
 and record not in(select record from seekdestroy.bib_score where record_type in ($$p$$,$$o$$))
 and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$eaudio$$)
 and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$phono$$)
@@ -155,7 +155,7 @@ and record not in(select record from seekdestroy.bib_score where opac_icon = $$k
 and record not in(select record from seekdestroy.bib_score where opac_icon = $$casaudiobook$$)
 and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$cas$$ and (lower(call_labels)~$$cas$$ or lower(copy_locations)~$$cas$$ ) )
 and record not in(select record from seekdestroy.bib_score where (lower(call_labels)~$$music$$ or lower(copy_locations)~$$music$$ ) )
-and record not in(select record from seekdestroy.bib_score where winning_score_score=1 and circ_mods is null and opac_icon is null	)
+and record not in(select record from seekdestroy.bib_score where winning_score_score=1 and circ_mods is null and	opac_icon is null	)
 and record not in(select record from seekdestroy.bib_score where record_type in ($$p$$,$$o$$))
 and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$eaudio$$)
 and record not in(select record from SEEKDESTROY.bib_score WHERE opac_icon ~ $$phono$$)
@@ -435,9 +435,7 @@ select record
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 and winning_score_score!=0
  ;
- 
- 
- 
+
 #
 # Music Bibs convert automatically
 #
@@ -446,18 +444,10 @@ select record
  from seekdestroy.bib_score
  where
  record in (select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$phono$$)
- and record not in ( select record from seekdestroy.bib_score where circ_mods~$$AUDIOBOOK$$)
- and record not in ( select record from seekdestroy.bib_score where circ_mods~$$VIDEO$$ and winning_score_score < 5)
- and record not in ( select record from seekdestroy.bib_score where circ_mods~$$BOOK$$ and winning_score_score < 5)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$kit$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$audiobook$$) 
- and record not in ( select record from seekdestroy.bib_score where lower(call_labels)!~$$music$$ and lower(call_labels)!~$$ cd$$ and lower(call_labels)!~$$^cd$$ and lower(call_labels)!~$$audio$$ and lower(copy_locations)!~$$music$$ and lower(copy_locations)!~$$ cd$$ and lower(copy_locations)!~$$^cd$$ and lower(copy_locations)!~$$audio$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score<5)
- and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
- and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~$$dvd$$ or lower(circ_mods)~$$video$$ or lower(copy_locations)~$$dvd$$))
- and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ or opac_icon~$$score$$ or opac_icon~$$phono$$ or opac_icon~$$kit$$ or opac_icon~$$audiobook$$)
+ and record not in ( select record from seekdestroy.bib_score where circ_mods!~$$MUSIC$$)
+ and record not in ( select record from seekdestroy.bib_score where btrim(call_labels)=$$$$ and winning_score_score<5)
+ and record not in ( select record from seekdestroy.bib_score where call_labels!~*$$music$$ and copy_locations!~*$$music$$)
  and winning_score = $$music_score$$
  and winning_score_score!=0
  ;
@@ -473,18 +463,10 @@ select record
  from seekdestroy.bib_score
  where
  record in (select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$phono$$)
- and record not in ( select record from seekdestroy.bib_score where circ_mods~$$AUDIOBOOK$$)
- and record not in ( select record from seekdestroy.bib_score where circ_mods~$$VIDEO$$ and winning_score_score < 5)
- and record not in ( select record from seekdestroy.bib_score where circ_mods~$$BOOK$$ and winning_score_score < 5)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$kit$$)
- and record not in ( select record from seekdestroy.bib_score where opac_icon~$$audiobook$$) 
- and record not in ( select record from seekdestroy.bib_score where lower(call_labels)!~$$music$$ and lower(call_labels)!~$$ cd$$ and lower(call_labels)!~$$^cd$$ and lower(call_labels)!~$$audio$$ and lower(copy_locations)!~$$music$$ and lower(copy_locations)!~$$ cd$$ and lower(copy_locations)!~$$^cd$$ and lower(copy_locations)!~$$audio$$ and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score<5)
- and record not in ( select record from seekdestroy.bib_score where winning_score_distance < 2 and winning_score_score > 2)
- and record not in ( select record from seekdestroy.bib_score where second_place_score~$$video_score$$ and (lower(call_labels)~$$dvd$$ or lower(circ_mods)~$$video$$ or lower(copy_locations)~$$dvd$$))
- and record not in ( select record from seekdestroy.bib_score where winning_score_score<5 and length(btrim(circ_mods))=0 and length(btrim(copy_locations))=0 ) 
+ and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ or opac_icon~$$score$$ or opac_icon~$$phono$$ or opac_icon~$$kit$$ or opac_icon~$$audiobook$$)
+ and record not in ( select record from seekdestroy.bib_score where circ_mods!~$$MUSIC$$)
+ and record not in ( select record from seekdestroy.bib_score where btrim(call_labels)=$$$$ and winning_score_score<5)
+ and record not in ( select record from seekdestroy.bib_score where call_labels!~*$$music$$ and copy_locations!~*$$music$$)
  and winning_score = $$music_score$$
  and winning_score_score!=0
  )
@@ -676,9 +658,8 @@ music_additional_search~~select id,marc from biblio.record_entry where
 	)
 	AND 
 	id in
-	( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$Music$$)
-		union
-	  select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$CD$$)
+	(
+    select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$MUSIC$$)
 	)
 	;
 
