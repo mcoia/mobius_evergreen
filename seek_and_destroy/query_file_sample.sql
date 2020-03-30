@@ -756,7 +756,7 @@ ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ dvd$$ OR LOWER
 OR
 ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$ dvd$$ OR LOWER(NAME)~$$^dvd$$) )
 OR
-lower(ac.circ_modifier) ~* $$ dvd$$ OR
+lower(ac.circ_modifier) ~* $$video$$ OR
 lower(ac.circ_modifier) ~* $$^dvd$$
 )
 AND
@@ -795,9 +795,6 @@ and
 )
 and
 (
-	lower(ac.circ_modifier) !~* $$ dvd$$ and
-	lower(ac.circ_modifier) !~* $$^dvd$$ and
-	lower(ac.circ_modifier) !~* $$movie$$ and
 	lower(ac.circ_modifier) !~* $$video$$
 )
 AND
@@ -827,8 +824,6 @@ BRE.ID>0 AND
 ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$vhs$$) )
 OR
 ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$vhs$$) )
-OR
-lower(ac.circ_modifier) ~* $$vhs$$
 )
 AND
 BRE.ID IN
@@ -864,8 +859,6 @@ and
 )
 and
 (
-	lower(ac.circ_modifier) !~* $$movie$$ and
-	lower(ac.circ_modifier) !~* $$vhs$$ and
 	lower(ac.circ_modifier) !~* $$video$$
 )
 AND
@@ -896,10 +889,6 @@ ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ dvd$$ OR LOWER
 OR
 ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$ dvd$$ OR LOWER(NAME)~$$^dvd$$ OR LOWER(NAME)~$$vhs$$ OR LOWER(NAME)~$$video$$ OR LOWER(NAME)~$$movie$$) )
 OR
-lower(ac.circ_modifier) ~* $$ dvd$$ OR
-lower(ac.circ_modifier) ~* $$^dvd$$ OR
-lower(ac.circ_modifier) ~* $$movie$$ OR
-lower(ac.circ_modifier) ~* $$vhs$$ OR
 lower(ac.circ_modifier) ~* $$video$$
 )
 AND
@@ -940,10 +929,6 @@ and
 )
 and
 (
-	lower(ac.circ_modifier) !~* $$ dvd$$ and
-	lower(ac.circ_modifier) !~* $$^dvd$$ and
-	lower(ac.circ_modifier) !~* $$movie$$ and
-	lower(ac.circ_modifier) !~* $$vhs$$ and
 	lower(ac.circ_modifier) !~* $$video$$
 )
 AND
@@ -1016,8 +1001,7 @@ and
 )
 and
 (
-	lower(ac.circ_modifier) !~* $$music$$ and
-	lower(ac.circ_modifier) !~* $$cd$$
+	lower(ac.circ_modifier) !~* $$music$$
 )
 AND
 BRE.ID IN
@@ -1068,7 +1052,7 @@ or
 	acl.name ~* $$ACD$$ 
 )
 and
-ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
+ac.circ_modifier in ( $$AUDIOBOOK$$ ) and
 (
 (
 (SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$music$$ and
@@ -1120,7 +1104,7 @@ and
 	lower(acl.name) !~* $$disk$$ and
 	acl.name !~* $$ACD$$ 
 )
-and ac.circ_modifier not in ( $$AudioBooks$$,$$CD$$ )
+and ac.circ_modifier not in ( $$AUDIOBOOK$$ )
 ) as a
 order by ID;
 
