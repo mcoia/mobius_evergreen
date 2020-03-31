@@ -445,7 +445,7 @@ select record
  where
  record in (select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
  and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ or opac_icon~$$score$$ or opac_icon~$$phono$$ or opac_icon~$$kit$$ or opac_icon~$$audiobook$$)
- and record not in ( select record from seekdestroy.bib_score where circ_mods!~$$MUSIC$$)
+ and record not in ( select record from seekdestroy.bib_score where trim(BOTH $$,$$ from circ_mods) != $$MUSIC$$)
  and record not in ( select record from seekdestroy.bib_score where btrim(call_labels)=$$$$ and winning_score_score<5)
  and record not in ( select record from seekdestroy.bib_score where call_labels!~*$$music$$ and copy_locations!~*$$music$$)
  and winning_score = $$music_score$$
@@ -464,7 +464,7 @@ select record
  where
  record in (select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
  and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ or opac_icon~$$score$$ or opac_icon~$$phono$$ or opac_icon~$$kit$$ or opac_icon~$$audiobook$$)
- and record not in ( select record from seekdestroy.bib_score where circ_mods!~$$MUSIC$$)
+ and record not in ( select record from seekdestroy.bib_score where trim(BOTH $$,$$ from circ_mods) != $$MUSIC$$)
  and record not in ( select record from seekdestroy.bib_score where btrim(call_labels)=$$$$ and winning_score_score<5)
  and record not in ( select record from seekdestroy.bib_score where call_labels!~*$$music$$ and copy_locations!~*$$music$$)
  and winning_score = $$music_score$$
