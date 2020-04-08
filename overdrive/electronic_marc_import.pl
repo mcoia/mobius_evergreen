@@ -252,7 +252,7 @@ or die("Error in command line arguments\nYou can specify
                     undef @results;
 
                     ## Authority Imports
-                    my $query = "SELECT filename from e_bib_import.import_status where type=\$\$importauth\$\$ and job=$jobid and status=\$\$new\$\$ order by id";
+                    my $query = "SELECT filename from e_bib_import.import_status where type=\$\$importauth\$\$ and job=$jobid and status=\$\$new\$\$ group by 1";
                     updateJob("Processing",$query);
                     my @results = @{$dbHandler->query($query)};
                     my $count = 0;

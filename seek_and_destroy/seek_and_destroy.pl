@@ -40,10 +40,47 @@ our $runMoveElectronicAudioBooks=0;
 our $runMoveAudioBooks=0;
 our $runDedupe=0;
 our $runFindElectronic856TOC=0;
+our $doNotRunFullReEval=0;
 
                     
 our $resetScores=0;
 
+my $help = "
+You can specify
+[Global settings]
+--config configfilename                       [Path to the config file - required]             
+--xmlconfig pathto_opensrf.xml                [Defaults to /openils/conf/opensrf.xml]
+--debug flag                                  [Cause more output - not implemented yet]
+--dryrun flag                                 [Cause no production table updates]
+--runCleamMetarecords flag                    [Run the Metarecord clean routine]
+
+[What to execute - used mainly]
+--runElectronic flag                          [Find bibs that are possibly Electronic (wave cleanup)]
+--runAudioBook flag                           [Find bibs that are possibly AudioBook (wave cleanup)]
+--runVideo flag                               [Find bibs that are possibly DVD/BluRay/VHS (wave cleanup)]
+--runLargePrint flag                          [Find bibs that are possibly Large Print (wave cleanup)]
+--runMusic flag                               [Find bibs that are possibly Music (wave cleanup)]
+
+[What to execute - rusty old code, hardly used]
+--runMoveElectronicBooks flag                 [Find items attached to electronic bibs and attempt to move items to non-electronic version]
+--runMoveElectronicAudioBooks flag            [Find items attached to electronic AudioBook bibs and attempt to move items to non-electronic version]
+--runMoveAudioBooks flag                      [Find items attached to AudioBook bibs and attempt to move items to non-AudioBook version]
+--runFindElectronic856TOC flag                [Find Electronic 856 links that have indicators that cause URL's to be clickable but they are the Table of Contents]
+
+[This is used AFTER all of the formats have been ran]
+--runDedupe flag                              [Find Duplicate bibs and merge those that are close enough]
+--resetScores flag                            [Empty out the schema table of any bib scores - recommended when running dedupe]
+
+[A nice flag to skip everything and just run the report]
+--reportonly flag                             [Skip everything and only run a report - Reports are always run at the end]
+
+**** IMPORTANT SETTING **** 
+--doNotRunFullReEval flag                     [This will cause the software to execute the bib conversion based on previously collected scores]
+
+NOTE: Used in conjunction with [What to execute - used mainly]
+      If you set this setting, the software will convert bibs to the selected format based on a previous run.
+      See schema seekdestroy.bib_scores and subroutine [sub findInvalidMARC] in this script
+\n";
 
 GetOptions (
 "config=s" => \$configFile,
@@ -61,36 +98,19 @@ GetOptions (
 "runDedupe" => \$runDedupe,
 "runFindElectronic856TOC" => \$runFindElectronic856TOC,
 "resetScores" => \$resetScores,
+"doNotRunFullReEval" => \$doNotRunFullReEval,
 "reportonly" => \$reportonly
 )
-or die("Error in command line arguments\nYou can specify
---config configfilename                       [Path to the config file - required]             
---xmlconfig pathto_opensrf.xml                [Defaults to /openils/conf/opensrf.xml]
---debug flag                                  [Cause more output - not implemented yet]
---dryrun flag                                 [Cause no production table updates]
---runCleamMetarecords flag                    [Run the Metarecord clean routine]
---runElectronic flag                          [Find bibs that are possibly Electronic (wave cleanup)]
---runAudioBook flag                           [Find bibs that are possibly AudioBook (wave cleanup)]
---runVideo flag                               [Find bibs that are possibly DVD/BluRay/VHS (wave cleanup)]
---runLargePrint flag                          [Find bibs that are possibly Large Print (wave cleanup)]
---runMusic flag                               [Find bibs that are possibly Music (wave cleanup)]
---runMoveElectronicBooks flag                 [Find items attached to electronic bibs and attempt to move items to non-electronic version]
---runMoveElectronicAudioBooks flag            [Find items attached to electronic AudioBook bibs and attempt to move items to non-electronic version]
---runMoveAudioBooks flag                      [Find items attached to AudioBook bibs and attempt to move items to non-AudioBook version]
---runDedupe flag                              [Find Duplicate bibs and merge those that are close enough]
---runFindElectronic856TOC flag                [Find Electronic 856 links that have indicators that cause URL's to be clickable but they are the Table of Contents]
---resetScores flag                            [Empty out the schema table of any bib scores - recommended when running dedupe]
---reportonly flag                             [Skip everything and only run a report - Reports are always run at the end]
-\n");
+or die("Error in command line arguments $help");
 
 if(! -e $xmlconf)
 {
-	print "I could not find the xml config file: $xmlconf\nYou can specify the path when executing this script\n";
+	print "I could not find the xml config file: $xmlconf $help";
 	exit 0;
 }
  if(!$configFile)
  {
-	print "Please specify a config file\n";
+	print "Please specify a config file\n $help";
 	exit;
  }
 
@@ -196,8 +216,6 @@ if(! -e $xmlconf)
 					
                     $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH") if $resetScores;
                     $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE") if $resetScores;
-					
-
 
 					cleanMetaRecords() if $runCleamMetarecords;
                     findInvalidElectronicMARC() if $runElectronic;
@@ -1027,24 +1045,51 @@ sub determineWhichVideoFormat
 	if( ($dvd >= $blu) && ($dvd >= $vhs) )
 	{
 		$log->addLine("Choosing DVD for $bibid");
-		updateMARCSetDVD($bibid,$marc);
+		updateMARCSetVideoFormat($bibid,$marc,'dvd');
 	}
 	elsif( ($blu >= $dvd) && ($blu >= $vhs) )
 	{
 		$log->addLine("Choosing BLURAY for $bibid");
-		updateMARCSetBluray($bibid,$marc);
+		updateMARCSetVideoFormat($bibid,$marc,'blu-ray');
 	}
 	else
 	{
 		$log->addLine("Choosing VHS for $bibid");
-		updateMARCSetVHS($bibid,$marc);
+		updateMARCSetVideoFormat($bibid,$marc,'vhs');
 	}
 }
 
-sub updateMARCSetDVD
+sub updateMARCSetVideoFormat
 {	
-	my $bibid = @_[0];	
+	my $bibid = @_[0];
 	my $marc = @_[1];
+    my $type = @_[2];
+
+    my %data = 
+    (
+        'vhs' =>
+        {
+            'letter' => 'b',
+            'tag' => 'V H S',
+            '007' => 'vf cbahou',
+            'log' => 'VHS'
+        },
+        'blu-ray' =>
+        {
+            'letter' => 's',
+            'tag' => 'B L U R A Y',
+            '007' => 'vd csaizq',
+            'log' => 'Bluray'
+        },
+        'default' =>
+        {
+            'letter' => 'v',
+            'tag' => 'D V D',
+            '007' => 'vd cvaizq',
+            'log' => 'DVD'
+        }
+    );
+    $type = 'default' if !$data{$type}; # Default is DVD if type isn't in the array
 	$marc = setMARCForm($marc,' ');
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
@@ -1061,7 +1106,7 @@ sub updateMARCSetDVD
 			$marcob->delete_field($z07);
 			#print $z07->data()."\n";
 			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'v',1);
-			$replacement=$mobUtil->insertDataIntoColumn($replacement,'v',5);
+			$replacement=$mobUtil->insertDataIntoColumn($replacement,$data{$type}{'letter'},5);
 			#print "$replacement\n";			
 			$z07->update($replacement);
 			$marcob->insert_fields_ordered($z07);
@@ -1076,20 +1121,144 @@ sub updateMARCSetDVD
 	}
 	if(!$altered)
 	{
-		my $z07 = MARC::Field->new( '007', 'vd cvaizq' );
+		my $z07 = MARC::Field->new( '007', $data{$type}{'007'} );
 		#print "inserted new 007\n".$z07->data()."\n";
 		$marcob->insert_fields_ordered($z07);
 	}
 	my $xmlresult = convertMARCtoXML($marcob);
-	$xmlresult = fingerprintScriptMARC($xmlresult,'D V D');
+	$xmlresult = fingerprintScriptMARC($xmlresult,$data{$type}{'tag'});
 	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
-	updateMARC($xmlresult,$bibid,'false','Correcting for DVD in the leader/007 rem 008_23');
+	updateMARC($xmlresult,$bibid,'false','Correcting for '.$data{$type}{'log'}.' in the leader/007 rem 008_23');
 }
 
-sub updateMARCSetBluray
-{	
-	my $bibid = @_[0];	
+sub determineWhichMusicFormat
+{
+	my $bibid = @_[0];
 	my $marc = @_[1];
+
+    # Stay Orderly for logs
+    my @formatOrder = ('cdmusic','phonomusic','casmusic','music');
+    my %formatDetermineMatrix = 
+    (
+        'cdmusic' =>
+        {
+            'score' => 0,
+            'phrases' => ['cd'],
+            'autowin' => 0,
+            'default' => 0
+        },
+        'phonomusic' =>
+        {
+            'score' => 0,
+            'phrases' => ['33 1/3 rpm','phono'],
+            'autowin' => 1,  ## If these phrases are found in the marc - then it can be no other format
+            'default' => 0
+        },
+        'casmusic' =>
+        {
+            'score' => 0,
+            'phrases' => ['cass','4 3/4 in'],
+            'autowin' => 0,
+            'default' => 0
+        },
+        'music' =>  ## This is default - if all scores are a tie or are 0
+        {
+            'score' => 0,
+            'phrases' => [],
+            'autowin' => 0,
+            'default' => 1
+        }
+    );
+    my $query = "select circ_mods,copy_locations,call_labels from seekdestroy.bib_score where record=$bibid";
+	my @results = @{$dbHandler->query($query)};
+	my $marcob = $marc;
+	$marcob =~ s/(<leader>.........)./${1}a/;
+	$marcob = MARC::Record->new_from_xml($marcob);
+    my $autowin = 0;
+	my $flatmarc = $marcob->as_formatted;
+	foreach(@results)
+	{
+        my $row = $_;
+        my @row = @{$row};
+        my $score=@row[0].@row[1].@row[2].$flatmarc;
+
+        while ((my $format, my $array) = each(%formatDetermineMatrix))
+        {
+            my %array = %{$array};
+            foreach(@{$array{'phrases'}})
+            {
+                my $phrase = $_;
+                my @sp = split(lc($phrase), lc($score));
+                $formatDetermineMatrix{$format}{'score'} += $#sp;
+                $autowin = $format if($formatDetermineMatrix{$format}{'autowin'} && $#sp > 0);
+            }
+        }
+	}
+    my $logentry = "music score bib $bibid : ";
+    $logentry .= $_ . " " . $formatDetermineMatrix{$_}{'score'}.", " foreach(@formatOrder);
+    $log->addLine($logentry);
+    my $winningScore = 0;
+    my $winningFormat = '';
+    my $default = 0;
+    while ((my $format, my %array) = each(%formatDetermineMatrix))
+    {
+        if($formatDetermineMatrix{$format}{'score'} > $winningScore)
+        {
+            $winningScore = $formatDetermineMatrix{$format}{'score'};
+            $winningFormat = $format;
+            $default = 0; # just in case the last loop set this and now we have a new winner
+        }
+        elsif($formatDetermineMatrix{$format}{'score'} == $winningScore && $winningScore != 0)
+        {
+            # Condition: tie - defaulting to 'music'
+            # autowin beats this though
+            $default = 'music';
+        }
+    }
+    $winningFormat = $default if($default);
+	$winningFormat = $autowin if($autowin);
+    $log->addLine("Choosing $winningFormat for $bibid");
+	updateMARCSetMusicFormat($bibid,$marc,$winningFormat);
+}
+
+sub updateMARCSetMusicFormat
+{	
+	my $bibid = @_[0];
+	my $marc = @_[1];
+    my $type = @_[2];
+
+    my %data = 
+    (
+        'cdmusic' =>
+        {
+            'letter' => 'f',
+            'tag' => 'C D M U S I C',
+            '007' => 'sd fungnn|||eu',
+            'log' => 'CDMusic'
+        },
+        'phonomusic' =>
+        {
+            'letter' => 'b',
+            'tag' => 'P H O N O M U S I C',
+            '007' => 'sd bumennmpluu',
+            'log' => 'Phonomusic'
+        },
+        'casmusic' =>
+        {
+            'letter' => 'l',
+            'tag' => 'C A S S E T T E M U S I C',
+            '007' => 'ss lunjlcmpnce',
+            'log' => 'CassetteMusic'
+        },
+        'default' =>
+        {
+            'letter' => '',
+            'tag' => 'M U S I C',
+            '007' => '',
+            'log' => 'Generic Music'
+        }
+    );
+    $type = 'default' if !$data{$type}; # Default is DVD if type isn't in the array
 	$marc = setMARCForm($marc,' ');
 	my $marcob = $marc;
 	$marcob =~ s/(<leader>.........)./${1}a/;
@@ -1100,80 +1269,38 @@ sub updateMARCSetBluray
 	my $altered=0;
 	foreach(@{$marcr{tag007}})
 	{		
-		if(substr($_->data(),0,1) eq 'v')
+		if(substr($_->data(),0,1) eq 's')
 		{
 			my $z07 = $_;
 			$marcob->delete_field($z07);
-			#print $z07->data()."\n";
-			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'v',1);
-			$replacement=$mobUtil->insertDataIntoColumn($replacement,'s',5);
-			#print "$replacement\n";			
-			$z07->update($replacement);
-			$marcob->insert_fields_ordered($z07);
+            if(length($data{$type}{'letter'}) ==1)
+            {
+                #print $z07->data()."\n";
+                $replacement=$mobUtil->insertDataIntoColumn($z07->data(),'s',1);
+                $replacement=$mobUtil->insertDataIntoColumn($replacement,$data{$type}{'letter'},4);
+                #print "$replacement\n";			
+                $z07->update($replacement);
+                $marcob->insert_fields_ordered($z07);
+            }
 			$altered=1;
 		}
-		elsif(substr($_->data(),0,1) eq 's')
+		elsif(substr($_->data(),0,1) eq 'v')
 		{
 			my $z07 = $_;
 			$marcob->delete_field($z07);
 			#print "removed video 007\n";
 		}
 	}
-	if(!$altered)
+	if(!$altered && length($data{$type}{'007'}) > 0)
 	{
-		my $z07 = MARC::Field->new( '007', 'vd csaizq' );
+		my $z07 = MARC::Field->new( '007', $data{$type}{'007'} );
 		#print "inserted new 007\n".$z07->data()."\n";
 		$marcob->insert_fields_ordered($z07);
 	}
 	my $xmlresult = convertMARCtoXML($marcob);
-	$xmlresult = fingerprintScriptMARC($xmlresult,'B L U R A Y');
-	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
-	updateMARC($xmlresult,$bibid,'false','Correcting for Bluray in the leader/007 rem 008_23');
-}
-
-sub updateMARCSetVHS
-{	
-	my $bibid = @_[0];	
-	my $marc = @_[1];
-	$marc = setMARCForm($marc,' ');
-	my $marcob = $marc;
-	$marcob =~ s/(<leader>.........)./${1}a/;
-	$marcob = MARC::Record->new_from_xml($marcob);
-	my $marcr = populate_marc($marcob);	
-	my %marcr = %{normalize_marc($marcr)};    
-	my $replacement;
-	my $altered=0;
-	foreach(@{$marcr{tag007}})
-	{		
-		if(substr($_->data(),0,1) eq 'v')
-		{
-			my $z07 = $_;
-			$marcob->delete_field($z07);
-			#print $z07->data()."\n";
-			$replacement=$mobUtil->insertDataIntoColumn($z07->data(),'v',1);
-			$replacement=$mobUtil->insertDataIntoColumn($replacement,'b',5);
-			#print "$replacement\n";			
-			$z07->update($replacement);
-			$marcob->insert_fields_ordered($z07);
-			$altered=1;
-		}
-		elsif(substr($_->data(),0,1) eq 's')
-		{
-			my $z07 = $_;
-			$marcob->delete_field($z07);
-			#print "removed video 007\n";
-		}
-	}
-	if(!$altered)
-	{
-		my $z07 = MARC::Field->new( '007', 'vf cbahou' );
-		#print "inserted new 007\n".$z07->data()."\n";
-		$marcob->insert_fields_ordered($z07);
-	}
-	my $xmlresult = convertMARCtoXML($marcob);
-	$xmlresult = fingerprintScriptMARC($xmlresult,'V H S');
-	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'g');
-	updateMARC($xmlresult,$bibid,'false','Correcting for VHS in the leader/007 rem 008_23');
+	$xmlresult = fingerprintScriptMARC($xmlresult,$data{$type}{'tag'});
+	$xmlresult = updateMARCSetSpecifiedLeaderByte($bibid,$xmlresult,7,'j');
+	updateMARC($xmlresult,$bibid,'false','Correcting for '.$data{$type}{'log'}.' in the leader/007 rem 008_23');
 }
 
 sub updateMARCSetLargePrint
@@ -1372,7 +1499,7 @@ sub findInvalidMusicMARC
 	my @additionalSearchQueries = ($queries{"music_additional_search"});
 	my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
 	my $subQueryNotConvert =  $queries{"non_music_bib_not_convert_to_music"};
-	my $convertFunction = "updateMARCSetMusic(\$id,\$marc);";
+	my $convertFunction = "determineWhichMusicFormat(\$id,\$marc);";
 	#combine both lists for gathering up bib canidates
 	my @music = (@musicSearchPhrases, @musicSearchPhrasesAddition);
 	findInvalidMARC(
@@ -1400,25 +1527,27 @@ sub findInvalidMARC
 	
 	
 	my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
-	updateJob("Processing","findInvalidMARC  $query");
-	$dbHandler->update($query);
-	foreach(@marcSearchPhrases)
-	{
-		my $phrase = lc$_;
-		my $query = $phraseQuery;
-		$query =~ s/\$phrase/$phrase/g;
-		$query =~ s/\$problemphrase/$problemPhrase/g;
-		updateJob("Processing","findInvalidMARC  $query");
-		updateProblemBibs($query,$problemPhrase,$typeName);
+    if(!$doNotRunFullReEval)  # This can take DAYS to finish on large datasets - hence the switch.
+    {
+        updateJob("Processing","findInvalidMARC  $query");
+        $dbHandler->update($query);
+        foreach(@marcSearchPhrases)
+        {
+            my $phrase = lc$_;
+            my $query = $phraseQuery;
+            $query =~ s/\$phrase/$phrase/g;
+            $query =~ s/\$problemphrase/$problemPhrase/g;
+            updateJob("Processing","findInvalidMARC  $query");
+            updateProblemBibs($query,$problemPhrase,$typeName);
+        }
+        foreach(@additionalSearchQueries)
+        {
+            my $query = $_;				
+            $query =~ s/\$problemphrase/$problemPhrase/g;
+            updateJob("Processing","findInvalidMARC  $query");
+            updateProblemBibs($query,$problemPhrase,$typeName);
+        }
 	}
-	foreach(@additionalSearchQueries)
-	{
-		my $query = $_;				
-		$query =~ s/\$problemphrase/$problemPhrase/g;
-		updateJob("Processing","findInvalidMARC  $query");
-		updateProblemBibs($query,$problemPhrase,$typeName);
-	}
-	
 	# Now that we have digested the possibilities - 
 	# Lets weed them out into bibs that we want to convert	
 	my $output='';
