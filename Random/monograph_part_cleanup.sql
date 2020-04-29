@@ -1604,7 +1604,7 @@ label~*'^\s?9\d{2}[\\/\s\:\-\.]+\d{1,2}[\\/\s\.\-]+9\d{2}[\\/\s\:\-\.]+\d{1,2}[\
 
 union all
 
--- "1923/YY" where YY < 12 and subtraction between the two years is less than 15
+-- "1923/YY" where YY <= 12 and subtraction between the two years is less than 15
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1\2-\1\3','gi')
 from 
@@ -1623,7 +1623,7 @@ regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+\d{2}[\s\.\-]?$','\1\2'
 
 union all
 
--- "1923/YY" where YY < 12 and subtraction between the two years is less than 5
+-- "1923/YY" where YY <= 12 and subtraction between the two years is less than 5
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1\2-\1\3','gi')
 from 
@@ -1642,7 +1642,7 @@ regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+\d{2}[\s\.\-]?$','\1\2'
  
 union all
 
--- "1923/YY" where YY < 12 and subtraction between the two years is > 4  (it's a month)
+-- "1923/YY" where YY <= 12 and subtraction between the two years is > 4  (it's a month)
 select
 label,to_char(to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
 from 
@@ -1668,7 +1668,7 @@ regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+\d{2}[\s\.\-]?$','\1\2'
  
 union all
 
--- "1923/YY" where YY < 12 and subtraction between the two years is > 15  (it's a month)
+-- "1923/YY" where YY <= 12 and subtraction between the two years is > 15  (it's a month)
 select
 label,to_char(to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
 from 
@@ -1676,7 +1676,7 @@ biblio.monograph_part
 where 
 label~*'^\s?\(?\d{4}[\\/\s\:\-\.]+\d{2}[\s\.\-]?$'
 and
-regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+\d{2}[\s\.\-]?$','\1','gi')::numeric < 1990  --- year needs to be greater than 1989
+regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+\d{2}[\s\.\-]?$','\1','gi')::numeric < 1990  --- year needs to be less than 1989
 and
 regexp_replace(label,'^\s?\(?\d{4}[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1','gi')::numeric between 1 and 12  --- Looks like a month number
 and
