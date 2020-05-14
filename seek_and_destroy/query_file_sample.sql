@@ -1,7 +1,7 @@
 #
 # ~~ is the equal sign! (because there are equal signs in the queries we cant delimit by that)
 # Be sure and end your queries with a semicolon ";"#
-#   
+#
 
 
 # Program Queries
@@ -16,7 +16,7 @@ and id in
 (
 select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
 )
-and 
+and
 (
     marc ~ $$tag="008">.......................[oqs]$$
     or
@@ -39,8 +39,8 @@ electronic_audiobook_with_physical_items_attached~~select id from biblio.record_
 and id in
 (
 select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-)   
-and 
+)
+and
 (
     marc ~ $$tag="008">.......................[oqs]$$
     or
@@ -52,13 +52,13 @@ and
 );
 
 
-# 
+#
 # Electronic Bibs convert automatically
 #
 non_electronic_bib_convert_to_electronic~~
 select record
- from seekdestroy.bib_score sbs where 
- winning_score=$$electricScore$$ 
+ from seekdestroy.bib_score sbs where
+ winning_score=$$electricScore$$
  and
  opac_icon !=$$eaudio$$
  and
@@ -69,17 +69,17 @@ select record
  winning_score_score>6
  and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
  ;
- 
-# 
+
+#
 # Electronic Need Humans
 #
 non_electronic_bib_not_convert_to_electronic~~
 select record
- from seekdestroy.bib_score sbs where 
+ from seekdestroy.bib_score sbs where
  record not in(
  select record
- from seekdestroy.bib_score sbs where 
- winning_score=$$electricScore$$ 
+ from seekdestroy.bib_score sbs where
+ winning_score=$$electricScore$$
  and
  opac_icon !=$$eaudio$$
  and
@@ -91,7 +91,7 @@ select record
  and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
  )
  and
- winning_score~$$electricScore$$ 
+ winning_score~$$electricScore$$
  and
  winning_score_score<7
  and
@@ -104,23 +104,23 @@ select record
  opac_icon !=$$ebook$$
  and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 ;
- 
- 
+
+
 #   non_audiobook_bib_convert_to_audiobook
 #----------------------------------------------
 # This query should result in all of the bib records that you want to convert to Audio books
-# The conversion means: 
+# The conversion means:
 # Item Form (008_24, 006_7) will be set to blank " " if its not already
 # 007_4 to "f"
 # Any 007s that start with "v" will be removed
 # Bibs without 007s will have one created
 
 non_audiobook_bib_convert_to_audiobook~~select record
- from seekdestroy.bib_score sbs where 
+ from seekdestroy.bib_score sbs where
 
- winning_score=$$audioBookScore$$ 
-and 
-electronic=0   
+ winning_score=$$audioBookScore$$
+and
+electronic=0
 and record not in(select record from seekdestroy.bib_score where winning_score_score>1 and winning_score_distance<2)
 and record not in(select record from seekdestroy.bib_score where opac_icon=$$phonospoken$$ and (second_place_score is null or second_place_score=$$$$) and (circ_mods ~$$^BOOK$$ or circ_mods ~*$$,BOOK$$))
 and record not in(select record from seekdestroy.bib_score where circ_mods = $$BOOK$$ and opac_icon = $$book$$)
@@ -138,16 +138,16 @@ and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$probl
 ;
 
 #
-# Audiobook NEEDS HUMANS 
+# Audiobook NEEDS HUMANS
 #
 non_audiobook_bib_not_convert_to_audiobook~~select record from seekdestroy.bib_score sbs where record not in
 (
 select record
- from seekdestroy.bib_score sbs where 
+ from seekdestroy.bib_score sbs where
 
- winning_score=$$audioBookScore$$ 
-and 
-electronic=0   
+ winning_score=$$audioBookScore$$
+and
+electronic=0
 and record not in(select record from seekdestroy.bib_score where winning_score_score>1 and winning_score_distance<2)
 and record not in(select record from seekdestroy.bib_score where opac_icon=$$phonospoken$$ and (second_place_score is null or second_place_score=$$$$) and (circ_mods ~$$^BOOK$$ or circ_mods ~*$$,BOOK$$))
 and record not in(select record from seekdestroy.bib_score where circ_mods = $$BOOK$$ and opac_icon = $$book$$)
@@ -176,7 +176,7 @@ and record not in(select record from seekdestroy.bib_score where opac_icon ~ $$p
 # Find items that are problably audio related but not attached to audio related bibs
 # This is used exclusivly for findItemsCircedAsAudioBooksButAttachedNonAudioBib
 #
-findItemsCircedAsAudioBooksButAttachedNonAudioBib~~select bre.id,bre.marc,string_agg(ac.barcode,$$,$$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where 
+findItemsCircedAsAudioBooksButAttachedNonAudioBib~~select bre.id,bre.marc,string_agg(ac.barcode,$$,$$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where
 acl.id=ac.location and
 bre.id=acn.record and
 acn.id=ac.call_number and
@@ -198,7 +198,7 @@ or
     lower(acl.name) ~* $$mus$$ or
     lower(acl.name) ~* $$ cd$$ or
     lower(acl.name) ~* $$^cd$$ or
-    lower(acl.name) ~* $$disk$$ 
+    lower(acl.name) ~* $$disk$$
 )
 and
 ac.circ_modifier in ( $$AudioBooks$$,$$CD$$ ) and
@@ -224,7 +224,7 @@ group by bre.id,bre.marc;
 # Find items that are problably not audio related but are attached to audio related bibs
 # This is used exclusivly for findItemsNotCircedAsAudioBooksButAttachedAudioBib
 #
-findItemsNotCircedAsAudioBooksButAttachedAudioBib~~select bre.id,bre.marc,string_agg(ac.barcode,$$,$$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where 
+findItemsNotCircedAsAudioBooksButAttachedAudioBib~~select bre.id,bre.marc,string_agg(ac.barcode,$$,$$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn, asset.copy_location acl where
 bre.marc ~ $$<leader>......i$$ and
 acl.id=ac.location and
 bre.id=acn.record and
@@ -250,10 +250,10 @@ and
     lower(acl.name) !~* $$mus$$ and
     lower(acl.name) !~* $$ cd$$ and
     lower(acl.name) !~* $$^cd$$ and
-    lower(acl.name) !~* $$disk$$ 
+    lower(acl.name) !~* $$disk$$
 )
 and
-ac.circ_modifier not in ( $$AudioBooks$$,$$CD$$ ) 
+ac.circ_modifier not in ( $$AudioBooks$$,$$CD$$ )
 group by bre.id,bre.marc;
 
 
@@ -262,46 +262,46 @@ group by bre.id,bre.marc;
 # DVD Bibs convert automatically
 #
 non_dvd_bib_convert_to_dvd~~select record
- from seekdestroy.bib_score sbs where 
+ from seekdestroy.bib_score sbs where
 
- winning_score~$$video_score$$ 
- and 
+ winning_score~$$video_score$$
+ and
 electronic=0
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
- and 
+ and
  (
-    not (winning_score_score>1 and winning_score_distance<2) 
+    not (winning_score_score>1 and winning_score_distance<2)
  )
 and record not in
 (
-    select record from seekdestroy.bib_score where  
+    select record from seekdestroy.bib_score where
     opac_icon = $$kit$$
 )
 and record not in
 (
-    select record from seekdestroy.bib_score where  
+    select record from seekdestroy.bib_score where
     opac_icon = $$map$$
 )
 and record not in
 (
-    select record from seekdestroy.bib_score where 
+    select record from seekdestroy.bib_score where
      circ_mods!~$$VIDEO$$
 )
 and record not in
 (
-    select record from seekdestroy.bib_score where 
+    select record from seekdestroy.bib_score where
     (
      circ_mods~$$EQUIPMENT$$ or
      circ_mods~$$PLAYAWAY$$ or
      circ_mods~$$TECHNOLOGY$$ or
      circ_mods~$$SOFTWARE$$
-     ) and winning_score_score=1     
+     ) and winning_score_score=1
      and
      opac_icon~$$software$$
 )
 and record not in
 (
-     select record from seekdestroy.bib_score where 
+     select record from seekdestroy.bib_score where
      (
      circ_mods~$$MAGAZINE$$ or
      circ_mods~$$PERIODICAL$$ or
@@ -311,12 +311,12 @@ and record not in
      opac_icon~$$serial$$
 )
 and record not in
-(    
+(
 select record from seekdestroy.bib_score where (opac_icon=$$book$$ or opac_icon~$$serial$$) and not (circ_mods~$$VIDEO$$ or circ_mods~$$MUSIC$$) and winning_score_score=1
 )
 and record not in
-(    
-    select record from seekdestroy.bib_score where 
+(
+    select record from seekdestroy.bib_score where
      not
      (circ_mods~$$VIDEO$$ or circ_mods~$$TECHNOLOGY$$ or circ_mods~$$PLAYAWAY$$)
      and
@@ -336,47 +336,47 @@ and winning_score_distance>0
 non_dvd_bib_not_convert_to_dvd~~select record from seekdestroy.bib_score where record not in
 (
 select record
- from seekdestroy.bib_score sbs where 
+ from seekdestroy.bib_score sbs where
 
- winning_score~$$video_score$$ 
- and 
+ winning_score~$$video_score$$
+ and
 electronic=0
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
- and 
+ and
  (
-    not (winning_score_score>1 and winning_score_distance<2) 
+    not (winning_score_score>1 and winning_score_distance<2)
  )
 and record not in
 (
-    select record from seekdestroy.bib_score where  
+    select record from seekdestroy.bib_score where
     opac_icon = $$kit$$
 )
 and record not in
 (
-    select record from seekdestroy.bib_score where  
+    select record from seekdestroy.bib_score where
     opac_icon = $$map$$
 )
 and record not in
 (
-    select record from seekdestroy.bib_score where 
+    select record from seekdestroy.bib_score where
      circ_mods!~$$VIDEO$$
 )
 and record not in
 (
-    select record from seekdestroy.bib_score where 
+    select record from seekdestroy.bib_score where
     (
      circ_mods~$$EQUIPMENT$$ or
      circ_mods~$$PLAYAWAY$$ or
      circ_mods~$$TECHNOLOGY$$ or
      circ_mods~$$GAME$$ or
      circ_mods~$$SOFTWARE$$
-     ) and winning_score_score=1     
+     ) and winning_score_score=1
      and
      opac_icon~$$software$$
 )
 and record not in
 (
-     select record from seekdestroy.bib_score where 
+     select record from seekdestroy.bib_score where
      (
      circ_mods~$$MAGAZINE$$ or
      circ_mods~$$PERIODICAL$$ or
@@ -386,12 +386,12 @@ and record not in
      opac_icon~$$serial$$
 )
 and record not in
-(    
+(
 select record from seekdestroy.bib_score where (opac_icon=$$book$$ or opac_icon~$$serial$$) and not (circ_mods~$$VIDEO$$ or circ_mods~$$MUSIC$$) and winning_score_score=1
 )
 and record not in
-(    
-    select record from seekdestroy.bib_score where 
+(
+    select record from seekdestroy.bib_score where
      not
      (circ_mods~$$VIDEO$$ or circ_mods~$$TECHNOLOGY$$ or circ_mods~$$PLAYAWAY$$)
      and
@@ -406,7 +406,7 @@ and not winning_score~$$audioBookScore$$
 and winning_score_score!=0
 and winning_score_distance>0
 )
-and winning_score~$$video_score$$ 
+and winning_score~$$video_score$$
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 and winning_score_score!=0
 and winning_score_distance!=0
@@ -432,9 +432,9 @@ select record
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VIDEO$$)
  and record not in ( select record from seekdestroy.bib_score  where opac_icon~$$ebook$$)
  and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$  and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score=1)
- and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ ) 
+ and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
  ;
- 
+
 #
 # Large Print NEEDS HUMANS
 #
@@ -457,7 +457,7 @@ select record
  and record not in ( select record from seekdestroy.bib_score  where circ_mods~$$VIDEO$$)
  and record not in ( select record from seekdestroy.bib_score  where opac_icon~$$ebook$$)
  and record not in ( select record from seekdestroy.bib_score  where lower(call_labels)!~$$lp$$ and lower(call_labels)!~$$large$$ and lower(copy_locations)!~$$large$$ and lower(copy_locations)!~$$lp$$ and lower(call_labels)!~$$lg$$ and lower(copy_locations)!~$$lg$$ and lower(call_labels)!~$$sight$$  and btrim(copy_locations)!=$$$$ and btrim(call_labels)!=$$$$ and winning_score_score=1)
- and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ ) 
+ and record not in ( select record from seekdestroy.bib_score sbs2  where (select deleted from biblio.record_entry where id= sbs2.record)=$$t$$ and second_place_score !=$$$$ )
  )
  and winning_score ~ $$largeprint_score$$
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
@@ -479,7 +479,7 @@ select record
  and winning_score = $$music_score$$
  and winning_score_score!=0
  ;
- 
+
 #
 # Music NEEDS HUMANS
 #
@@ -508,8 +508,8 @@ select record
 and record in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$)
 and winning_score_score>2
 ;
- 
- 
+
+
 # Program Queries - Format search phrase
 ##########################################################
 
@@ -519,15 +519,15 @@ and winning_score_score>2
 # Electronic Bibs search phrases
 #
 
-electronic_search_phrase~~select id,marc from biblio.record_entry where     
+electronic_search_phrase~~select id,marc from biblio.record_entry where
     not
     (
         (
         marc ~ $$tag="008">.......................[oqs]$$ or
         marc ~ $$tag="006">......[oqs]$$
         )
-        and 
-        marc ~ $$<leader>.......p$$ 
+        and
+        marc ~ $$<leader>.......p$$
     )
     AND
     lower(marc) ~* $$$phrase$$
@@ -541,8 +541,8 @@ electronic_search_phrase~~select id,marc from biblio.record_entry where
 # Additional Electronic search - Find MARC that has 856 indicator2=0 and is not cataloged as electronic
 #
 
-electronic_additional_search~~select id,marc from biblio.record_entry where 
-    id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND  
+electronic_additional_search~~select id,marc from biblio.record_entry where
+    id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND
     marc ~ $$<leader>......[at]$$
     and
     not
@@ -551,8 +551,8 @@ electronic_additional_search~~select id,marc from biblio.record_entry where
         marc ~ $$tag="008">.......................[oqs]$$ or
         marc ~ $$tag="006">......[oqs]$$
         )
-        and 
-        marc ~ $$<leader>.......p$$ 
+        and
+        marc ~ $$<leader>.......p$$
     )
     and
     id not in
@@ -566,7 +566,7 @@ electronic_additional_search~~select id,marc from biblio.record_entry where
 # Audiobook Bibs search phrases
 #
 
-audiobook_search_phrase~~select id,marc from biblio.record_entry where      
+audiobook_search_phrase~~select id,marc from biblio.record_entry where
     (
     marc !~ $$tag="007">s..[fl]$$
     OR
@@ -580,30 +580,30 @@ audiobook_search_phrase~~select id,marc from biblio.record_entry where
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     );
 
-audiobook_additional_search~~select id,marc from biblio.record_entry where      
+audiobook_additional_search~~select id,marc from biblio.record_entry where
     (
     marc !~ $$tag="007">s..[fl]$$
     OR
     marc !~ $$<leader>......[i]$$
     )
-    AND 
+    AND
     id not in
     (
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     )
-    AND 
+    AND
     id in
     ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$AudioBooks$$))
     ;
 
-    
+
 #
 # DVD/video search phrases
 #
 
-dvd_search_phrase~~select id,marc from biblio.record_entry where        
+dvd_search_phrase~~select id,marc from biblio.record_entry where
     (
-        marc !~ $$tag="007">v...[vbs]$$             
+        marc !~ $$tag="007">v...[vbs]$$
     )
     AND
     lower(marc) ~* $$$phrase$$
@@ -612,28 +612,28 @@ dvd_search_phrase~~select id,marc from biblio.record_entry where
     (
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     );
-    
-dvd_additional_search~~select id,marc from biblio.record_entry where        
+
+dvd_additional_search~~select id,marc from biblio.record_entry where
     (
-    marc !~ $$tag="007">v...[vbs]$$ 
+    marc !~ $$tag="007">v...[vbs]$$
     )
-    AND 
+    AND
     id not in
     (
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     )
-    AND 
+    AND
     id in
     ( select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier in($$VIDEO$$)))
     ;
- 
- 
- 
+
+
+
 #
 # Large Print search phrases
 #
 
-largeprint_search_phrase~~select id,marc from biblio.record_entry where 
+largeprint_search_phrase~~select id,marc from biblio.record_entry where
     (
         marc !~ $$<leader>......[atd]$$
     OR
@@ -652,13 +652,13 @@ largeprint_search_phrase~~select id,marc from biblio.record_entry where
     (
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     );
-    
-    
+
+
 #
 # Music search phrases
 #
 
-music_search_phrase~~select id,marc from biblio.record_entry where      
+music_search_phrase~~select id,marc from biblio.record_entry where
     (
     marc !~ $$tag="007">s..[lf]$$
     OR
@@ -669,7 +669,7 @@ music_search_phrase~~select id,marc from biblio.record_entry where
     AND
     lower(marc) !~* $$non music$$
     AND
-    lower(marc) !~* $$non-music$$   
+    lower(marc) !~* $$non-music$$
     AND
     lower(marc) !~* $$talking books$$
     AND
@@ -679,20 +679,20 @@ music_search_phrase~~select id,marc from biblio.record_entry where
     (
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     );
-    
-    
-music_additional_search~~select id,marc from biblio.record_entry where      
+
+
+music_additional_search~~select id,marc from biblio.record_entry where
     (
     marc !~ $$tag="007">s..[lf]$$
     OR
     marc !~ $$<leader>......[j]$$
     )
-    AND 
+    AND
     id not in
     (
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     )
-    AND 
+    AND
     id in
     (
     select record from asset.call_number where id in(select call_number from asset.copy where circ_modifier=$$MUSIC$$)
@@ -700,8 +700,8 @@ music_additional_search~~select id,marc from biblio.record_entry where
     ;
 
 
-############################################################################################# 
-#REPORT QUERIES 
+#############################################################################################
+#REPORT QUERIES
 #
 
 
@@ -710,8 +710,8 @@ music_additional_search~~select id,marc from biblio.record_entry where
 #
 
 possible_electronic~~select record
- from seekdestroy.bib_score sbs where 
-electronic>0 
+ from seekdestroy.bib_score sbs where
+electronic>0
 and not opac_icon ~ $$eaudio$$
 and not opac_icon ~ $$ebook$$
 and not opac_icon ~ $$evideo$$
@@ -723,7 +723,7 @@ winning_score~$$electricScore$$;
 # Find items that show signs of being large print but are attached to non large print bibs
 #
  large_print_items_on_non_large_print_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -752,7 +752,7 @@ BRE.ID > 0;
 # Find Items that do not show signs of being large print but are attached to large print bibs
 #
 non_large_print_items_on_large_print_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -779,7 +779,7 @@ BRE.ID > 0;
 # Find DVD MISMATCHES
 #
 questionable_dvd_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -808,7 +808,7 @@ BRE.ID IN
 )
 UNION
 select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -848,7 +848,7 @@ order by 1;
 # Find VHS mismatches
 #
 questionable_vhs_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -871,10 +871,10 @@ BRE.ID IN
     WHERE A."FORMAT"!~$$vhs$$
     UNION
     SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-) 
+)
 UNION
 select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -912,7 +912,7 @@ order by 1;
 # Find Questionable video format mismatches
 #
 questionable_video_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -937,10 +937,10 @@ BRE.ID IN
     WHERE A."FORMAT"!~$$dvd$$ AND A."FORMAT"!~$$vhs$$ AND A."FORMAT"!~$$blu$$
     UNION
     SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-) 
+)
 UNION
 select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -977,14 +977,14 @@ BRE.ID IN
     WHERE A."FORMAT"~$$dvd$$ or A."FORMAT"~$$blu$$ or A."FORMAT"~$$vhs$$
 )
 order by 1;
- 
- 
- 
+
+
+
 #
 # Find Questionable music format mismatches
 #
 questionable_music_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -1009,10 +1009,10 @@ BRE.ID IN
     WHERE A."FORMAT"!~$$music$$
     UNION
     SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-) 
+)
 UNION
 select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -1027,7 +1027,7 @@ BRE.ID>0 AND
     lower(acn.label) !~* $$readalong$$ and
     lower(acn.label) !~* $$singalong$$ and
     lower(acn.label) !~* $$classical$$
-    
+
 )
 and
 (
@@ -1049,7 +1049,7 @@ BRE.ID IN
     WHERE A."FORMAT"~$$music$$
 )
 order by 1;
- 
+
 #
 # Find Items that are probably* NOT AUDIOBOOK but are attached to Audiobook bibs
 # and (union)
@@ -1058,7 +1058,7 @@ order by 1;
 # cameron positive audiobooks
 # ACD AND CAS
 questionable_audiobook_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -1085,7 +1085,7 @@ or
     lower(acl.name) ~* $$ cd$$ or
     lower(acl.name) ~* $$^cd$$ or
     lower(acl.name) ~* $$disk$$ or
-    acl.name ~* $$ACD$$ 
+    acl.name ~* $$ACD$$
 )
 and
 ac.circ_modifier in ( $$AUDIOBOOK$$ ) and
@@ -1108,7 +1108,7 @@ UNION
 select a.id,a.barcode,a.label,a.icon,a.name from
 (
 select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) as "icon",AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -1138,7 +1138,7 @@ and
     lower(acl.name) !~* $$ cd$$ and
     lower(acl.name) !~* $$^cd$$ and
     lower(acl.name) !~* $$disk$$ and
-    acl.name !~* $$ACD$$ 
+    acl.name !~* $$ACD$$
 )
 and ac.circ_modifier not in ( $$AUDIOBOOK$$ )
 ) as a
@@ -1148,7 +1148,7 @@ order by ID;
 # Find Items that are attached to deleted bibs
 #
  items_attached_to_deleted_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -1161,7 +1161,7 @@ NOT AC.DELETED;
 # Find Items that are attached to Electronic bibs
 #
 electronic_book_with_physical_items_attached_for_report~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where 
+from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
 AOU.ID=AC.CIRC_LIB AND
 BRE.ID=ACN.RECORD AND
 ACN.ID=AC.CALL_NUMBER AND
@@ -1174,7 +1174,7 @@ BRE.id in
 (
 select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
 )
-and 
+and
 (
     BRE.marc ~ $$tag="008">.......................[oqs]$$
     or
