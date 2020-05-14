@@ -38,7 +38,7 @@ where
 label~*'^\(?v[^\.\s,]*[\.\s,]+[^\.\s,\)]+[\)\.\s]?$'
 and
 (
-label~*'^\(?v\.'
+label~*'^\(?v[\s\.]'
 or
 label~*'^\(?vol\.'
 or
