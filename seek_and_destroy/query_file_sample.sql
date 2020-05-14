@@ -520,11 +520,15 @@ and winning_score_score>2
 #
 
 electronic_search_phrase~~select id,marc from biblio.record_entry where     
-    marc !~ $$tag="008">.......................[oqs]$$
-    and
-    marc !~ $$tag="006">......[oqs]$$
-    and
-    marc !~ $$<leader>.......p$$
+    not
+    (
+        (
+        marc ~ $$tag="008">.......................[oqs]$$ or
+        marc ~ $$tag="006">......[oqs]$$
+        )
+        and 
+        marc ~ $$<leader>.......p$$ 
+    )
     AND
     lower(marc) ~* $$$phrase$$
     and
@@ -541,11 +545,15 @@ electronic_additional_search~~select id,marc from biblio.record_entry where
     id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND  
     marc ~ $$<leader>......[at]$$
     and
-    marc !~ $$tag="008">.......................[oqs]$$
-    and
-    marc !~ $$tag="006">......[oqs]$$
-    and
-    marc !~ $$<leader>.......p$$
+    not
+    (
+        (
+        marc ~ $$tag="008">.......................[oqs]$$ or
+        marc ~ $$tag="006">......[oqs]$$
+        )
+        and 
+        marc ~ $$<leader>.......p$$ 
+    )
     and
     id not in
     (
