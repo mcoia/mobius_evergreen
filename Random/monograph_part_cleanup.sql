@@ -213,6 +213,8 @@ label~*'^d\.\s*\d*$'
 or
 label~*'^dis[^\s]*\s*?\d*$'
 )
+and
+label!~*'season'
 
 union all
 
@@ -233,6 +235,8 @@ and
 (
 label~*'^dis[csk]*[^\d]*\d*\-+[^\dd*]'
 )
+and
+label!~*'season'
 
 
 union all
@@ -250,6 +254,8 @@ and
 (
 label~*'^dis[csk]*[^\d]*\d+[\-&\s]+\d+.*$'
 )
+and
+label!~*'season'
 
 union all
 
@@ -266,6 +272,8 @@ and
 (
 label~*'^dis[csk]*[\-&\s,]*\d*[\-&\s,]*dis[csk]*[\-&\s,]*\d.*$'
 )
+and
+label!~*'season'
 
 union all
 
@@ -278,6 +286,8 @@ where
 label~'\d'
 and
 label~*'^dvd[^\d]*\d*.*$'
+and
+label!~*'season'
 
 union all
 
@@ -290,7 +300,50 @@ where
 label~'\d'
 and
 label~*'^dvd[^\d]*\d*.*$'
+and
+label!~*'season'
 
+union all
+
+-- season X Disc Y
+select
+label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)$','Season \1, Disc \2','gi')
+from 
+biblio.monograph_part
+where 
+btrim(label)~*'^.*?season[^\d]*[\d]+.*?dis[cks]*[^\d]*[\d]+$'
+and
+label!~*'vol'
+and
+label!~*'part'
+
+union all
+
+-- season X Disc Y-Z
+select
+label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)[\s\-&\.,]+(\d+)$','Season \1, Disc \2-\3','gi')
+from 
+biblio.monograph_part
+where 
+btrim(label)~*'^.*?season[^\d]*[\d]+.*?dis[cks]*[^\d]*[\d]+[\s\-&\.,]+\d+$'
+and
+label!~*'vol'
+and
+label!~*'part'
+
+union all
+
+-- season W Disc X-Y-Z -> Season \1, Disc \2-\4'
+select
+label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)[\s\-&\.,]+(\d+)[\s\-&\.,]+(\d+)$','Season \1, Disc \2-\4','gi')
+from 
+biblio.monograph_part
+where 
+btrim(label)~*'^.*?season[^\d]*[\d]+.*?dis[cks]*[^\d]*[\d]+[\s\-&\.,]+\d+[\s\-&\.,]+\d+$'
+and
+label!~*'vol'
+and
+label!~*'part'
 
 union all
 
