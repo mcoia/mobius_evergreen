@@ -74,6 +74,8 @@ if(!$schema)
 		@columns[$i] =~s/\(//g;
 		@columns[$i] =~s/\)//g;
 		@columns[$i] =~s/\*//g;
+        @columns[$i] =~s/\//_/g;
+        @columns[$i] =~s/\-/_/g;
 	}
 	
 	#drop the table
@@ -100,13 +102,18 @@ if(!$schema)
 	{
 		$query.="(";
 		my @thisrow = @{$_};
-		
+		my $colcount = 0;
 		for(@thisrow)
 		{
 			$_ =~ s/\$$/\$ /g;
-			$query.='$$'.$_.'$$,';
+			$query.='$data$'.$_.'$data$,';
+            $colcount++;
 		}
-		
+		while($colcount < ($#columns + 1))
+        {
+            $query.='$$$$,';
+            $colcount++;
+        }
 		$query=substr($query,0,-1)."),\n";
 		$count++;
 		
