@@ -351,30 +351,6 @@ union all
 
 -- Year
 
--- Xth YYYY -> YYYY
-select
-label,regexp_replace(label,'[^\s]*\s*(\d\d\d\d)$','\1','gi')
-from 
-biblio.monograph_part
-where 
-label~'\d{4}'
-and
-label~'^\d'
-and
-label~'\s'
-and
-label!~'[\\/\-\:,]'
-and
-label!~'^no'
-and
-(
-label~*'^[^\s]+[^\d\s]+\s*\d\d\d\d$'
-or
-label~*'^[^\d\s]+[^\s]*\s*\d\d\d\d$'
-)
-
-union all
-
 -- Xth YYYY/YYYY -> YYYY-YYYY
 select
 label,regexp_replace(label,'^\s?\(?\d+[tnrs][hdt].*(\d{4})[\s,\.\\/\-]+(\d{4})\s?$','\1-\2','gi')
@@ -1071,6 +1047,32 @@ union all
 
 
 -- Part Language
+
+-- "pt. 1"
+select
+label,regexp_replace(label,'^[\(\s]?pte?[\.\s,]+([^\\/\.\s,\-]+)[\s\-]*$','Part \1','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?pte?[\.\s,]+[^\\/\.\s,\-]+[\s\-]*$'
+
+union all
+
+-- "pt. X-Y"
+select
+label,regexp_replace(label,'^[\(\s]?pte?[\.\s,]+([^&\\/\s,\-]+)[&\\/\s,\-]+([^&\\/\s,\-]+)[\-\s/\\\.]*$','Part \1-\2','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?pte?[\.\s,]+[^&\\/\s,\-]+[&\\/\s,\-]+[^&\\/\s,\-]+[\-\s/\\\.]*$'
+and
+label!~*'\d{4}'
+and
+label!~*'v\.'
+and
+label!~*'no\.'
+
+union all
 
 -- "pt.1 1972" 
 select
@@ -1770,36 +1772,6 @@ group by 1,2
 
 union all
 
--- "1904s"  (junk at the end of the year)
-select
-label,regexp_replace(label,'^\s?\(?(\d{4})[^\d\s]{1,3}\s?$','\1','gi')
-from 
-biblio.monograph_part
-where 
-label~*'^\s?\(?\d{4}[^\d\s]{1,3}\s?$'
-
-union all
-
--- "1948 FS"
-select
-label,regexp_replace(label,'^\s?\(?(\d{4})[\s\.]+[^\s\.]{2}$','\1','gi')
-from 
-biblio.monograph_part
-where 
-label~*'^\s?\(?\d{4}[\s\.]+[^\s\.]{2}$'
-
-union all
-
--- "2006, v. 7"
-select
-label,regexp_replace(label,'^\s?\(?(\d{4})[\s\.]+[^\s\.]{2}$','\1','gi')
-from 
-biblio.monograph_part
-where 
-label~*'^\s?\(?\d{4}[\s\.]+[^\s\.]{2}$'
-
-union all
-
 -- "1998 (09) Sep"
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\d\(\)]?\(\d+\)\s+([^\s\.\d\\/]{3,5})[\)\s]?$','\1:\2','gi')
@@ -1875,6 +1847,56 @@ label~*'winter' or
 label~*'summer' or
 label~*'spring'
 )
+
+union all
+
+
+
+-- Leftover odds and ends stuff like Bk. sup
+-- bk X
+select
+label,regexp_replace(label,'^[\(\s]?bk?[\.\s]+([^\\/\.\s,\-]+)[\s\-]*$','Book \1','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?bk?[\.\s]+[^\\/\.\s,\-]+[\s\-]*$'
+
+union all
+
+-- sup X
+select
+label,regexp_replace(label,'^[\(\s]?sup?[\.\s]+([^\\/\.\s,\-]+)[\s\-]*$','Suppl. \1','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?sup?[\.\s]+[^\\/\.\s,\-]+[\s\-]*$'
+and
+label!~'\d{4}'
+
+union all
+
+-- sup YYYY
+select
+label,regexp_replace(label,'^[\(\s]?sup?[\.\s]+(\d{4})[\s\-]*$','\1 Suppl.','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?sup?[\.\s]+\d{4}[\s\-]*$'
+and
+label~'\d{4}'
+
+union all
+
+
+-- YYYY sup
+select
+label,regexp_replace(label,'^[\(\s]?(\d{4})[\.\s\|\\/]+sup?[\.\s]+[\s\-]*$','\1 Suppl.','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?\d{4}[\.\s\|\\/]+sup?[\.\s]+[\s\-]*$'
+
+
 )
 as a
 
