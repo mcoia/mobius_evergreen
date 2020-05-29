@@ -1,18 +1,19 @@
 /* 
 create table mymig.monograph_part_conversion
-(bmp bigint,current_val text,new_val text ,new_id bigint)
+(current_val text,new_val text)
 
 
 insert into
 mymig.monograph_part_conversion
-(bmp,current_val,new_val)
+(current_val,new_val)
 
 
 
  */
 
  
-select * from 
+select label,(case when (label~'\-$' and "regexp_replace"!~'\-$') then "regexp_replace"||'-' else "regexp_replace" end)
+from
 (
 
 -- Volume language
@@ -28,7 +29,7 @@ regexp_replace(
 regexp_replace(label,'^\(?v[^abtsn\.\s,]*[\.\s,]+([^\.\s,]+)([^\)]*)\)?.*$','Vol. \1\2','gi'),
 '\([^\)]+\)','','gi'),
 '[\(\)]','','gi'),
-'&','-','gi'),
+'[&/]','-','gi'),
 '\-$','','gi'),
 '(\d{1,3})/(\d{4})','\1, \2','gi')
 
@@ -51,7 +52,7 @@ union all
 
 -- VXX
 select
-label,regexp_replace(btrim(label),'^^v\.*([^\-,\.\s/\(\)]*)$','Vol. \1','gi')
+label,regexp_replace(regexp_replace(btrim(label),'^^v\.*([^\-,\.\s/\(\)]*)$','Vol. \1','gi'),'&','-','g')
 from 
 biblio.monograph_part
 where
@@ -191,6 +192,55 @@ label~*'^\(?\d{4}[\\/\:\.,\s]+v[^\d]*[\s\.\-]+[^\s\.\-,]+\s?$'
 
 union all
 
+-- "v. 1, disc 1-4"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:]+):?[,\.\s\-]+d[^,\.\s]*[,\.\s\-]+([^,\.\s\-]+)[,\.\s\-]+([^,\.\s\-]+)\s?$','Vol. \1, Disc \2-\3','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:]+:?[,\.\s\-]+d[^,\.\s]*[,\.\s\-]+[^,\.\s\-]+[,\.\s\-]+[^,\.\s\-]+\s?$'
+
+union all
+
+-- "v.1, 1897-1942"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[:;,\.\s\-]+(\d{4})[,\.\s\-\\/]+(\d{4})\s?$','Vol. \1, \2-\3','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[:;,\.\s\-]+\d{4}[,\.\s\-\\/]+\d{4}\s?$'
+
+union all
+
+-- "v.1/2 1913/1989"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[/:;,\-]+([^,\.\s\-:/;]+)[/:;,\.\s\-]+(\d{4})[,\.\s\-\\/]+(\d{4})\s?$','Vol. \1-\2, \3-\4','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[/:;,\-]+[^,\.\s\-:/;]+[/:;,\.\s\-]+\d{4}[,\.\s\-\\/]+\d{4}\s?$'
+
+union all
+
+-- "v.5, no. 4 1988"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+no?[,\.\s\-:/;]+([^,\.\s\-:/;]+)[,\.\s\-:/;\(\)]+(\d{4})[\(\)\s]?$','Vol. \1, No. \2, \3','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+no?[,\.\s\-:/;]+[^,\.\s\-:/;]+[,\.\s\-:/;\(\)]+\d{4}[\(\)\s]?$'
+
+union all
+
+-- "v.1 A-C"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+([^\s\-&])[\s\-&]+([^\s\-&])\s?$','Vol. \1 \2-\3','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+[^\s\-&][\s\-&]+[^\s\-&]\s?$'
+
+union all
 
 -- disk language
 
@@ -1036,25 +1086,34 @@ union all
 
 -- #X
 select
-label,regexp_replace(label,'^\(?\s?#?\s?(\d+)[\)\s]$','\1','gi')
+label,regexp_replace(label,'^\(?\s?#\s?(\d+)[\)\s]?$','No. \1','gi')
 from 
 biblio.monograph_part
 where 
-label~*'^\(?\s?#?\s?\d+[\)\s]?$'
+label~*'^\(?\s?#\s?\d+[\)\s]?$'
 
 union all
 
+-- X (1 or 2 digit bare numbers)
+select
+label,regexp_replace(label,'^\s*(\d{1,2})[\)\s]?$','Vol. \1','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^\s*\d{1,2}[\)\s]?$'
+
+union all
 
 
 -- Part Language
 
 -- "pt. 1"
 select
-label,regexp_replace(label,'^[\(\s]?pte?[\.\s,]+([^\\/\.\s,\-]+)[\s\-]*$','Part \1','gi')
+label,regexp_replace(label,'^[\(\s]?pte?[\.\s,]*([^\\/\.\s,\-]+)[\s\-]*$','Part \1','gi')
 from 
 biblio.monograph_part
 where 
-label~*'^[\(\s]?pte?[\.\s,]+[^\\/\.\s,\-]+[\s\-]*$'
+label~*'^[\(\s]?pte?[\.\s,]*[^\\/\.\s,\-]+[\s\-]*$'
 
 union all
 
@@ -1850,16 +1909,26 @@ label~*'spring'
 
 union all
 
-
-
 -- Leftover odds and ends stuff like Bk. sup
 -- bk X
 select
-label,regexp_replace(label,'^[\(\s]?bk?[\.\s]+([^\\/\.\s,\-]+)[\s\-]*$','Book \1','gi')
+label,regexp_replace(label,'^[\(\s]?bks?[\.\s]*([^\\/\.\s,\-]+)[\s\-]*$','Book \1','gi')
 from 
 biblio.monograph_part
 where 
-label~*'^[\(\s]?bk?[\.\s]+[^\\/\.\s,\-]+[\s\-]*$'
+label~*'^[\(\s]?bks?[\.\s]*[^\\/\.\s,\-]+[\s\-]*$'
+
+union all
+
+-- bk X-Y
+select
+label,regexp_replace(label,'^[\(\s]?bks?[\.\s]*([^\\/\.\s,\-]+)[\s\-]+([^\\/\.\s,\-]+)[\s\-]*$','Book \1-\2','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?bks?[\.\s]*[^\\/\.\s,\-]+[\s\-]+[^\\/\.\s,\-]+[\s\-]*$'
+and
+label!~'\d{4}'
 
 union all
 
@@ -1869,7 +1938,7 @@ label,regexp_replace(label,'^[\(\s]?sup?[\.\s]+([^\\/\.\s,\-]+)[\s\-]*$','Suppl.
 from 
 biblio.monograph_part
 where 
-label~*'^[\(\s]?sup?[\.\s]+[^\\/\.\s,\-]+[\s\-]*$'
+label~*'^[\(\s]?sup?p?[\.\s]+[^\\/\.\s,\-]+[\s\-]*$'
 and
 label!~'\d{4}'
 
@@ -1887,7 +1956,6 @@ label~'\d{4}'
 
 union all
 
-
 -- YYYY sup
 select
 label,regexp_replace(label,'^[\(\s]?(\d{4})[\.\s\|\\/]+sup?[\.\s]+[\s\-]*$','\1 Suppl.','gi')
@@ -1895,6 +1963,16 @@ from
 biblio.monograph_part
 where 
 label~*'^[\(\s]?\d{4}[\.\s\|\\/]+sup?[\.\s]+[\s\-]*$'
+
+union all
+
+-- "pt.1 1960/1962"
+select
+label,regexp_replace(label,'^[\(\s]?pt[\.\s\|\\/]+([^\s,\.]+)[\s,\.]+(\d{4})[\\/\.\s]+(\d{4})[\s\-]*$','Part \1, \2-\3','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^[\(\s]?pt[\.\s\|\\/]+[^\s,\.]+[\s,\.]+\d{4}[\\/\.\s]+\d{4}[\s\-]*$'
 
 
 )
