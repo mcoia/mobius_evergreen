@@ -242,6 +242,69 @@ label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+[^\s\-&][\s\-&]+[^\s\-&]\s?$'
 
 union all
 
+-- "v. 1 No. 1"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+no[\.\s,\-]+([^,\.\s\-:/;]+)\s?$','Vol. \1, No. \2','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+no[\.\s,\-]+[^,\.\s\-:/;]+\s?$'
+
+union all
+
+-- "v. 1/pt. 2"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+pt[\.\s,\-]+([^,\.\s\-:/;]+)\s?$','Vol. \1, Part \2','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+pt[\.\s,\-]+[^,\.\s\-:/;]+\s?$'
+
+union all
+
+-- "pt.2/v.1"
+select
+label,regexp_replace(label,'^pt[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+v[\.\s,\-]+([^,\.\s\-:/;]+)\s?$','Vol. \2, Part \1','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^pt[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+v[\.\s,\-]+[^,\.\s\-:/;]+\s?$'
+
+union all
+
+-- "v.10 c.1"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+c\.[\.\s,\-]*([^,\.\s\-:/;]+)\s?$','Vol. \1, Copy \2','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+c\.[\.\s,\-]*[^,\.\s\-:/;]+\s?$'
+
+union all
+
+-- "Vol. 1,pt2 "
+select
+label,regexp_replace(label,'^vol[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+pt[\.\s,\-]*([^,\.\s\-:/;]+)\s?$','Vol. \1, Part \2','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^vol[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+pt[\.\s,\-]*[^,\.\s\-:/;]+\s?$'
+
+union all
+
+-- "v.1 1974/75"
+select
+label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+\(?(\d{2})(\d{2})[/\-]\(?(\d{2})\)?\s?$','Vol. \1, \2\3-\2\4','gi')
+from 
+biblio.monograph_part
+where 
+label~*'^v[\.\s,\-]+[^,\.\s\-:/;]+[,\.\s\-:/;]+\(?\d{4}[/\-]\(?\d{1,2}\)?\s?$'
+
+union all
+
+
+
+
 -- disk language
 
 -- Disc X
@@ -261,7 +324,7 @@ and
 (
 label~*'^d\.\s*\d*$'
 or
-label~*'^dis[^\s]*\s*?\d*$'
+label~*'^dis[^\s]*\s*?\d*\s*$'
 )
 and
 label!~*'season'
@@ -293,19 +356,12 @@ union all
 
 -- Disc X-Y
 select
-label,regexp_replace(label,'^dis[csk]*[^\d]*(\d*)[\-&\s]+(\d*).*','Disc \1-\2','gi')
+label,regexp_replace(label,'^dis[csk]*[^\d]*(\d+)[\-&\s]+(\d+)\s*','Disc \1-\2','gi')
 from 
 biblio.monograph_part
-where 
-label~'\d'
-and
-label~'\-'
-and
-(
-label~*'^dis[csk]*[^\d]*\d+[\-&\s]+\d+.*$'
-)
-and
-label!~*'season'
+where
+label!~'\d{4}' and
+label~*'^dis[csk]*[^\d]*\d+[\-&\s]+\d+\s*$'
 
 union all
 
