@@ -1,18 +1,156 @@
-/* 
-create table mymig.monograph_part_conversion
-(current_val text,new_val text)
 
-
-insert into
-mymig.monograph_part_conversion
-(current_val,new_val)
+-- DROP TABLE mymig.monograph_part_conversion;
+-- DROP TABLE mymig.monograph_part_conversion_map;
+-- DROP FUNCTION mymig.monograph_part_get_current_job;
+-- DROP TABLE mymig.monograph_part_conversion_job;
 
 
 
- */
 
+DROP TABLE IF EXISTS mymig.monograph_part_conversion;
+DROP TABLE IF EXISTS mymig.monograph_part_conversion_map;
+DROP FUNCTION IF EXISTS mymig.monograph_part_get_current_job();
+DROP FUNCTION IF EXISTS mymig.monograph_part_update_current_job();
+DROP FUNCTION IF EXISTS mymig.monograph_part_conversion_error_generator();
+DROP TABLE IF EXISTS mymig.monograph_part_conversion_job;
+
+
+
+CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion_job
+(
+id bigserial NOT NULL,
+start_time timestamp with time zone NOT NULL DEFAULT now(),
+last_update_time timestamp with time zone NOT NULL DEFAULT now(),
+status text default 'processing',    
+current_action text,
+current_action_num bigint default 0,
+CONSTRAINT job_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion
+(
+id bigserial NOT NULL,
+original_label text,
+new_label text,
+manual boolean DEFAULT FALSE,
+job bigint,
+CONSTRAINT mymig_monograph_part_conversion_job FOREIGN KEY (job) REFERENCES mymig.monograph_part_conversion_job (id) MATCH SIMPLE
+);
+
+CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion_manual
+(
+original_label text,
+new_label text
+);
+
+CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion_map
+(
+copy bigint,
+original_label text,
+new_label text,
+job bigint,
+CONSTRAINT mymig_monograph_part_conversion_map_job FOREIGN KEY (job) REFERENCES mymig.monograph_part_conversion_job (id) MATCH SIMPLE
+);
+
+
+CREATE OR REPLACE FUNCTION mymig.monograph_part_get_current_job() RETURNS BIGINT AS
+$func$
+DECLARE
+
+ job bigint;
  
-select label,(case when (label~'\-$' and "regexp_replace"!~'\-$') then "regexp_replace"||'-' else "regexp_replace" end)
+BEGIN
+    SELECT INTO job MAX(id) FROM mymig.monograph_part_conversion_job;
+RETURN job;
+END;
+$func$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION mymig.monograph_part_update_current_job(step_text TEXT, finished boolean = FALSE) RETURNS VOID AS
+$func$
+DECLARE
+ status_text TEXT := 'processing';
+ cjob BIGINT;
+BEGIN
+
+SELECT INTO cjob mymig.monograph_part_get_current_job();
+
+    IF finished THEN
+    status_text = 'complete';
+    END IF;
+
+    UPDATE mymig.monograph_part_conversion_job
+    SET
+    last_update_time = now(),
+    status = status_text,
+    current_action = step_text,
+    current_action_num = current_action_num + 1
+    WHERE
+    id = cjob;
+
+END;
+$func$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION mymig.monograph_part_conversion_error_generator(message TEXT = 'There was an error')
+RETURNS boolean AS
+$body$
+BEGIN
+    RAISE '%', message;
+    RETURN FALSE;
+END;
+$body$
+LANGUAGE plpgsql;
+
+
+\set ON_ERROR_STOP on
+
+
+
+-- start a new job
+
+INSERT INTO mymig.monograph_part_conversion_job(status,current_action)
+VALUES ('starting','Starting up...');
+
+-- try to read any manual converted items
+SELECT mymig.monograph_part_update_current_job('truncating mymig.monograph_part_conversion_manual');
+TRUNCATE mymig.monograph_part_conversion_manual;
+
+SELECT mymig.monograph_part_update_current_job('Reading file /mnt/evergreen/tmp/monograph_part_manual.csv');
+\COPY mymig.monograph_part_conversion_manual(original_label,new_label) FROM /mnt/evergreen/tmp/monograph_part_manual.csv
+
+-- Clean it up
+SELECT mymig.monograph_part_update_current_job('Trimming white space from mymig.monograph_part_conversion_manual');
+UPDATE mymig.monograph_part_conversion_manual
+SET
+new_label = btrim(new_label),
+original_label = btrim(original_label);
+
+SELECT mymig.monograph_part_update_current_job('Removing starting/trailing quote marks from mymig.monograph_part_conversion_manual');
+-- remove quotation marks from the beginning and end
+UPDATE mymig.monograph_part_conversion_manual
+SET
+new_label = REGEXP_REPLACE(new_label,'^"*(.*?)"*','\1','g'),
+original_label = REGEXP_REPLACE(original_label,'^"*(.*?)"*','\1','g');
+
+SELECT mymig.monograph_part_update_current_job('Trimming white space from mymig.monograph_part_conversion_manual');
+UPDATE mymig.monograph_part_conversion_manual
+SET
+new_label = btrim(new_label),
+original_label = btrim(original_label);
+
+SELECT mymig.monograph_part_update_current_job('Deleting rows that are null or empty from mymig.monograph_part_conversion_manual');
+DELETE FROM mymig.monograph_part_conversion_manual
+WHERE
+new_label IS NULL OR  new_label ='';
+
+
+
+INSERT INTO
+mymig.monograph_part_conversion
+(original_label,new_label,job)
+ 
+select label,(case when (label~'\-$' and "regexp_replace"!~'\-$') then "regexp_replace"||'-' else "regexp_replace" end),mymig.monograph_part_get_current_job()
 from
 (
 
@@ -2036,5 +2174,108 @@ as a
 
 
 group by 1,2
-order by length(a.label),1,2
+order by length(a.label),1,2;
+
+
+-- clean a little bit
+select mymig.monograph_part_update_current_job('Trimming mymig.monograph_part_conversion.new_label');
+UPDATE
+mymig.monograph_part_conversion
+SET new_label = btrim(new_label)
+WHERE 
+job = mymig.monograph_part_get_current_job() AND
+new_label != btrim(new_label);
+
+
+-- Append the manual stuff (if any)
+SELECT mymig.monograph_part_update_current_job('Appending any manual conversions into mymig.monograph_part_conversion');
+INSERT INTO
+mymig.monograph_part_conversion
+(original_label,new_label,manual,job)
+SELECT 
+original_label,new_label,true,mymig.monograph_part_get_current_job()
+FROM
+mymig.monograph_part_conversion_manual;
+
+
+SELECT mymig.monograph_part_update_current_job('Removing exact duplicates from mymig.monograph_part_conversion');
+-- Eliminate exact duplicates
+DELETE FROM mymig.monograph_part_conversion mmpc
+WHERE
+id in(
+SELECT id
+FROM 
+(
+SELECT MIN(id) as id, original_label,new_label,job
+FROM
+mymig.monograph_part_conversion
+GROUP BY original_label,new_label,job
+HAVING COUNT(*) > 1) b
+);
+
+-- do it twice to be sure
+SELECT mymig.monograph_part_update_current_job('Removing exact duplicates from mymig.monograph_part_conversion');
+-- Eliminate exact duplicates
+DELETE FROM mymig.monograph_part_conversion mmpc
+WHERE
+id in(
+SELECT id
+FROM 
+(
+SELECT MIN(id) as id, original_label,new_label,job
+FROM
+mymig.monograph_part_conversion
+GROUP BY original_label,new_label,job
+HAVING COUNT(*) > 1) b
+);
+
+
+-- And now the trouble starts
+-- might have two entries that map the same old value to two different new values 
+-- this is an execution killer
+
+-- look for duplicates
+SELECT CASE WHEN a.count = 2 THEN mymig.monograph_part_conversion_error_generator('The conversion map contains conflicting conversions') ELSE TRUE END
+FROM
+(
+SELECT original_label,count(*)
+FROM
+mymig.monograph_part_conversion
+WHERE
+job = mymig.monograph_part_get_current_job()
+GROUP by 1
+HAVING count(*) > 1
+) as a;
+
+-- Record the map with the affected copies
+select mymig.monograph_part_update_current_job('Trimming mymig.monograph_part_conversion.new_label');
+
+INSERT INTO mymig.monograph_part_conversion_map
+(copy,original_label,new_label,job)
+SELECT
+acpm.target_copy,
+bmp.label,
+mmpc.new_label,
+mymig.monograph_part_get_current_job()
+FROM
+biblio.monograph_part bmp,
+asset.copy_part_map acpm,
+mymig.monograph_part_conversion mmpc
+LEFT JOIN mymig.monograph_part_conversion_map mmpcm ON ( acpm.target_copy::TEXT||'_'||mymig.monograph_part_get_current_job() = mmpcm.target_copy::TEXT||'_'||mmpcm.job::TEXT)
+WHERE
+mmpc.original_label=bmp.label AND
+bmp.id=acpm.part AND
+NOT bmp.deleted AND
+mmpcm.copy is null; -- make sure we are not inserting duplicates, will never happen if this script is run start to finish
+
+/* BEGIN;
+
+INSERT INTO biblio.monograph_part(record,label)
+SELECT
+bmp.record,mmpc.new_label
+FROM
+mymig.monograph_part_conversion mmpc,
+biblio.monograph_part bmp
+where
+bmp.label=mmpc.original_label */
 
