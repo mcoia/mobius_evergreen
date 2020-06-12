@@ -1,20 +1,12 @@
 
--- DROP TABLE mymig.monograph_part_conversion;
--- DROP TABLE mymig.monograph_part_conversion_map;
--- DROP FUNCTION mymig.monograph_part_get_current_job;
--- DROP TABLE mymig.monograph_part_conversion_job;
-
-
-
-
-DROP TABLE IF EXISTS mymig.monograph_part_conversion;
-DROP TABLE IF EXISTS mymig.monograph_part_conversion_map;
-DROP FUNCTION IF EXISTS mymig.monograph_part_get_current_job();
-DROP FUNCTION IF EXISTS mymig.monograph_part_update_current_job();
-DROP FUNCTION IF EXISTS mymig.monograph_part_conversion_error_generator();
-DROP TABLE IF EXISTS mymig.monograph_part_conversion_job;
-
-
+-- 
+-- DROP TABLE IF EXISTS mymig.monograph_part_conversion;
+-- DROP TABLE IF EXISTS mymig.monograph_part_conversion_map;
+-- DROP FUNCTION IF EXISTS mymig.monograph_part_get_current_job();
+-- DROP FUNCTION IF EXISTS mymig.monograph_part_update_current_job();
+-- DROP FUNCTION IF EXISTS mymig.monograph_part_conversion_error_generator();
+-- DROP TABLE IF EXISTS mymig.monograph_part_conversion_job;
+--
 
 CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion_job
 (
@@ -46,6 +38,8 @@ new_label text
 CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion_map
 (
 copy bigint,
+record bigint,
+acpm bigint,
 original_label text,
 new_label text,
 job bigint,
@@ -66,7 +60,7 @@ END;
 $func$ LANGUAGE plpgsql;
 
 
-CREATE OR REPLACE FUNCTION mymig.monograph_part_update_current_job(step_text TEXT, finished boolean = FALSE) RETURNS VOID AS
+CREATE OR REPLACE FUNCTION mymig.monograph_part_update_current_job(step_text TEXT, finished boolean = FALSE) RETURNS TEXT AS
 $func$
 DECLARE
  status_text TEXT := 'processing';
@@ -87,7 +81,7 @@ SELECT INTO cjob mymig.monograph_part_get_current_job();
     current_action_num = current_action_num + 1
     WHERE
     id = cjob;
-
+RETURN step_text;
 END;
 $func$ LANGUAGE plpgsql;
 
@@ -535,20 +529,6 @@ label!~*'season'
 
 union all
 
--- DVD {anything} Disc X-Y
-select
-label,regexp_replace(label,'^dvd.*dis[csk]*[\-&\s,]+(\d*)[\-&\s,]+(\d*)$','Disc \1-\2','gi')
-from 
-biblio.monograph_part
-where 
-label~'\d'
-and
-label~*'^dvd[^\d]*\d*.*$'
-and
-label!~*'season'
-
-union all
-
 -- season X Disc Y
 select
 label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)$','Season \1, Disc \2','gi')
@@ -742,6 +722,8 @@ label!~*'dec'
 )
 and
 label~*'^\(?\d{4}[/\-]\(?\d{4}\)?\s+[^\s]+\s?$'
+and
+label!~*'^\(?\d{4}[/\-]\(?\d{4}\)?\s+\d{4}[/\-]\(?\d{4}\)?.*' -- remove eg. '2004/2005 2004/2005', handled in another query
 
 union all
 
@@ -1339,7 +1321,7 @@ union all
 
 -- Part X, Vol. X (for rows starting with numeric values only)
 select
-label,regexp_replace(label,'^[\(\s]?(\d{1,3})\s+v[^\d]*(\d+)$','Part \1, Vol. \2','gi')
+label,regexp_replace(label,'^[\(\s]?(\d{1,3})\s+v[^\d]*(\d+)$','Vol. \2, Part \1','gi')
 from 
 biblio.monograph_part
 where 
@@ -1349,7 +1331,7 @@ union all
 
 -- Part X, Vol. X (for rows starting with pt)
 select
-label,regexp_replace(label,'^[\(\s]?pt\.?\s?(\d+)\,?\s+v[^\d]*(\d+)$','Part \1, Vol. \2','gi')
+label,regexp_replace(label,'^[\(\s]?pt\.?\s?(\d+)\,?\s+v[^\d]*(\d+)$','Vol. \2, Part \1','gi')
 from 
 biblio.monograph_part
 where 
@@ -2050,31 +2032,6 @@ label~*'dec'
 
 union all
 
--- "1992/6 (June)"
-select
-label,to_char(to_date(regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\(\)]+(\d)[\.,\\/\s\(]+[^\s\.\d\\/]{3,12}[\)\s]?$','\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
-from 
-biblio.monograph_part
-where 
-label~*'^\s?\(?\d{4}[\s\./\\\(\)]+\d[\.,\\/\s\(]+[^\s\.\d\\/]{3,12}[\)\s]?$'
-and
-(
-label~*'jan' or
-label~*'feb' or
-label~*'mar' or
-label~*'apr' or
-label~*'may' or
-label~*'jun' or
-label~*'jul' or
-label~*'aug' or
-label~*'sep' or
-label~*'oct' or
-label~*'nov' or
-label~*'dec'
-)
-
-union all
-
 --"1998/4 Winter"
 select
 label,
@@ -2230,12 +2187,22 @@ HAVING COUNT(*) > 1) b
 );
 
 
+-- remove conversions that don't make any changes
+SELECT mymig.monograph_part_update_current_job('Removing conversions that dont make any changes');
+-- Eliminate exact duplicates
+DELETE FROM mymig.monograph_part_conversion mmpc
+WHERE
+original_label = new_label
+AND
+job = mymig.monograph_part_get_current_job();
+
 -- And now the trouble starts
 -- might have two entries that map the same old value to two different new values 
 -- this is an execution killer
 
 -- look for duplicates
-SELECT CASE WHEN a.count = 2 THEN mymig.monograph_part_conversion_error_generator('The conversion map contains conflicting conversions') ELSE TRUE END
+select mymig.monograph_part_update_current_job('Looking for duplicates in the map - this can terminate execution');
+SELECT CASE WHEN a.count > 1 THEN mymig.monograph_part_conversion_error_generator('The conversion map contains conflicting conversions') ELSE TRUE END
 FROM
 (
 SELECT original_label,count(*)
@@ -2248,34 +2215,69 @@ HAVING count(*) > 1
 ) as a;
 
 -- Record the map with the affected copies
-select mymig.monograph_part_update_current_job('Trimming mymig.monograph_part_conversion.new_label');
-
+select mymig.monograph_part_update_current_job('Create the final map with bre.record and asset.copy.id');
 INSERT INTO mymig.monograph_part_conversion_map
-(copy,original_label,new_label,job)
+(copy,record,acpm,original_label,new_label,job)
 SELECT
 acpm.target_copy,
+bmp.record,
+acpm.id,
 bmp.label,
 mmpc.new_label,
 mymig.monograph_part_get_current_job()
 FROM
-biblio.monograph_part bmp,
-asset.copy_part_map acpm,
-mymig.monograph_part_conversion mmpc
-LEFT JOIN mymig.monograph_part_conversion_map mmpcm ON ( acpm.target_copy::TEXT||'_'||mymig.monograph_part_get_current_job() = mmpcm.target_copy::TEXT||'_'||mmpcm.job::TEXT)
+biblio.monograph_part bmp
+JOIN asset.copy_part_map acpm ON (bmp.id = acpm.part)
+JOIN mymig.monograph_part_conversion mmpc ON (mmpc.original_label = bmp.label AND acpm.part = bmp.id)
+-- LEFT JOIN mymig.monograph_part_conversion_map mmpcm ON ( acpm.target_copy = mmpcm.copy AND bmp.record=mmpcm.record and mmpcm.job=mymig.monograph_part_get_current_job())
 WHERE
-mmpc.original_label=bmp.label AND
-bmp.id=acpm.part AND
-NOT bmp.deleted AND
-mmpcm.copy is null; -- make sure we are not inserting duplicates, will never happen if this script is run start to finish
+NOT bmp.deleted
+-- AND mmpcm.copy IS NULL
+;
 
-/* BEGIN;
 
+ROLLBACK;
+-- now we have all the stuff we need to start making the conversion in production
+BEGIN;
+
+-- Create new monograph labels that don't exist yet
+select mymig.monograph_part_update_current_job('Inserting biblio.monograph_part new part labels that do not already exist');
 INSERT INTO biblio.monograph_part(record,label)
 SELECT
-bmp.record,mmpc.new_label
+DISTINCT mmpcm.record,mmpcm.new_label
 FROM
-mymig.monograph_part_conversion mmpc,
-biblio.monograph_part bmp
-where
-bmp.label=mmpc.original_label */
+mymig.monograph_part_conversion_map mmpcm
+LEFT JOIN biblio.monograph_part bmp ON (bmp.label = mmpcm.new_label AND bmp.record = mmpcm.record )
+WHERE
+bmp is null;
 
+-- assign the copies to the new part where appropriate
+select mymig.monograph_part_update_current_job('Updating copies Inserting biblio.monograph_part new part labels that do not already exist');
+UPDATE asset.copy_part_map acpm
+SET
+part = bmp.id
+FROM
+biblio.monograph_part bmp,
+mymig.monograph_part_conversion_map mmpcm
+WHERE
+mmpcm.acpm = acpm.id AND
+mmpcm.copy = acpm.target_copy AND
+mmpcm.record = bmp.record AND
+mmpcm.new_label = bmp.label;
+
+-- delete unused labels when we can
+select mymig.monograph_part_update_current_job('Deleting old/unused bmp labels where we can');
+UPDATE
+biblio.monograph_part bmp_outter
+SET
+deleted = TRUE
+FROM
+biblio.monograph_part bmp
+JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label )
+LEFT JOIN asset.copy_part_map acpm ON ( acpm.part=bmp.id )
+WHERE
+bmp_outter.id=bmp.id AND
+acpm.id IS NULL;
+
+COMMIT;
+-- 
