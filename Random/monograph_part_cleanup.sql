@@ -2279,5 +2279,9 @@ WHERE
 bmp_outter.id=bmp.id AND
 acpm.id IS NULL;
 
+select mymig.monograph_part_update_current_job('Committing transaction');
+
 COMMIT;
+
+select mymig.monograph_part_update_current_job('Done',true);
 -- 
