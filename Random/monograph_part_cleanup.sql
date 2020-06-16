@@ -769,7 +769,14 @@ union all
 
 -- YYYY {month}
 select
-label,initcap(regexp_replace(label,'^\(?(\d{4})[\\/,\s\:]*\(?([^\d\.\(/\-,\s\:]+)\.?\s?\)?$','\1:\2','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\(?(\d{4})[\\/,\s\:]*\(?([^\d\.\(/\-,\s\:]+)\.?\s?\)?$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{4})[\\/,\s\:]*\(?([^\d\.\(/\-,\s\:]+)\.?\s?\)?$','\2','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'YYYY {month}' as res_query
 from 
 biblio.monograph_part
@@ -803,7 +810,14 @@ union all
 
 -- YYYY/MM {month}
 select
-label,initcap(regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\1:\2','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\2','gi'),'Mon')
+    'Mon'
+    )
+))
 , 'YYYY/MM {month}' as res_query
 from 
 biblio.monograph_part
@@ -837,7 +851,19 @@ union all
 
 -- YYYY/MM {month} / {month}
 select
-label,initcap(regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\1\2:\4-\1\3:\5','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\1\2:','gi')
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\4','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','-\1\3:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\5','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'YYYY/MM {month} / {month}' as res_query
 from 
 biblio.monograph_part
@@ -871,7 +897,19 @@ union all
 
 -- YYYY {month-month}
 select
-label,initcap(regexp_replace(label,'^\(?(\d{4})\s?\:?\(?([^\d\.\(/\-,\s]+)\.?[\-/\\]+([^\d\.\-/\)]+)\.?\s?\)?$','\1:\2-\3','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\(?(\d{4})\s?\:?\(?([^\d\.\(/\-,\s]+)\.?[\-/\\]+([^\d\.\-/\)]+)\.?\s?\)?$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{4})\s?\:?\(?([^\d\.\(/\-,\s]+)\.?[\-/\\]+([^\d\.\-/\)]+)\.?\s?\)?$','\2','gi'),'Mon'),
+    'Mon'
+    ),
+    '-',
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{4})\s?\:?\(?([^\d\.\(/\-,\s]+)\.?[\-/\\]+([^\d\.\-/\)]+)\.?\s?\)?$','\3','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'YYYY {month-month}' as res_query
 from 
 biblio.monograph_part
@@ -905,7 +943,18 @@ union all
 
 -- YYYY {month-month} (from YYYY month day - month day)
 select
-label,initcap(regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$','\1:\2 \3 - \1:\4 \5','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$','\2','gi'),'Mon'),
+    'Mon'),
+regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$',' \3 - \1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$','\4','gi'),'Mon'),
+    'Mon'),
+regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$',' \5','gi'),
+))
 , 'YYYY {month-month} (from YYYY month day - month day)' as res_query
 from 
 biblio.monograph_part
@@ -1017,7 +1066,14 @@ union all
 
 -- No. X YYYY:{month}
 select
-label,initcap(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,]+)\)?\.?,?$','No. \1, \2:\3','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,]+)\)?\.?,?$','No. \1, \2:','gi'),
+to_char(
+    to_date(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,]+)\)?\.?,?$','\3','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'No. X YYYY:{month}' as res_query
 from 
 biblio.monograph_part
@@ -1059,7 +1115,14 @@ union all
 
 -- No. X YYYY:{month} but where the month is mentioned first instead of second
 select
-label,initcap(regexp_replace(label,'^no\.?\s?(\d+);?\s+\(?([^\d\.]+)\)?\.*\s+\(?(\d\d\d\d)\)?.*$','No. \1, \3:\2','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^no\.?\s?(\d+);?\s+\(?([^\d\.]+)\)?\.*\s+\(?(\d\d\d\d)\)?.*$','No. \1, \3:','gi'),
+to_char(
+    to_date(
+        regexp_replace(label,'^no\.?\s?(\d+);?\s+\(?([^\d\.]+)\)?\.*\s+\(?(\d\d\d\d)\)?.*$','\2','gi'),'Mon'),
+        'Mon')
+))
 , 'No. X YYYY:{month} but where the month is mentioned first instead of second' as res_query
 from 
 biblio.monograph_part
@@ -1101,7 +1164,14 @@ union all
 
 -- No. X Vol. YYYY:{month} (starting with XX/YY)
 select
-label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]*\(?\d*\)?[\:,\.\s]*([^\.\s/]+)\.?$','Vol. \1, No. \2, \3:\4','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]*\(?\d*\)?[\:,\.\s]*([^\.\s/]+)\.?$','Vol. \1, No. \2, \3:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]*\(?\d*\)?[\:,\.\s]*([^\.\s/]+)\.?$','\4','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'No. X Vol. YYYY:{month} (starting with XX/YY)' as res_query
 from 
 biblio.monograph_part
@@ -1136,7 +1206,19 @@ union all
 
 -- No. X Vol. YYYY:{month-month} (starting with XX/YY)
 select
-label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]+([^\(\.\s/]+)[\:,\.\s/]+([^\.\s/]+)\.?$','Vol. \1, No. \2, \3:\4 - \3:\5','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]+([^\(\.\s/]+)[\:,\.\s/]+([^\.\s/]+)\.?$','Vol. \1, No. \2, \3:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]+([^\(\.\s/]+)[\:,\.\s/]+([^\.\s/]+)\.?$','\4','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]+([^\(\.\s/]+)[\:,\.\s/]+([^\.\s/]+)\.?$',' - \3:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]+([^\(\.\s/]+)[\:,\.\s/]+([^\.\s/]+)\.?$','\5','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'No. X Vol. YYYY:{month-month} (starting with XX/YY)' as res_query
 from 
 biblio.monograph_part
@@ -1171,7 +1253,15 @@ union all
 
 -- No. X Vol. YYYY:{month} (starting with XX/YY month YYYY)
 select
-label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','Vol. \1, No. \2, \4:\3','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','Vol. \1, No. \2, \4:','gi'),
+to_char(
+    to_date(
+        regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','\3','gi'),'Mon'),
+        'Mon'
+    )
+))
 , 'No. X Vol. YYYY:{month} (starting with XX/YY month YYYY)' as res_query
 from 
 biblio.monograph_part
@@ -1206,7 +1296,19 @@ union all
 
 -- No. X YYYY:{month-month}
 select
-label,initcap(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,/]+)[\)\.,/\-]+([^\d\)\.\:,/]+)\.?$','No. \1, \2:\3 - \2:\4','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,/]+)[\)\.,/\-]+([^\d\)\.\:,/]+)\.?$','No. \1, \2:','gi'),
+to_char(
+    to_date(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,/]+)[\)\.,/\-]+([^\d\)\.\:,/]+)\.?$','\3','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,/]+)[\)\.,/\-]+([^\d\)\.\:,/]+)\.?$',' - \2:','gi'),
+to_char(
+    to_date(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,/]+)[\)\.,/\-]+([^\d\)\.\:,/]+)\.?$','\4','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'No. X YYYY:{month-month}' as res_query
 from 
 biblio.monograph_part
@@ -1252,7 +1354,19 @@ union all
 
 -- No. X YYYY:{month-month} (with beginning format XX/YY month-month YYYY)
 select
-label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\-/\\]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','Vol. \1, No. \2, \5:\3 - \5:\4','gi'))
+label,initcap(
+concat(
+regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\-/\\]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','Vol. \1, No. \2, \5:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\-/\\]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','\3','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\-/\\]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$',' - \5:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\-/\\]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','\4','gi'),'Mon'),
+    'Mon'
+    )
+))
 , 'No. X YYYY:{month-month} (with beginning format XX/YY month-month YYYY)' as res_query
 from 
 biblio.monograph_part
@@ -1738,7 +1852,15 @@ union all
 
 -- YYYY : month Suppl (digit)?
 select
-label,btrim(regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)\s?$','\1:\2 Suppl. \3','gi'))
+label,btrim(
+concat(
+regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)\s?$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)\s?$','\2','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)\s?$',' Suppl. \3','gi')
+))
 , 'YYYY : month Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
@@ -1794,7 +1916,15 @@ union all
 
 -- Suppl (digit)? YYYY:month
 select
-label,btrim(regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)[,\.\:\-\s]+(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]?$','\2:\3 Suppl. \1','gi'))
+label,btrim(
+concat(
+regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)[,\.\:\-\s]+(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]?$','\2:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)[,\.\:\-\s]+(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]?$','\3','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)[,\.\:\-\s]+(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]?$',' Suppl. \1','gi')
+))
 , 'Suppl (digit)? YYYY:month' as res_query
 from 
 biblio.monograph_part
@@ -1842,7 +1972,19 @@ union all
 
 -- "1889 June-1890 June" 
 select
-label,regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$','\1:\2 - \3:\4','gi')
+label,
+concat(
+regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$','\2','gi'),'Mon'),
+    'Mon'
+    ),
+regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$',' - \3:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$','\4','gi'),'Mon'),
+    'Mon'
+    )
+)
 , '1889 June-1890 June' as res_query
 from 
 biblio.monograph_part
@@ -1863,6 +2005,12 @@ label~*'oct' or
 label~*'nov' or
 label~*'dec'
 )
+and
+label!~*'autumn' and
+label!~*'fall' and
+label!~*'winter' and
+label!~*'summer' and
+label!~*'spring'
 
 union all
 
@@ -1965,7 +2113,14 @@ union all
 
 -- "988 June 1988"
 select
-label,regexp_replace(label,'^\s?\(?9\d{1,2}[\\/\s\:\-\.]+([^\d\.]{3,12})[\s\.\-]+(\d{4})[\s\.\-]?$','\2:\1','gi')
+label,
+concat(
+regexp_replace(label,'^\s?\(?9\d{1,2}[\\/\s\:\-\.]+([^\d\.]{3,12})[\s\.\-]+(\d{4})[\s\.\-]?$','\2:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?\(?9\d{1,2}[\\/\s\:\-\.]+([^\d\.]{3,12})[\s\.\-]+(\d{4})[\s\.\-]?$','\1','gi'),'Mon'),
+    'Mon'
+    )
+)
 , '988 June 1988' as res_query
 from 
 biblio.monograph_part
@@ -2119,7 +2274,13 @@ union all
 
 -- "1998 (09) Sep"
 select
-label,regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\d\(\)]?\(\d+\)\s+([^\s\.\d\\/]{3,5})[\)\s]?$','\1:\2','gi')
+label,
+concat(
+regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\d\(\)]?\(\d+\)\s+([^\s\.\d\\/]{3,5})[\)\s]?$','\1:','gi'),
+to_char(
+    to_date(regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\d\(\)]?\(\d+\)\s+([^\s\.\d\\/]{3,5})[\)\s]?$','\2','gi'),'Mon'),
+    'Mon')
+)
 , '1998 (09) Sep' as res_query
 from 
 biblio.monograph_part
