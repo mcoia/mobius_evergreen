@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS mymig.monograph_part_conversion
 id bigserial NOT NULL,
 original_label text,
 new_label text,
+res_query text,
 manual boolean DEFAULT FALSE,
 job bigint,
 CONSTRAINT mymig_monograph_part_conversion_job FOREIGN KEY (job) REFERENCES mymig.monograph_part_conversion_job (id) MATCH SIMPLE
@@ -42,6 +43,7 @@ record bigint,
 acpm bigint,
 original_label text,
 new_label text,
+
 job bigint,
 CONSTRAINT mymig_monograph_part_conversion_map_job FOREIGN KEY (job) REFERENCES mymig.monograph_part_conversion_job (id) MATCH SIMPLE
 );
@@ -142,9 +144,9 @@ new_label IS NULL OR  new_label ='';
 
 INSERT INTO
 mymig.monograph_part_conversion
-(original_label,new_label,job)
+(original_label,new_label,res_query,job)
  
-select label,(case when (label~'\-$' and "regexp_replace"!~'\-$') then "regexp_replace"||'-' else "regexp_replace" end),mymig.monograph_part_get_current_job()
+select label,(case when (label~'\-$' and "regexp_replace"!~'\-$') then "regexp_replace"||'-' else "regexp_replace" end),res_query,mymig.monograph_part_get_current_job()
 from
 (
 
@@ -164,6 +166,7 @@ regexp_replace(label,'^\(?v[^abtsn\.\s,]*[\.\s,]+([^\.\s,]+)([^\)]*)\)?.*$','Vol
 '[&/]','-','gi'),
 '\-$','','gi'),
 '(\d{1,3})/(\d{4})','\1, \2','gi')
+, 'Vol. XX' as res_query
 
 from 
 biblio.monograph_part
@@ -185,12 +188,15 @@ union all
 -- VXX
 select
 label,regexp_replace(regexp_replace(btrim(label),'^^v\.*([^\-,\.\s/\(\)]*)$','Vol. \1','gi'),'&','-','g')
+, 'VXX' as res_query
 from 
 biblio.monograph_part
 where
 btrim(label) ~'[^\s]'
 and
 btrim(label)~*'^v\.*[^\-,\.\s/\(\)]*$'
+and btrim(label)!~*'^volume$'
+and btrim(label)!~*'^vol$'
 and
 (
 btrim(label)~*'^v'
@@ -209,6 +215,7 @@ union all
 -- Vol X,(for rows starting with {digits}th)
 select
 label,regexp_replace(label,'^\s?\(?\d+[tnrs][hdt].*v[^\s\.,]*[\.\s]+([^\s\.,]+)\s?$','Vol. \1','gi')
+, 'Vol X,(for rows starting with {digits}th)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -227,6 +234,7 @@ union all
 -- Vol. X, YYYY
 select
 label,regexp_replace(label,'^v[^\d]*(\d+)\s+(\d{4})$','Vol. \1, \2','gi')
+, 'Vol. X, YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -239,6 +247,7 @@ union all
 -- Vol. X, YYYY-YYYY
 select
 label,regexp_replace(label,'^v[^\d]*(\d+)\s+(\d{4})[\-/](\d{4})$','Vol. \1, \2-\3','gi')
+, 'Vol. X, YYYY-YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -251,6 +260,7 @@ union all
 -- Vol. X, YYYY-YYYY (from YYYY/YYYY v.x)
 select
 label,regexp_replace(label,'^\s*(\d{4})[\\/\-](\d{4})[\s\.,\-]+v[^\s\.,]*[\s\.,]+(.+)$','Vol. \3, \1-\2','gi')
+, ' Vol. X, YYYY-YYYY (from YYYY/YYYY v.x)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -263,6 +273,7 @@ union all
 -- Vol. X, YYYY-YYYY (from YYYY/YY v.x)
 select
 label,regexp_replace(label,'^\s*(\d{2})(\d{2})[\\/\-](\d{2})[\s\.,\-]+v[^\s\.,]*[\s\.,]+([^\-\s\.]+).*$','Vol. \4, \1\2-\1\3','gi')
+, 'Vol. X, YYYY-YYYY (from YYYY/YY v.x)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -275,6 +286,7 @@ union all
 -- Vol. X, YYYY {season}
 select
 label,initcap(regexp_replace(label,'^v[^\d]*(\d+)\s+(\d{4})[\s\:]([afws][uaip][tlnmr][ultmi][men]?[nrg]?)\-?$','Vol. \1, \2:\3','gi'))
+, 'Vol. X, YYYY {season}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -295,6 +307,7 @@ union all
 -- Vol. X, YYYY {season/season}
 select
 label,initcap(regexp_replace(label,'^v[^\d]*(\d+\.?\d*)\s+(\d{4})\s+([^\d]+)/([^\d]+)$','Vol. \1, \2:\3/\4','gi'))
+, 'Vol. X, YYYY {season/season}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -317,6 +330,7 @@ union all
 -- YYYY Vol. XX
 select
 label,regexp_replace(label,'^\(?(\d{4})[\\/\:\.,\s]+v[^\d]*[\s\.\-]+([^\s\.\-,]+)\s?$','Vol. \2, \1','gi')
+, 'YYYY Vol. XX' as res_query
 from 
 biblio.monograph_part
 where 
@@ -327,6 +341,7 @@ union all
 -- "v. 1, disc 1-4"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:]+):?[,\.\s\-]+d[^,\.\s]*[,\.\s\-]+([^,\.\s\-]+)[,\.\s\-]+([^,\.\s\-]+)\s?$','Vol. \1, Disc \2-\3','gi')
+, 'v. 1, disc 1-4' as res_query
 from 
 biblio.monograph_part
 where 
@@ -337,6 +352,7 @@ union all
 -- "v.1, 1897-1942"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[:;,\.\s\-]+(\d{4})[,\.\s\-\\/]+(\d{4})\s?$','Vol. \1, \2-\3','gi')
+, 'v.1, 1897-1942' as res_query
 from 
 biblio.monograph_part
 where 
@@ -347,6 +363,7 @@ union all
 -- "v.1/2 1913/1989"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[/:;,\-]+([^,\.\s\-:/;]+)[/:;,\.\s\-]+(\d{4})[,\.\s\-\\/]+(\d{4})\s?$','Vol. \1-\2, \3-\4','gi')
+, 'v.1/2 1913/1989' as res_query
 from 
 biblio.monograph_part
 where 
@@ -357,6 +374,7 @@ union all
 -- "v.5, no. 4 1988"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+no?[,\.\s\-:/;]+([^,\.\s\-:/;]+)[,\.\s\-:/;\(\)]+(\d{4})[\(\)\s]?$','Vol. \1, No. \2, \3','gi')
+, 'v.5, no. 4 1988' as res_query
 from 
 biblio.monograph_part
 where 
@@ -367,6 +385,7 @@ union all
 -- "v.1 A-C"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+([^\s\-&])[\s\-&]+([^\s\-&])\s?$','Vol. \1 \2-\3','gi')
+, 'v.1 A-C' as res_query
 from 
 biblio.monograph_part
 where 
@@ -377,6 +396,7 @@ union all
 -- "v. 1 No. 1"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+no[\.\s,\-]+([^,\.\s\-:/;]+)\s?$','Vol. \1, No. \2','gi')
+, 'v. 1 No. 1' as res_query
 from 
 biblio.monograph_part
 where 
@@ -387,6 +407,7 @@ union all
 -- "v. 1/pt. 2"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+pt[\.\s,\-]+([^,\.\s\-:/;]+)\s?$','Vol. \1, Part \2','gi')
+, 'v. 1/pt. 2' as res_query
 from 
 biblio.monograph_part
 where 
@@ -397,6 +418,7 @@ union all
 -- "pt.2/v.1"
 select
 label,regexp_replace(label,'^pt[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+v[\.\s,\-]+([^,\.\s\-:/;]+)\s?$','Vol. \2, Part \1','gi')
+, 'pt.2/v.1' as res_query
 from 
 biblio.monograph_part
 where 
@@ -407,6 +429,7 @@ union all
 -- "v.10 c.1"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+c\.[\.\s,\-]*([^,\.\s\-:/;]+)\s?$','Vol. \1, Copy \2','gi')
+, 'v.10 c.1' as res_query
 from 
 biblio.monograph_part
 where 
@@ -417,6 +440,7 @@ union all
 -- "Vol. 1,pt2 "
 select
 label,regexp_replace(label,'^vol[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+pt[\.\s,\-]*([^,\.\s\-:/;]+)\s?$','Vol. \1, Part \2','gi')
+, 'Vol. 1,pt2' as res_query
 from 
 biblio.monograph_part
 where 
@@ -427,6 +451,7 @@ union all
 -- "v.1 1974/75"
 select
 label,regexp_replace(label,'^v[\.\s,\-]+([^,\.\s\-:/;]+)[,\.\s\-:/;]+\(?(\d{2})(\d{2})[/\-]\(?(\d{2})\)?\s?$','Vol. \1, \2\3-\2\4','gi')
+, 'v.1 1974/75' as res_query
 from 
 biblio.monograph_part
 where 
@@ -442,6 +467,7 @@ union all
 -- Disc X
 select
 label,regexp_replace(label,'^d[^\d]*(\d*)(.*)$','Disc \1','gi')
+, 'Disc X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -466,6 +492,7 @@ union all
 -- Disc X- {no number}
 select
 label,regexp_replace(label,'^dis[csk]*[^\d]*(\d*)\-+.*','Disc \1','gi')
+, 'Disc X- {no number}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -489,6 +516,7 @@ union all
 -- Disc X-Y
 select
 label,regexp_replace(label,'^dis[csk]*[^\d]*(\d+)[\-&\s]+(\d+)\s*','Disc \1-\2','gi')
+, 'Disc X-Y' as res_query
 from 
 biblio.monograph_part
 where
@@ -500,6 +528,7 @@ union all
 -- Disc X-Disc Y
 select
 label,regexp_replace(label,'^dis[csk]*[\-&\s,]*(\d*)[\-&\s,]*dis[csk]*[\-&\s,]*(\d*).*','Disc \1-\2','gi')
+, 'Disc X-Disc Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -518,6 +547,7 @@ union all
 -- DVD {anything} Disc X
 select
 label,regexp_replace(label,'^dvd[^\d]+dis[csk]*[\-&\s,]+(\d*)$','Disc \1','gi')
+, 'DVD {anything} Disc X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -532,6 +562,7 @@ union all
 -- season X Disc Y
 select
 label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)$','Season \1, Disc \2','gi')
+, 'season X Disc Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -546,6 +577,7 @@ union all
 -- season X Disc Y-Z
 select
 label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)[\s\-&\.,]+(\d+)$','Season \1, Disc \2-\3','gi')
+, 'season X Disc Y-Z' as res_query
 from 
 biblio.monograph_part
 where 
@@ -560,6 +592,7 @@ union all
 -- season W Disc X-Y-Z -> Season \1, Disc \2-\4'
 select
 label,regexp_replace(label,'^.*?season[^\d]*([\d]+).*?dis[cks]*[^\d]*([\d]+)[\s\-&\.,]+(\d+)[\s\-&\.,]+(\d+)$','Season \1, Disc \2-\4','gi')
+, 'season W Disc X-Y-Z -> Season \1, Disc \2-\4' as res_query
 from 
 biblio.monograph_part
 where 
@@ -578,6 +611,7 @@ union all
 -- Xth YYYY/YYYY -> YYYY-YYYY
 select
 label,regexp_replace(label,'^\s?\(?\d+[tnrs][hdt].*(\d{4})[\s,\.\\/\-]+(\d{4})\s?$','\1-\2','gi')
+, 'Xth YYYY/YYYY -> YYYY-YYYY' as res_query
 from 
 biblio.monograph_part
 where
@@ -596,6 +630,7 @@ union all
 -- Xth YYYY/YYYY - YYYY/YYYY -> YYYY-YYYY
 select
 label,regexp_replace(label,'^\s?\(?\d+[tnrs][hdt][^\d]+(\d{4})[\s,\.\\/\-]+(\d{4})[\s,\.\\/\-](\d{4})[\s,\.\\/\-]+(\d{4})\s?$','\1-\4','gi')
+, 'Xth YYYY/YYYY - YYYY/YYYY -> YYYY-YYYY' as res_query
 from 
 biblio.monograph_part
 where
@@ -612,6 +647,7 @@ union all
 -- YYYY/YYYY - YYYY/YYYY -> YYYY-YYYY   (from YYYY/YY-YYYY/YY)
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\s,\.\\/\-]+\d{2}[\s,\.\\/\-](\d{2})\d{2}[\s,\.\\/\-]+(\d{2})\s?$','\1-\2\3','gi')
+, 'YYYY/YYYY - YYYY/YYYY -> YYYY-YYYY   (from YYYY/YY-YYYY/YY)' as res_query
 from 
 biblio.monograph_part
 where
@@ -628,6 +664,7 @@ union all
 -- YYYY/YYYY - YYYY/YYYY -> YYYY-YYYY   (from YYYY/YYYY-YYYY/YYYY)
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\s\.\\/\-]+\d{4}[\s\.\\/\-]\d{4}[\s\.\\/\-]+(\d{4})\s?$','\1-\2','gi')
+, 'YYYY/YYYY - YYYY/YYYY -> YYYY-YYYY   (from YYYY/YYYY-YYYY/YYYY)' as res_query
 from 
 biblio.monograph_part
 where
@@ -644,6 +681,7 @@ union all
 -- YYYY-YYYY
 select
 label,btrim(regexp_replace(label,'^\(?(\d{4})[/\-\\&\s]+\(?(\d{4})\)?\s*([^\s\-\.]?)[\s\.\-\:/\\]?$','\1-\2 \3','gi'))
+, 'YYYY-YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -654,6 +692,7 @@ union all
 -- YYYY-YY {optional qualifier}
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\-]\(?(\d{2})\)?\s+\(?([^\s\)]+)\)?\-?\s?$','\1\2-\1\3 \4','gi')
+, 'YYYY-YY {optional qualifier}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -691,6 +730,7 @@ union all
 -- YYYY-YYYYY {optional qualifier}
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\\/\-]\(?(\d{4})\)?\s+\(?([^\s\)]+)\)?\-?\s?$','\1-\2 \3','gi')
+, 'YYYY-YYYYY {optional qualifier}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -730,6 +770,7 @@ union all
 -- YYYY {month}
 select
 label,initcap(regexp_replace(label,'^\(?(\d{4})[\\/,\s\:]*\(?([^\d\.\(/\-,\s\:]+)\.?\s?\)?$','\1:\2','gi'))
+, 'YYYY {month}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -763,6 +804,7 @@ union all
 -- YYYY/MM {month}
 select
 label,initcap(regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\1:\2','gi'))
+, 'YYYY/MM {month}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -796,6 +838,7 @@ union all
 -- YYYY/MM {month} / {month}
 select
 label,initcap(regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\1\2:\4-\1\3:\5','gi'))
+, 'YYYY/MM {month} / {month}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -829,6 +872,7 @@ union all
 -- YYYY {month-month}
 select
 label,initcap(regexp_replace(label,'^\(?(\d{4})\s?\:?\(?([^\d\.\(/\-,\s]+)\.?[\-/\\]+([^\d\.\-/\)]+)\.?\s?\)?$','\1:\2-\3','gi'))
+, 'YYYY {month-month}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -862,6 +906,7 @@ union all
 -- YYYY {month-month} (from YYYY month day - month day)
 select
 label,initcap(regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$','\1:\2 \3 - \1:\4 \5','gi'))
+, 'YYYY {month-month} (from YYYY month day - month day)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -900,6 +945,7 @@ union all
 -- No. X YYYY
 select
 label,regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?$','No. \1, \2','gi')
+, 'No. X YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -918,6 +964,7 @@ union all
 -- No. X YYYY:{season}
 select
 label,initcap(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?.*([afws][uaip][tlnmr][ultmi][men]?[nrg]?)$','No. \1, \2:\3','gi'))
+, 'No. X YYYY:{season}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -944,6 +991,7 @@ union all
 -- No. X YYYY:{season/season}
 select
 label,initcap(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?[\d/]*\)?\s?([^\d\)]+)\)?$','No. \1, \2:\3','gi'))
+, 'No. X YYYY:{season/season}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -970,6 +1018,7 @@ union all
 -- No. X YYYY:{month}
 select
 label,initcap(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,]+)\)?\.?,?$','No. \1, \2:\3','gi'))
+, 'No. X YYYY:{month}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1011,6 +1060,7 @@ union all
 -- No. X YYYY:{month} but where the month is mentioned first instead of second
 select
 label,initcap(regexp_replace(label,'^no\.?\s?(\d+);?\s+\(?([^\d\.]+)\)?\.*\s+\(?(\d\d\d\d)\)?.*$','No. \1, \3:\2','gi'))
+, 'No. X YYYY:{month} but where the month is mentioned first instead of second' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1052,6 +1102,7 @@ union all
 -- No. X Vol. YYYY:{month} (starting with XX/YY)
 select
 label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]*\(?\d*\)?[\:,\.\s]*([^\.\s/]+)\.?$','Vol. \1, No. \2, \3:\4','gi'))
+, 'No. X Vol. YYYY:{month} (starting with XX/YY)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1086,6 +1137,7 @@ union all
 -- No. X Vol. YYYY:{month-month} (starting with XX/YY)
 select
 label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+(\d{4})[\:,\.\s]+([^\(\.\s/]+)[\:,\.\s/]+([^\.\s/]+)\.?$','Vol. \1, No. \2, \3:\4 - \3:\5','gi'))
+, 'No. X Vol. YYYY:{month-month} (starting with XX/YY)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1120,6 +1172,7 @@ union all
 -- No. X Vol. YYYY:{month} (starting with XX/YY month YYYY)
 select
 label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','Vol. \1, No. \2, \4:\3','gi'))
+, 'No. X Vol. YYYY:{month} (starting with XX/YY month YYYY)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1154,6 +1207,7 @@ union all
 -- No. X YYYY:{month-month}
 select
 label,initcap(regexp_replace(label,'no\.?\s?(\d+);?\s+\(?(\d\d\d\d)\)?\s?\(?\:?[\d/]*\)?\s?([^\d\)\.\:,/]+)[\)\.,/\-]+([^\d\)\.\:,/]+)\.?$','No. \1, \2:\3 - \2:\4','gi'))
+, 'No. X YYYY:{month-month}' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1199,6 +1253,7 @@ union all
 -- No. X YYYY:{month-month} (with beginning format XX/YY month-month YYYY)
 select
 label,initcap(regexp_replace(label,'^\s?(\d{1,3})/+(\d{1,3})[\s\.,]+([^\d\s\-/\\]+)[\s\-/\\]+([^\d\s\-/\\]+)[\s\.,]+(\d{4})\.?$','Vol. \1, No. \2, \5:\3 - \5:\4','gi'))
+, 'No. X YYYY:{month-month} (with beginning format XX/YY month-month YYYY)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1233,6 +1288,7 @@ union all
 -- No. X
 select
 label,regexp_replace(label,'no[\.,]?\s*(\d+);?\s*$','No. \1','gi')
+, 'No. X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1243,6 +1299,7 @@ union all
 -- No. X-Y
 select
 label,regexp_replace(label,'no[\.,]?\s*(\d+)\s?\-\s?(\d+)$','No. \1-\2','gi')
+, 'No. X-Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1253,6 +1310,7 @@ union all
 -- X of Y -> X
 select
 label,regexp_replace(label,'^\s?#?(\d+)\s*of\s*\d+$','\1','gi')
+, 'X of Y -> X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1263,6 +1321,7 @@ union all
 -- #X
 select
 label,regexp_replace(label,'^\(?\s?#\s?(\d+)[\)\s]?$','No. \1','gi')
+, '#X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1273,6 +1332,7 @@ union all
 -- X (1 or 2 digit bare numbers)
 select
 label,regexp_replace(label,'^\s*(\d{1,2})[\)\s]?$','Vol. \1','gi')
+, 'X (1 or 2 digit bare numbers)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1286,6 +1346,7 @@ union all
 -- "pt. 1"
 select
 label,regexp_replace(label,'^[\(\s]?pte?[\.\s,]*([^\\/\.\s,\-]+)[\s\-]*$','Part \1','gi')
+, 'pt. 1' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1296,6 +1357,7 @@ union all
 -- "pt. X-Y"
 select
 label,regexp_replace(label,'^[\(\s]?pte?[\.\s,]+([^&\\/\s,\-]+)[&\\/\s,\-]+([^&\\/\s,\-]+)[\-\s/\\\.]*$','Part \1-\2','gi')
+, 'pt. X-Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1312,6 +1374,7 @@ union all
 -- "pt.1 1972" 
 select
 label,regexp_replace(label,'^[\(\s]?pt[\.\s]+([^\\/\.\s,\-]+)[\\/\.\s,]+(\d{4})\s?$','Part \1, \2','gi')
+, 'pt.1 1972' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1322,6 +1385,7 @@ union all
 -- Part X, Vol. X (for rows starting with numeric values only)
 select
 label,regexp_replace(label,'^[\(\s]?(\d{1,3})\s+v[^\d]*(\d+)$','Vol. \2, Part \1','gi')
+, 'Part X, Vol. X (for rows starting with numeric values only)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1332,6 +1396,7 @@ union all
 -- Part X, Vol. X (for rows starting with pt)
 select
 label,regexp_replace(label,'^[\(\s]?pt\.?\s?(\d+)\,?\s+v[^\d]*(\d+)$','Vol. \2, Part \1','gi')
+, 'Part X, Vol. X (for rows starting with pt)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1342,6 +1407,7 @@ union all
 -- Part X, Vol. X (for rows starting with v)
 select
 label,regexp_replace(label,'^[\(\s]?v[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,]+p[^\s\.,]*[\s\.,]+([^\s\.,]+)\.?\s?,?$','Vol. \1, Part \2','gi')
+, 'Part X, Vol. X (for rows starting with v)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1352,6 +1418,7 @@ union all
 -- Part X, Vol. X (for rows starting with {digits}th)
 select
 label,regexp_replace(label,'^\s?\(?\d+[tnrs][hdt].*p[^\s\.,]*[\.\s]+([^\s,\.\\/\-])+[\.\s]+v[^\s\.,]*[\.\s]+([^\s,\.\\/\-]+)\s?$','Vol. \2, Part \1','gi')
+, 'Part X, Vol. X (for rows starting with {digits}th)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1368,6 +1435,7 @@ union all
 -- Part X, No. Y, Vol. Z (for rows starting with v)
 select
 label,regexp_replace(label,'^[\(\s]?v[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,]+p[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,]n[^\s\.,]*[\s\.,]+([^\s\.,]+).*$','Vol. \1, No. \3, Part \2','gi')
+, 'Part X, No. Y, Vol. Z (for rows starting with v)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1378,6 +1446,7 @@ union all
 -- Part X, Vol. X, YYYY (for rows starting with v)
 select
 label,regexp_replace(label,'^[\(\s]?v[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,]+p[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,](\d{4})\.?\s?,?$','Vol. \1, Part \2, \3','gi')
+, 'Part X, Vol. X, YYYY (for rows starting with v)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1388,6 +1457,7 @@ union all
 -- Part X, Vol. X, YYYY-YYYY (for rows starting with v)
 select
 label,regexp_replace(label,'^[\(\s]?v[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,]+p[^\s\.,]*[\s\.,]+([^\s\.,]+)[\s\.,](\d{4})[\\/\-]+(\d{4})\.?\s?,?$','Vol. \1, Part \2, \3-\4','gi')
+, 'Part X, Vol. X, YYYY-YYYY (for rows starting with v)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1398,6 +1468,7 @@ union all
 -- Part X, YYYY
 select
 label,regexp_replace(regexp_replace(label,'^\s?(\d{4})\s+pt?\.\s?(\d+)([/\-]?\d*).*$','Part \2\3, \1','gi'),'/','-','gi')
+, 'Part X, YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1408,6 +1479,7 @@ union all
 -- Part X, YYYY-YYYY
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\)\-/]+(\d{4})[\,\.\:]?\s+pt\.\s?([^\s]+).*$','Part \3, \1-\2','gi')
+, 'Part X, YYYY-YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1420,6 +1492,7 @@ union all
 -- Part X, YYYY-YYYY (from YYYY/YY)
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\)\-/]+(\d{1,2})[\,\.\:]?\s+pt\.\s?([^\s]+).*$','Part \4, \1\2-\1\3','gi')
+, 'Part X, YYYY-YYYY (from YYYY/YY)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1437,6 +1510,7 @@ union all
 -- Series X
 select
 label,regexp_replace(label,'^\s?\(?ser[^,\.\:]?i?e?s?[,\.\:\s]+([^\s,\.\\/\-]+)[,\s]?$','Series \1','gi')
+, 'Series X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1449,6 +1523,7 @@ union all
 -- Series X-Y
 select
 label,regexp_replace(label,'^\s?\(?ser[^,\.\:]?i?e?s?[,\.\:\s]+(\d+)[\-/\\]+(\d+)[,\s]?$','Series \1-\2','gi')
+, 'Series X-Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1461,6 +1536,7 @@ union all
 -- Series X, Vol. Y
 select
 label,regexp_replace(label,'^\s?\(?ser[^,\.\:]?i?e?s?[,\.\:\s]+([^\s,\.\\/\-]+)[\s,\.\\/\-]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)[,\s]?$','Series \1, Vol. \2','gi')
+, 'Series X, Vol. Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1473,6 +1549,7 @@ union all
 -- Part Z, Series X, Vol. Y
 select
 label,regexp_replace(label,'^\s?\(?ser[^,\.\:]?i?e?s?[,\.\:\s]+([^\s,\.\\/\-]+)[\s,\.\\/\-]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)[,\.\:\s]+p[^,\.\:]*[,\.\:\s]+([^\s,]+)$','Series \1, Vol. \2,Part \3','gi')
+, 'Part Z, Series X, Vol. Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1487,6 +1564,7 @@ union all
 -- Xrd Series
 select
 label,regexp_replace(label,'^\s?\(?(\d+[tnrs][hdt])[\s\.\-]+ser[^,\.\:]?i?e?s?[,\.\:\s]?$','\1 Series','gi')
+, 'Xrd Series' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1497,6 +1575,7 @@ union all
 -- Xrd Series, Vol. Y
 select
 label,regexp_replace(label,'^\s?\(?(\d+[tnrs][hdt])[\s\.\-]+ser[^,\.\:]?i?e?s?[,\.\:\s]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)\s?$','\1 Series, Vol. \2','gi')
+, ' Xrd Series, Vol. Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1509,6 +1588,7 @@ union all
 -- Xrd Series, Vol. Y YYYY
 select
 label,regexp_replace(label,'^\s?\(?(\d+[tnrs][hdt])[\s\.\-]+ser[^,\.\:]?i?e?s?[,\.\:\s]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)[,\.\:\s]+(\d{4})\s?$','\1 Series, Vol. \2, \3','gi')
+, 'Xrd Series, Vol. Y YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1521,6 +1601,7 @@ union all
 -- Xrd Series, Vol. Y YYYY-YYYY
 select
 label,regexp_replace(label,'^\s?\(?(\d+[tnrs][hdt])[\s\.\-]+ser[^,\.\:]?i?e?s?[,\.\:\s]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)[,\.\:\s]+(\d{4})[,\.\:\s\-]+(\d{4})\s?$','\1 Series, Vol. \2, \3-\4','gi')
+, 'Xrd Series, Vol. Y YYYY-YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1539,6 +1620,7 @@ union all
 -- YYYY-YYYY Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{4})[/,\.\:\-\s]+(\d{4})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)$','\1-\2 Suppl. \3','gi'))
+, 'YYYY-YYYY Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1551,6 +1633,7 @@ union all
 -- YYYY/YY Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[/,\.\:\-\s]+(\d{2})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)$','\1\2-\1\3 Suppl. \4','gi'))
+, 'YYYY/YY Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1563,6 +1646,7 @@ union all
 -- YYYY/YY Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[/,\.\:\-\s]+(\d{2})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)$','\1\2-\1\3 Suppl. \4','gi'))
+, 'YYYY/YY Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1575,6 +1659,7 @@ union all
 -- YYYY/YY-YYYY/YY Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[/,\.\:\-\s]+(\d{2})[/,\.\:\-\s](\d{2})(\d{2})[/,\.\:\-\s]+(\d{2})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)$','\1\2-\1\3 - \4\5-\4\6 Suppl. \7','gi'))
+, 'YYYY/YY-YYYY/YY Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1587,6 +1672,7 @@ union all
 -- Supp X YYYY
 select
 label,regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]+([^,\.\:\-\s/]+)[,\.\:\-\s]+(\d{4})\s?$','\2 Suppl. \1','gi')
+, 'Supp X YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1601,6 +1687,7 @@ union all
 -- Supp YYYY
 select
 label,regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]+(\d{4})\s?$','\1 Suppl.','gi')
+, 'Supp YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1613,6 +1700,7 @@ union all
 -- Supp X YYYY/YYYY
 select
 label,btrim(regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]+)[,\.\:\-\s]+(\d{4})[/,\.\:\-\s]+(\d{4})[,\.\:\-\s]?$','\2-\3 Suppl. \1','gi'))
+, 'Supp X YYYY/YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1625,6 +1713,7 @@ union all
 -- YYYY Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)$','\1 Suppl. \2','gi'))
+, 'YYYY Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1637,6 +1726,7 @@ union all
 -- YYYY Suppl (digit)? YYYY
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)[,\.\:\-\s]+(\d{4})\s?$','\1-\3 Suppl. \2','gi'))
+, 'YYYY Suppl (digit)? YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1649,6 +1739,7 @@ union all
 -- YYYY : month Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)\s?$','\1:\2 Suppl. \3','gi'))
+, 'YYYY : month Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1676,6 +1767,7 @@ union all
 -- month YYYY Suppl (digit)?
 select
 label,btrim(regexp_replace(label,'^\s?\(?([^\d\.]+)[,\.\:\-\s]+(\d{4})[,\.\:\-\s]+suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)\s?$','\2:\1 Suppl. \3','gi'))
+, 'month YYYY Suppl (digit)?' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1703,6 +1795,7 @@ union all
 -- Suppl (digit)? YYYY:month
 select
 label,btrim(regexp_replace(label,'^\s?\(?suppl[\.ement]*[,\.\:\-\s]?([^,\.\:\-\s]?)[,\.\:\-\s]+(\d{4})[,\.\:\-\s]+([^\d\.]+)[,\.\:\-\s]?$','\2:\3 Suppl. \1','gi'))
+, 'Suppl (digit)? YYYY:month' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1739,6 +1832,7 @@ regexp_replace(label,'^\s?\(?(\d{2})[\\/\-]+(\d{2})[\\/\-]+(\d{2})[,\.\:\-\s]?',
 'MMDDYY'),
 'YYYY:Mon DD'
 )
+, 'Standard DD-MM-YY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1749,6 +1843,7 @@ union all
 -- "1889 June-1890 June" 
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$','\1:\2 - \3:\4','gi')
+, '1889 June-1890 June' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1774,6 +1869,7 @@ union all
 -- "1906 Nov. 15-1907 Nov. 1"
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:]+([^\d\.]{3,12})[\.\\/\-\s]+(\d{4})[\\/\s\:]+([^\d\.]{3,12})[,\.\:\-\s]?$','\1:\2 - \3:\4','gi')
+, '1906 Nov. 15-1907 Nov. 1' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1799,6 +1895,8 @@ union all
 -- "10 1977 Aug."
 select
 label,regexp_replace(label,'^\s?\(?(\d{1,3})[\\/\s\:]+(\d{4})[\.\\/\-\s]*([^\d\.]*)[\s\.\-]?','Vol. \1, \2:\3','gi')
+, '
+, '' as res_query' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1824,6 +1922,7 @@ union all
 -- "10 1977"
 select
 label,regexp_replace(label,'^\s?\(?(\d{1,3})[\\/\s\:]+(\d{4})[\s\.\-]?','Vol. \1, \2','gi')
+, '10 1977' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1834,6 +1933,7 @@ union all
 -- "1/6"
 select
 label,regexp_replace(label,'^\s?\(?([^9]?\d{1,2})[\\/\s\:\-\.]+(\d{1,3})[\s\.\-]?$','Vol. \1, No. \2','gi')
+, '1/6' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1844,6 +1944,7 @@ union all
 -- "1/4-1/5"
 select
 label,regexp_replace(label,'^\s?\(?([^9]?\d{1,2})[\\/\s\:]+([^9]?\d{1,2})[\s\.\-/\\]+([^9]?\d{1,2})[\\/\s\:]+(\d{1,3})[\s\.\-]?$','Vol. \1, No. \2 - Vol. \3, No. \4','gi')
+, '1/4-1/5' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1854,6 +1955,7 @@ union all
 -- "958/1-"
 select
 label,to_char(to_date(regexp_replace(label,'^\s?\(?(9\d{1,2})[\\/\s\:\-\.]+(\d{1,3})[\s\.\-]?$','1\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
+, '958/1-' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1864,6 +1966,7 @@ union all
 -- "988 June 1988"
 select
 label,regexp_replace(label,'^\s?\(?9\d{1,2}[\\/\s\:\-\.]+([^\d\.]{3,12})[\s\.\-]+(\d{4})[\s\.\-]?$','\2:\1','gi')
+, '988 June 1988' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1887,6 +1990,7 @@ regexp_replace(label,'^\s?\(?9\d{2}[\\/\s\:\-\.]+\d{1,2}[\s\.\-]+(9\d{2})[\\/\s\
 ,'YYYY-MM'),
 'YYYY:Mon')
 )
+, '988/7-989/8 Jul.1988/Aug.1989' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1897,6 +2001,7 @@ union all
 -- "1923/YY" where YY <= 12 and subtraction between the two years is less than 15
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1\2-\1\3','gi')
+, '"1923/YY" where YY <= 12 and subtraction between the two years is less than 15' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1916,6 +2021,7 @@ union all
 -- "1923/YY" where YY <= 12 and subtraction between the two years is less than 5
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1\2-\1\3','gi')
+, '"1923/YY" where YY <= 12 and subtraction between the two years is less than 5' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1935,6 +2041,7 @@ union all
 -- "1923/YY" where YY <= 12 and subtraction between the two years is > 4  (it's a month)
 select
 label,to_char(to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
+, '"1923/YY" where YY <= 12 and subtraction between the two years is > 4  (its a month)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1961,6 +2068,7 @@ union all
 -- "1923/YY" where YY <= 12 and subtraction between the two years is > 15  (it's a month)
 select
 label,to_char(to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
+, '"1923/YY" where YY <= 12 and subtraction between the two years is > 15  (its a month)' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1987,6 +2095,7 @@ union all
 -- "1923/X" just one digit after the /
 select
 label,to_char(to_date(regexp_replace(label,'^\s?\(?(\d{4})[\\/\s\:\-\.]+(\d)[\s\.\-]?$','\1-\2','gi'),'YYYY-MM'),'YYYY:Mon')
+, '"1923/X" just one digit after the /' as res_query
 from 
 biblio.monograph_part
 where 
@@ -1997,6 +2106,7 @@ union all
 -- "1923/XX" two digits after the / ( > 12 )
 select
 label,regexp_replace(label,'^\s?\(?(\d{2})(\d{2})[\\/\s\:\-\.]+(\d{2})[\s\.\-]?$','\1\2-\1\3','gi')
+, '"1923/XX" two digits after the / ( > 12 )' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2010,6 +2120,7 @@ union all
 -- "1998 (09) Sep"
 select
 label,regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\d\(\)]?\(\d+\)\s+([^\s\.\d\\/]{3,5})[\)\s]?$','\1:\2','gi')
+, '1998 (09) Sep' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2045,6 +2156,7 @@ regexp_replace(label,'^\s?\(?(\d{4})[\s\./\\\(\)]+(\d)[\.,\\/\s\(]+[^\s\.\d\\/]{
 regexp_replace(label,'^\s?\(?\d{4}[\s\./\\\(\)]+\d[\.,\\/\s\(]+([^\s\.\d\\/\)]{3,12})[\)\s]?$',' (\1)','gi')
 )
 )
+, '1998/4 Winter' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2064,6 +2176,7 @@ union all
 -- bk X
 select
 label,regexp_replace(label,'^[\(\s]?bks?[\.\s]*([^\\/\.\s,\-]+)[\s\-]*$','Book \1','gi')
+, 'bk X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2074,6 +2187,7 @@ union all
 -- bk X-Y
 select
 label,regexp_replace(label,'^[\(\s]?bks?[\.\s]*([^\\/\.\s,\-]+)[\s\-]+([^\\/\.\s,\-]+)[\s\-]*$','Book \1-\2','gi')
+, 'bk X-Y' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2086,6 +2200,7 @@ union all
 -- sup X
 select
 label,regexp_replace(label,'^[\(\s]?sup?[\.\s]+([^\\/\.\s,\-]+)[\s\-]*$','Suppl. \1','gi')
+, 'sup X' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2098,6 +2213,7 @@ union all
 -- sup YYYY
 select
 label,regexp_replace(label,'^[\(\s]?sup?[\.\s]+(\d{4})[\s\-]*$','\1 Suppl.','gi')
+, 'sup YYYY' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2110,6 +2226,7 @@ union all
 -- YYYY sup
 select
 label,regexp_replace(label,'^[\(\s]?(\d{4})[\.\s\|\\/]+sup?[\.\s]+[\s\-]*$','\1 Suppl.','gi')
+, 'YYYY sup' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2120,6 +2237,7 @@ union all
 -- "pt.1 1960/1962"
 select
 label,regexp_replace(label,'^[\(\s]?pt[\.\s\|\\/]+([^\s,\.]+)[\s,\.]+(\d{4})[\\/\.\s]+(\d{4})[\s\-]*$','Part \1, \2-\3','gi')
+, 'pt.1 1960/1962' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2130,7 +2248,7 @@ label~*'^[\(\s]?pt[\.\s\|\\/]+[^\s,\.]+[\s,\.]+\d{4}[\\/\.\s]+\d{4}[\s\-]*$'
 as a
 
 
-group by 1,2
+group by 1,2,3
 order by length(a.label),1,2;
 
 
@@ -2281,7 +2399,7 @@ acpm.id IS NULL;
 
 select mymig.monograph_part_update_current_job('Committing transaction');
 
-COMMIT;
+ROLLBACK;
 
 select mymig.monograph_part_update_current_job('Done',true);
 -- 
