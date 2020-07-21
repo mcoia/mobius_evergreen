@@ -814,7 +814,7 @@ label,initcap(
 concat(
 regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\1:','gi'),
 to_char(
-    to_date(regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\2','gi'),'Mon')
+    to_date(regexp_replace(label,'^\(?(\d{4})[/\-]\(?\d{1,2}\)?\s+\(?([^\s\)/\.\-]+)\)?\s?$','\2','gi'),'Mon'),
     'Mon'
     )
 ))
@@ -853,7 +853,7 @@ union all
 select
 label,initcap(
 concat(
-regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\1\2:','gi')
+regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\1\2:','gi'),
 to_char(
     to_date(regexp_replace(label,'^\(?(\d{2})(\d{2})[/\-]+\(?(\d{1,2})\)?\s+\(?([^\s\)/\.\-]+)[\)?\s?\\/]?([^\s\)/\.\-]+)\)?\s?$','\4','gi'),'Mon'),
     'Mon'
@@ -953,7 +953,7 @@ regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\
 to_char(
     to_date(regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$','\4','gi'),'Mon'),
     'Mon'),
-regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$',' \5','gi'),
+regexp_replace(label,'^\(?(\d{4})[\s\:\.]+([^\s\:\.]+)[\s\:\.]+(\d+)[\s\:\.]?\-\s*([^\s\:\.]+)[\s\:\.]+(\d+).*$',' \5','gi')
 ))
 , 'YYYY {month-month} (from YYYY month day - month day)' as res_query
 from 
