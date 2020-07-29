@@ -212,10 +212,10 @@ label~*'^\(?volume'
 
 union all
 
--- Vol X,(for rows starting with {digits}th)
+-- Vol X,(for rows starting with {digits}th ed)
 select
-label,regexp_replace(label,'^\s?\(?\d+[tnrs][hdt].*v[^\s\.,]*[\.\s]+([^\s\.,]+)\s?$','Vol. \1','gi')
-, 'Vol X,(for rows starting with {digits}th)' as res_query
+label,regexp_replace(label,'^\s?\(?(\d+[tnrs][hdt]).*v[^\s\.,]*[\.\s]+([^\s\.,]+)\s?$','\1 ed., Vol. \2','gi')
+, 'Vol X,(for rows starting with {digits}th) ed' as res_query
 from 
 biblio.monograph_part
 where 
@@ -227,7 +227,24 @@ label!~*'n[^\s\.,]*[\.\s]'
 and
 label!~*'se[^\s\.,]*[\.\s]'
 and
-label~*'^\s?\(?\d+[tnrs][hdt].*v[^\s\.,]*[\.\s]+[^\s\.,]+\s?$'
+label~*'^\s?\(?\d+[tnrs][hdt]\s+ed.*v[^\s\.,]*[\.\s]+[^\s\.,]+\s?$'
+
+union all
+
+-- Vol X,(for rows starting with {digits}th Series)
+select
+label,regexp_replace(label,'^\s?\(?(\d+[tnrs][hdt]).*v[^\s\.,]*[\.\s]+([^\s\.,]+)\s?$','\1 Series, Vol. \2','gi')
+, 'Vol X,(for rows starting with {digits}th) Series' as res_query
+from 
+biblio.monograph_part
+where 
+label~*'v[^\s\.,]*[\.\s]'
+and
+label!~*'p[^\s\.,]*[\.\s]'
+and
+label!~*'n[^\s\.,]*[\.\s]'
+and
+label~*'^\s?\(?\d+[tnrs][hdt]\s+ser.*v[^\s\.,]*[\.\s]+[^\s\.,]+\s?$'
 
 union all
 
@@ -2507,7 +2524,7 @@ mymig.monograph_part_get_current_job()
 FROM
 biblio.monograph_part bmp
 JOIN asset.copy_part_map acpm ON (bmp.id = acpm.part)
-JOIN mymig.monograph_part_conversion mmpc ON (mmpc.original_label = bmp.label AND acpm.part = bmp.id)
+JOIN mymig.monograph_part_conversion mmpc ON (mmpc.original_label = bmp.label AND acpm.part = bmp.id AND mmpc.job=mymig.monograph_part_get_current_job())
 -- LEFT JOIN mymig.monograph_part_conversion_map mmpcm ON ( acpm.target_copy = mmpcm.copy AND bmp.record=mmpcm.record and mmpcm.job=mymig.monograph_part_get_current_job())
 WHERE
 NOT bmp.deleted
@@ -2528,6 +2545,7 @@ FROM
 mymig.monograph_part_conversion_map mmpcm
 LEFT JOIN biblio.monograph_part bmp ON (bmp.label = mmpcm.new_label AND bmp.record = mmpcm.record )
 WHERE
+mmpcm.job = mymig.monograph_part_get_current_job() AND
 bmp is null;
 
 -- assign the copies to the new part where appropriate
@@ -2539,6 +2557,7 @@ FROM
 biblio.monograph_part bmp,
 mymig.monograph_part_conversion_map mmpcm
 WHERE
+mmpcm.job = mymig.monograph_part_get_current_job() AND
 mmpcm.acpm = acpm.id AND
 mmpcm.copy = acpm.target_copy AND
 mmpcm.record = bmp.record AND
@@ -2552,7 +2571,7 @@ SET
 deleted = TRUE
 FROM
 biblio.monograph_part bmp
-JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label )
+JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label AND mmpcm.job = mymig.monograph_part_get_current_job() )
 LEFT JOIN asset.copy_part_map acpm ON ( acpm.part=bmp.id )
 WHERE
 bmp_outter.id=bmp.id AND
