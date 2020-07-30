@@ -2588,7 +2588,7 @@ select mymig.monograph_part_update_current_job('Done',true);
 
 -- Make a report for those labels that were not converted or touched
 -- select
--- bmp.label
+-- bmp.label,string_agg(bmp.record::text,',')
 -- from
 -- biblio.monograph_part bmp
 -- left join mymig.monograph_part_conversion mmpc on(bmp.label=mmpc.original_label)
@@ -2598,3 +2598,4 @@ select mymig.monograph_part_update_current_job('Done',true);
 -- mmpc2.original_label is null and
 -- not bmp.deleted
 -- group by 1
+-- order by length(bmp.label)
