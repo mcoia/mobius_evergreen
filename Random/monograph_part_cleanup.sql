@@ -2549,7 +2549,7 @@ mmpcm.job = mymig.monograph_part_get_current_job() AND
 bmp is null;
 
 -- assign the copies to the new part where appropriate
-select mymig.monograph_part_update_current_job('Updating copies Inserting biblio.monograph_part new part labels that do not already exist');
+select mymig.monograph_part_update_current_job('Updating copies to point to the new monograph parts');
 UPDATE asset.copy_part_map acpm
 SET
 part = bmp.id
@@ -2579,7 +2579,22 @@ acpm.id IS NULL;
 
 select mymig.monograph_part_update_current_job('Committing transaction');
 
-ROLLBACK;
+COMMIT;
 
 select mymig.monograph_part_update_current_job('Done',true);
 -- 
+
+
+
+-- Make a report for those labels that were not converted or touched
+-- select
+-- bmp.label
+-- from
+-- biblio.monograph_part bmp
+-- left join mymig.monograph_part_conversion mmpc on(bmp.label=mmpc.original_label)
+-- left join mymig.monograph_part_conversion mmpc2 on(bmp.label=mmpc2.new_label)
+-- where
+-- mmpc.original_label is null and
+-- mmpc2.original_label is null and
+-- not bmp.deleted
+-- group by 1
