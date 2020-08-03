@@ -134,7 +134,7 @@
 				}
 				my $dbuser = @dbUsers[0];
 				my $dbpass = @dbPasses[0];
-				my $remoteDirectory = "/";
+                my $remoteDirectory = $conf{"ftpremotedir"} || "/";
 			#All inputs are there and we can proceed
 				if($valid)
 				{
@@ -164,7 +164,7 @@
 							my $dateString = "$fdate $ftime";  # "2013-02-16 05:00:00";
 							my @tolist = ($conf{"alwaysemail"});
 							my $email = new email($conf{"fromemail"},\@tolist,0,0,\%conf);
-							$email->send("CollectionHQ $school - $platform $type Winding Up - Job # $dateString","I have started this process.\r\n\r\nYou will be notified when I am finished\r\n\r\n-MOBIUS Perl Squad-");
+                            $email->send("$school - $platform $type Winding Up - Job # $dateString","I have started this process.\r\n\r\nYou will be notified when I am finished\r\n\r\n-MOBIUS Perl Squad-");
 						#Logging and emailing
 						
 							my $marcOutFile = $outputMarcFile;
@@ -267,7 +267,7 @@
 								{	
 									undef @marc;
 									my @files = ($marcOutFile);
-									if(1)  #switch FTP on and off easily
+                                    if( length($conf{"ftphost"}) > 0 )
 									{
 										local $@;
 										eval{$mobUtil->sendftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$remoteDirectory,\@files,$log);};
@@ -277,6 +277,23 @@
 											my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
 											$email->send("RMO $school - $platform $type FTP FAIL - Job # $dateString","I'm just going to apologize right now, I could not FTP the file to ".$conf{"ftphost"}." ! Remote directory: $remoteDirectory\r\n\r\nYou are going to have to do it by hand. Bummer.\r\n\r\nCheck the log located: ".$conf{"logfile"}." and you will know more about why. Please fix this so that I can FTP the file in the future!\r\n\r\n File:\r\n\r\n$marcOutFile\r\n$recCount record(s).  \r\n\r\n-MOBIUS Perl Squad-");
 											$failString = "FTP Fail";
+                                            $valid=0;
+                                        }
+                                     }
+                                     elsif( length($conf{"httpuploadurl"}) > 0 )
+                                     {
+                                        my $cmd = '"curl --form \\"file=@' . $marcOutFile . '\\" ' . $conf{"httpuploadurl"}. '"';
+                                        $cmd = "system($cmd);";
+                                        $log->addLogLine("Sending file via http:");
+                                        $log->addLogLine($cmd);
+                                        local $@;
+                                        eval $cmd;
+                                        if ($@)
+                                        {
+                                            $log->addLogLine("HTTPS sending FAILED");
+                                            my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
+                                            $email->send("RMO $school - $platform $type HTTPD SEND FAIL - Job # $dateString","I'm just going to apologize right now, I could not HTTPS SEND the file to ".$conf{"httpuploadurl"}." ! Remote directory: $remoteDirectory\r\n\r\nYou are going to have to do it by hand. Bummer.\r\n\r\nCheck the log located: ".$conf{"logfile"}." and you will know more about why. Please fix this so that I can FTP the file in the future!\r\n\r\n File:\r\n\r\n$marcOutFile\r\n$recCount record(s).  \r\n\r\n-MOBIUS Perl Squad-");
+                                            $failString = "HTTPS sending FAILED";
 											$valid=0;
 										 }
 									 }

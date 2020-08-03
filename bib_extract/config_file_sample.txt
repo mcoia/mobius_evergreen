@@ -6,7 +6,7 @@ logfile = /tmp/ebsco_school.log
 #
 # Path to the executing script
 #
-pathtothis = /tmp/summon_or_ebsco.pl
+pathtothis = /tmp/evergreen_bib_extract.pl
 
 #
 # Folder to output marc records
@@ -47,11 +47,13 @@ maxdbconnections = 2
 
 #
 # FTP Server to drop off the marc output
-#
+# In the case where MARCIVE is using HTTPS - leave the ftp settings blank and set the httpuploadurl
 
 ftphost = ftp.server.com
 ftplogin = loginname
 ftppass = ftppassword
+ftpremotedir = /
+httpuploadurl = https://web.marcive.com/httpupload/Uploader.ashx?l=authority
 
 #
 # EMAIL OPTIONS
