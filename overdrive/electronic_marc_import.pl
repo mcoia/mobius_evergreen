@@ -45,6 +45,7 @@ use REST::Client;
 use LWP::UserAgent;
 use Digest::SHA qw(hmac_sha256_base64);
 use HTML::Entities;
+use pQuery;
 
 our $configFile;
 our $debug = 0;
@@ -109,7 +110,7 @@ or die("Error in command line arguments\nYou can specify
         my $ftime = $dt->hms;
         my $dateString = "$fdate $ftime";
         $log = new Loghandler($conf->{"logfile"});
-        #$log->truncFile("");
+        $log->truncFile("");
         $log->addLogLine(" ---------------- Script Starting ---------------- ");
         my @reqs = ("server","login","password","remotefolder","sourcename","tempspace","archivefolder","dbhost","db","dbuser","dbpass","port","participants","logfile","incomingmarcfolder","recordsource","ignorefiles","removalfiles","bibtag");
 
@@ -198,9 +199,7 @@ or die("Error in command line arguments\nYou can specify
             }
             elsif($reportOnly == -1) ## Make sure we are not just running reports
             {
-                @files = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
-                @files = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} eq 'ftp');
-                @files = @{getMarcFromCloudlibrary()}  if(lc$conf{"recordsource"} eq 'cloudlibrary');
+                @files = @{getmarc()};
 
                 if($#files!=-1)
                 {
@@ -917,6 +916,21 @@ sub moveFile
     return 1;
 }
 
+sub getmarc
+{
+    my @ret;
+    if( (lc$conf{"recordsource"} ne 'folder') && (lc$conf{"recordsource"} ne 'ftp') && (lc$conf{"recordsource"} ne 'cloudlibrary') && (lc$conf{"recordsource"} ne 'marcivehttps') )
+    {
+        $log->addLogLine("Unsupported external source: " . lc$conf{"recordsource"});
+        exit;
+    }
+    @ret = @{getmarcFromFolder()}  if(lc$conf{"recordsource"} eq 'folder');
+    @ret = @{getmarcFromFTP()}  if(lc$conf{"recordsource"} eq 'ftp');
+    @ret = @{getMarcFromCloudlibrary()}  if(lc$conf{"recordsource"} eq 'cloudlibrary');
+    @ret = @{getMarcFromMarciveHTTPS()}  if(lc$conf{"recordsource"} eq 'marcivehttps');
+    return \@ret;
+}
+
 sub getmarcFromFolder
 {
     my $incomingfolder = $conf{'incomingmarcfolder'};
@@ -1352,6 +1366,115 @@ sub _getMarcFromCloudlibrary
 
 }
 
+sub getMarcFromMarciveHTTPS
+{
+
+    if( (length($conf{'server'}) < 4) || (length($conf{'remotefolder'}) < 4) )
+    {
+        $log->addLogLine("Marcive settings for 'server' and 'remotefolder' are insufficient: '".$conf{'server'}."' / '".$conf{'remotefolder'}."'");
+        exit;
+    }
+    my $server = $conf{'server'}.'&s='.$conf{'remotefolder'};
+    my @ret = ();
+
+    $log->addLogLine("**********MARCIVE HTTPS starting -> $server");
+    my @interestingFiles = ();
+
+    my $rowNum = 0;
+    $log->addLine(pQuery->get($server)->content);
+    pQuery($server)->find("tr")->each(sub {
+        if($rowNum > 0) ## Skipping the title row
+        {
+            my $i = shift;
+            my $row = $_;
+            my $colNum = 0;
+            my %file = (filename => '', size => '', downloadlink => '');
+            pQuery("td",$row)->each(sub {
+                shift;
+                if($colNum == 0) # filename
+                {
+                    pQuery("a",$_)->each(sub {
+                        my $a_html = pQuery($_)->toHtml;
+                        shift;
+                        $file{'filename'} = pQuery($_)->text();
+                        $a_html =~ s/.*?href=['"]([^'"]*)['"].*$/$1/g;
+                        $file{'downloadlink'} = $a_html;
+                    });
+                }
+                elsif($colNum == 1)
+                {
+                    my @t = split(/\s/,pQuery($_)->text());
+                    $file{'size'} = @t[0];
+                }
+                $colNum++;
+            });
+            push (@interestingFiles, \%file);
+        }
+        $rowNum++;
+    });
+
+    $log->addLine(Dumper(\@interestingFiles)) if $debug;
+    foreach(@interestingFiles)
+    {
+        my %file = %{$_};
+        my $filename = $file{'filename'};
+        my $download = decideToDownload($filename);
+
+        if($download)
+        {
+            if(-e "$archivefolder/"."$filename")
+            {
+                my $size = stat("$archivefolder/"."$filename")->size; #[7];
+                my $rsize = $file{'size'};
+                $log->addLine("Local: $size") if $debug;
+                $log->addLine("remot: $rsize") if $debug;
+                if($size ne $rsize)
+                {
+                    $log->addLine("Local: $size") if $debug;
+                    $log->addLine("remot: $rsize") if $debug;
+                    $log->addLine("$archivefolder/"."$filename differes in size");
+                    unlink("$archivefolder/"."$filename");
+                }
+                else
+                {
+                    $log->addLine("skipping $filename");
+                    $download=0;
+                }
+            }
+            else
+            {
+                $log->addLine("NEW $filename");
+            }
+            if($download)
+            {
+                my $path = $archivefolder."/".$filename;
+                $path = substr($path,0,rindex($path,'/'));
+                if(!-d $path)
+                {
+                    $log->addLine("$path doesnt exist - creating directory");
+                    make_path($path, {
+                    verbose => 0,
+                    mode => 0755,
+                    });
+                }
+                $path = $archivefolder."/".$filename;
+                getstore($file{'downloadlink'}, $path);
+                if(-e $path)
+                {
+                    push (@ret, "$filename");
+                }
+                else
+                {
+                    $log->addLogLine("Unable to download ".$file{'downloadlink'});
+                }
+            }
+        }
+    }
+    $log->addLogLine("********** MARCIVE HTTPS DONE ***************");
+    $log->addLine(Dumper(\@ret));
+    return \@ret;
+}
+
 sub ftpRecurse
 {
     my $ftpOb = @_[0];
@@ -1457,7 +1580,7 @@ sub add9
                     #print "Comparing ".@subfields[$subs]. " to ".@shortnames[$t]."\n";
                         if(@subfields[$subs] eq @shortnames[$t])
                         {
-                            print "Same!\n";
+                            # print "Same!\n";
                             $shortnameexists=1;
                         }
                     }
