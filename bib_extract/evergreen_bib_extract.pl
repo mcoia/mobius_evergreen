@@ -23,6 +23,7 @@
  use MARC::File::XML (BinaryEncoding => 'utf8');
  use MARC::File::USMARC;
  use MARC::Batch;
+ use File::stat;
 
    #If you have weird control fields...
 
@@ -36,6 +37,7 @@
     # }
     # exit;
  my $barcodeCharacterAllowedInEmail=2000;
+ our $log;
 
  my $configFile = @ARGV[0];
  if(!$configFile)
@@ -52,7 +54,7 @@
     my %conf = %{$conf};
     if ($conf{"logfile"})
     {
-        my $log = new Loghandler($conf->{"logfile"});
+        $log = new Loghandler($conf->{"logfile"});
         $log->addLogLine(" ---------------- Script Starting ---------------- ");
         my @reqs = ("dbhost","db","dbuser","dbpass","port","fileprefix","marcoutdir","school","alwaysemail","fromemail","queryfile","platform","pathtothis","maxdbconnections");
         my $valid = 1;
@@ -265,7 +267,7 @@
                                 if($recCount>0)
                                 {
                                     undef @marc;
-                                    my @files = ($marcOutFile);
+                                    my @files = @{splitMARC($marcOutFile, $conf{"maxfilesize"})};
                                     if( length($conf{"ftphost"}) > 0 )
                                     {
                                         local $@;
@@ -281,19 +283,23 @@
                                      }
                                      elsif( length($conf{"httpuploadurl"}) > 0 )
                                      {
-                                        my $cmd = '"curl --form \\"file=@' . $marcOutFile . '\\" ' . $conf{"httpuploadurl"}. '"';
-                                        $cmd = "system($cmd);";
-                                        $log->addLogLine("Sending file via http:");
-                                        $log->addLogLine($cmd);
-                                        local $@;
-                                        eval $cmd;
-                                        if ($@)
+                                        foreach(@files)
                                         {
-                                            $log->addLogLine("HTTPS sending FAILED");
-                                            my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
-                                            $email->send("RMO $school - $platform $type HTTPD SEND FAIL - Job # $dateString","I'm just going to apologize right now, I could not HTTPS SEND the file to ".$conf{"httpuploadurl"}." ! Remote directory: $remoteDirectory\r\n\r\nYou are going to have to do it by hand. Bummer.\r\n\r\nCheck the log located: ".$conf{"logfile"}." and you will know more about why. Please fix this so that I can FTP the file in the future!\r\n\r\n File:\r\n\r\n$marcOutFile\r\n$recCount record(s).  \r\n\r\n-MOBIUS Perl Squad-");
-                                            $failString = "HTTPS sending FAILED";
-                                            $valid=0;
+                                            my $cmd = '"curl --form \\"file=@' . $_ . '\\" ' . $conf{"httpuploadurl"}. '"';
+                                            print $cmd."\n";
+                                            $cmd = "system($cmd);";
+                                            $log->addLogLine("Sending file via http:");
+                                            $log->addLogLine($cmd);
+                                            local $@;
+                                            eval $cmd;
+                                            if ($@)
+                                            {
+                                                $log->addLogLine("HTTPS sending FAILED");
+                                                my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
+                                                $email->send("RMO $school - $platform $type HTTPD SEND FAIL - Job # $dateString","I'm just going to apologize right now, I could not HTTPS SEND the file to ".$conf{"httpuploadurl"}." ! Remote directory: $remoteDirectory\r\n\r\nYou are going to have to do it by hand. Bummer.\r\n\r\nCheck the log located: ".$conf{"logfile"}." and you will know more about why. Please fix this so that I can FTP the file in the future!\r\n\r\n File:\r\n\r\n$marcOutFile\r\n$recCount record(s).  \r\n\r\n-MOBIUS Perl Squad-");
+                                                $failString = "HTTPS sending FAILED";
+                                                $valid=0;
+                                            }
                                         }
                                      }
                                 }
@@ -352,6 +358,66 @@
     {
         print "Config file does not define 'logfile'\n";
     }
+ }
+
+ sub splitMARC # This is needed with the vendor has a file size limit. Limit is expressed in Megabyts
+ {
+    my $marcfile = shift;
+    my $filesize = shift || 1800; # keep it under 2GB
+    $filesize = $filesize*1024*1024;
+    my $size = stat($marcfile)->size;
+    my @files = ($marcfile);
+    if($size > $filesize)
+    {
+        @files = ();
+        my @sp = split(/\//,$marcfile);
+        my $filename = pop @sp;
+        my @sp = split(/\./,$filename);
+        pop @sp;
+        my $filename = join(".", @sp);
+
+        print "figured it to be: $filename\n";
+        $log->addLogLine("$marcfile is too large. It's $size which is larger than $filesize. Splitting it up.");
+        my $num = 1;
+        my $thisOutFile = figureSplitFileName($conf->{"marcoutdir"},$filename,$num);
+        print "New name: $thisOutFile\n";
+        my $splitFileWriter = new Loghandler($thisOutFile);
+        my $file = MARC::File::USMARC->in( $marcfile );
+        my $checkLoop = 1000;
+        my $record = 0;
+        while ( my $marc = $file->next() )
+        {
+            $splitFileWriter->appendLine($marc->as_usmarc());
+            $record++;
+            if($record % $checkLoop == 0)
+            {
+                $size = stat($thisOutFile)->size;
+                if($size > $filesize)
+                {
+                    push @files, $thisOutFile;
+                    print "Split file $thisOutFile has exceeded $filesize\nRotating...\n";
+                    $num++;
+                    $thisOutFile = figureSplitFileName($conf->{"marcoutdir"},$filename,$num);
+                    $splitFileWriter = new Loghandler($thisOutFile);
+                    print "New file $thisOutFile\n";
+                }
+            }
+        }
+        push @files, $thisOutFile;
+
+    }
+    return \@files;
+ }
+
+ sub figureSplitFileName
+ {
+    my $folder = shift;
+    my $prefix = shift;
+    my $num = shift;
+
+    $num .= ""; # convert to a string
+    $num = "0$num" while (length $num < 3);
+    return $mobUtil->chooseNewFileName($folder,$prefix,$num);
  }
 
  sub processMARC

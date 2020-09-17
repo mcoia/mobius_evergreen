@@ -54,6 +54,9 @@ ftplogin = loginname
 ftppass = ftppassword
 ftpremotedir = /
 httpuploadurl = https://web.marcive.com/httpupload/Uploader.ashx?l=authority
+# File size limitation. Will split file into .001 .002 file names when filesize exceeds threshold.
+# Expressed in MB. Defaults to 1800MB
+maxfilesize = 1800
 
 #
 # EMAIL OPTIONS
