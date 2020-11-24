@@ -721,7 +721,7 @@ package evergreenScraper;
         }
         $logout=substr($logout,0,-1);
         #$log->addLine($logout);
-        my $field = MARC::Field->new('852','4', ' ', 'b' => @row[0], 'b'=>@row[1], 'c'=>@row[6], 'j'=>@row[5], 'g'=>@row[4], 'p'=>@row[3], 'y'=>"\$".@row[2]  );
+        my $field = MARC::Field->new('852','4', ' ', 'a' => @row[0], 'b'=>@row[1], 'c'=>@row[6], 'j'=>@row[5], 'g'=>@row[4], 'p'=>@row[3], 'y'=>"\$".@row[2]  );
         #print "done Making holdings field\n";
         push(@{$holdings{$recordID}},$field);
     }
