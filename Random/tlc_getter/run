@@ -1,0 +1,38 @@
+#!/bin/bash
+
+
+# Initial setup for your environment
+# Be sure and edit the vars.yml file for your path to here
+# Run this only once
+# cd (thisfolder) && ansible-playbook -vvv setup_playbook.yml
+
+
+# Make sure all the leftover stuff isn't running
+ps -ef | grep firefox | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+ps -ef | grep Xvfb | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+ps -ef | grep selenium | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+
+sleep 5
+
+ps -ef | grep firefox | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+ps -ef | grep Xvfb | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+ps -ef | grep selenium | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+
+sleep 5
+
+rm -f /tmp/.X99-lock
+
+# run the selenium stuff
+selenium/start_selenium &
+
+sleep 10
+
+# Wipe out the screenshots from last time
+rm screenshots/*
+
+
+# Make sure all the leftover stuff isn't running
+#ps -ef | grep firefox | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+#ps -ef | grep Xvfb | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+#ps -ef | grep selenium | grep -v grep | awk '{print $2}' | xargs sudo kill -9
+
