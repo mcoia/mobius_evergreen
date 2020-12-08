@@ -9,35 +9,353 @@ use Data::Dumper;
 
 use parent TLCWebController;
 
-our %selectAnswers = 
-(
-    "Location" => ":branches",
-    "Active or Owning Holdings Code" => "Active Holdings Code",
-    "Titles to Include" => "New and Edited Titles",
-    "Include On-The-Fly Items" => "Yes",
-    "Sort" => ":anything"
-
-);
+our $attemptMax = 5;
+our %selectAnswers;
 
 our @usedBranches = ();
 our $branchable = 0;
-our @selectAlled = ();
+our %attempts = ();
+our %filesOnDisk = ();
 
 sub scrape
 {
     my ($self) = shift;
+    
+    my $exec = '%selectAnswers = (' . $self->{selectAnswers}. ');';
+    eval($exec);
+    $selectAnswers{"finished"} = ();
+    while ((my $element, my $val) = each(%selectAnswers))
+    {
+        $attempts{$element} = 0;
+    }
 
     my $reportsPage = $self->SUPER::getToReportSelectionPage();
     if($reportsPage)
     {
         $self->takeScreenShot('filling_selects');
-        fillSelects($self);
+        fillAllOptions($self);
         print "done\n";
-        $self->takeScreenShot('filled_selects');
-        print "done with screenshot\n";
-        exit;
-        
+        $self->takeScreenShot('filled_everything');
+        clickFinish($self);
+        my $running = isReportRunning($self);
+        my $isDone = seeIfReportIsDone($self);
+        if(!$running && !$isDone)
+        {
+            print "Failed to get the report started\nSee screenshot for details";
+            $self->takeScreenShot('report_failed_to_start');
+            exit;
+        }
+        my $waiting = 0;
+        while($running || !$isDone)
+        {
+            $running = isReportRunning($self);
+            $isDone = seeIfReportIsDone($self);
+            print "Waiting for '". $self->{name}."' to finish running";
+            if($waiting % 10 == 0)
+            {
+                print ",taking screenshot\n";
+                $self->takeScreenShot('report_running');
+            }
+            else
+            {
+                print "\n";
+            }
+            $waiting++;
+            sleep 1;
+        }
+        $self->takeScreenShot('report_done');
+        readSaveFolder($self,1);
+        clickDownloadReportCSV($self);
+        print "Clicked Download\n";
+        my $newFile = 0;
+        while(!$newFile)
+        {
+            $newFile = seeIfNewFile($self);
+            print Dumper(\%filesOnDisk);
+            sleep 1;
+        }
+        $self->takeScreenShot('clicked_download');
     }
+}
+
+sub fillAllOptions
+{
+    my ($self) = shift;
+    my $keepGoing = 1;
+    my $totalPopulateButtons = 0;
+    my $totalSingles = 0;
+    my $totalSingleChanged = 0;
+    my @singleResults;  #holds single dropdown menu results
+    my @multiResults;   #holds multi select box results
+    my $doneMultis = 0;
+    my $loops = 0;
+    while($keepGoing)
+    {
+        my $somethingChanged = 0;
+        @singleResults = @{fillSelects($self)};
+        $totalSingles = @singleResults[0] if(!$totalSingles);
+        $totalSingleChanged += @singleResults[1];
+        if(!$loops)
+        {
+            @multiResults = @{selectAlls($self)};
+            $totalPopulateButtons = clickPopulateButtons($self);
+            $doneMultis = 1 if(!@multiResults[0]);
+        }
+        else #Not the first time
+        {
+            if($totalSingles > $totalSingleChanged)
+            {
+                @singleResults = @{fillSelects($self)};
+                $totalSingles = @singleResults[0] if(!$totalSingles);
+                $totalSingleChanged += @singleResults[1];
+                $somethingChanged = 1 if @singleResults[1];
+            }
+            if(@multiResults[0] && !@multiResults[2] && (@multiResults[1] < @multiResults[0]) )
+            {
+                @multiResults = @{selectAlls($self)};
+                $somethingChanged = 1 if @multiResults[1];
+            }
+            elsif(!$doneMultis)
+            {
+                $doneMultis = 1;
+            }
+            clickPopulateButtons($self) if($somethingChanged && $totalPopulateButtons);
+        }
+        $loops++;
+        print "
+        Total Populate Buttons:       $totalPopulateButtons
+        Total Dropdowns:              $totalSingles
+        Total Dropdowns Changed:      $totalSingleChanged
+        Total Multi Selects:          ".@multiResults[0]."
+        Total Multi Selects Changed:  ".@multiResults[1]."
+        Total Multi Selects no opts:  ".@multiResults[2]."
+        ";
+        sleep 1;
+        if( ($totalSingles > $totalSingleChanged) || !$doneMultis)
+        {
+            print "\nStill clicking stuff\n";
+            $self->takeScreenShot('filling_selects');
+        }
+        else
+        {
+            print "\nAll Square! Moving to run report \n";
+            $keepGoing = 0;
+            fillDates($self);
+            $self->takeScreenShot('filled_dates');
+        }
+    }
+}
+
+sub fillDates
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var first = 1;
+    var doms = document.querySelectorAll('input');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var thisID = doms[i].id;
+        var alabel = doms[i].getAttribute('aria-label');
+        if(alabel && alabel.match(/year/gi) && thisID.match(/year/gi))
+        {
+            if(first)
+            {
+                doms[i].value='1000-01-01';
+                first = 0;
+                var evt = new CustomEvent('change');
+                doms[i].dispatchEvent(evt);
+                evt = new CustomEvent('click');
+                doms[i].dispatchEvent(evt);
+            }
+            else
+            {
+                doms[i].value='4000-01-01';
+                var evt = new CustomEvent('change');
+                doms[i].dispatchEvent(evt);
+                evt = new CustomEvent('click');
+                doms[i].dispatchEvent(evt);
+            }
+        }
+    }
+    
+    first = 1;
+    doms = document.querySelectorAll('input');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var thisID = doms[i].id;
+        if(doms[i].type.match(/hidden/gi) && thisID.match(/date/gi))
+        {
+            if(first)
+            {
+                doms[i].value='1000-01-01';
+                first = 0;
+                 
+            }
+            else
+            {
+                doms[i].value='4000-01-01';
+            }
+        }
+    }
+    ";
+    $self->{driver}->execute_script($script);
+}
+
+sub clickFinish
+{
+    my ($self) = shift;
+    
+    my $script = "
+    var doms = document.querySelectorAll('select');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var thisID = doms[i].id;
+        var multi = doms[i].getAttribute('aria-multiselectable');
+        if(multi && multi == 'false')
+        {
+             var evt = new CustomEvent('change');
+             doms[i].dispatchEvent(evt);
+             evt = new CustomEvent('click');
+             doms[i].dispatchEvent(evt);
+        }
+    }
+    ";
+    $self->{driver}->execute_script($script);
+    sleep 1;
+    $script = 
+    "
+    var doms = document.querySelectorAll('button');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var thisID = doms[i].id;
+        var thisaction = doms[i].getAttribute('onClick');
+        if(thisaction && thisID.match(/finish/gi) && thisaction.match(/finish/gi))
+        {   
+            doms[i].click();
+        }
+    }
+    ";
+    $self->{driver}->execute_script($script);
+    sleep 1;
+}
+
+sub isReportRunning
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var doms = document.querySelectorAll('span');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var ttext = doms[i].innerHTML;
+        if(ttext && ( ttext.match(/Your report is running/gi)  ||  ttext.match(/working/gi)   ) )
+        {
+            return 1;
+        }
+    }
+    return 0;
+    ";
+    my $ret = $self->{driver}->execute_script($script);
+    return $ret;
+}
+
+sub seeIfReportIsDone
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var doms = document.querySelectorAll('img');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var srcattr = doms[i].getAttribute('src');
+        if(srcattr && srcattr.match(/action_view_html/gi))
+        {
+            return 1;
+        }
+    }
+    return 0;
+    ";
+    my $ret = $self->{driver}->execute_script($script);
+    return $ret;
+}
+
+sub selectAlls
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var changed = 0;
+    var howMany = 0;
+    var noOptions = 0;
+    var doms = document.querySelectorAll('select');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var thisID = doms[i].id;
+        var multi = doms[i].getAttribute('aria-multiselectable');
+        if(multi == 'true')
+        {
+            var thisChanged = 0;
+            howMany++;
+            var loops = 0;
+            Array.from(doms[i].options).forEach(function(option_element)
+            {
+                var is_option_selected = option_element.selected;
+                
+                if(!is_option_selected)
+                {
+                    option_element.selected = true;
+                    if(!thisChanged)
+                    {
+                        changed++;
+                    }
+                    thisChanged = 1;
+                }
+                loops++;
+            });
+            if(loops == 0)
+            {
+                noOptions++;
+            }
+            if(thisChanged)
+            {
+                 var evt = new CustomEvent('change');
+                 doms[i].dispatchEvent(evt);
+            }
+        }
+    }
+    return ''+howMany+','+changed+','+noOptions;
+    ";
+    my $selects =  $self->{driver}->execute_script($script);
+    my @s = split(/,/, $selects);
+    return \@s;
+
+}
+
+sub fillSelects
+{
+    my ($self) = shift;
+    my %sels = %{getSingleSelectIDs($self)};
+    my $total = 0;
+    my $changed = 0;
+    while ((my $domid, my $val) = each(%sels))
+    {
+        $total++;
+        my $alreadyDone = 0;
+        foreach(@{$selectAnswers{"finished"}})
+        {
+            $alreadyDone = 1 if($_ eq $val);
+        }
+        if(!$alreadyDone)
+        {
+            print "Filling $domid    '$val'\n";
+            my $worked = fillThisSelect($self, $domid, $val);
+            $changed++ if($worked);
+            sleep 2;
+        }
+    }
+    my @ret = ($total,$changed);
+    return \@ret;
 }
 
 sub getSingleSelectIDs
@@ -62,14 +380,6 @@ sub getSingleSelectIDs
                     allIDs += thisID + ',' + option_text + ',';
                     var option_value = option_element.value;
                 }
-                else
-                {
-                    var is_option_selected = option_element.selected;
-                    if(is_option_selected)
-                    {
-                        allIDs += loops + ',';
-                    }
-                }
                 loops++;
             });
         }
@@ -80,18 +390,12 @@ sub getSingleSelectIDs
     my @s = split(/,/, $selects);
     my %sels = ();
     my $thisOne = 0;
-    my $thisName;
     foreach(@s)
     {
-        if($thisOne && $thisName)
+        if($thisOne)
         {
-            $sels{$thisOne} = ( "name" => $thisName, "selected" => $_);
+            $sels{$thisOne} = $_;
             $thisOne = 0;
-            $thisName = 0;
-        }
-        else if($thisOne)
-        {
-            $thisName = $_;
         }
         else
         {
@@ -101,72 +405,72 @@ sub getSingleSelectIDs
     return \%sels;
 }
 
-sub fillSelects
-{
-    my %sels = %{getSingleSelectIDs($self)};
-    while ((my $domid, my $val) = each(%sels))
-    {
-        fillThisSelect($self, $domid);
-    }
-    return 1;
-}
-
 sub fillThisSelect
 {
     my ($self) = shift;
     my $domid = shift;
+    my $val = shift;
+    my $worked = 0;
     if($selectAnswers{$val})
     {
         if(substr($selectAnswers{$val},0,1) ne ':')
         {
             $selectAnswers{$val} =~ s/\s/\\s/g;
             print "Selecting '$selectAnswers{$val}' from '$domid'\n";
-            my $worked = selectsChooseSpecificOption($self, $domid, $selectAnswers{$val});
+            $worked = selectsChooseSpecificOption($self, $domid, $selectAnswers{$val});
             if(!$worked)
             {
-                print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in my code TLCWebReport.pm\n";
-                $self->takeScreenShot('filled_selects');
-                exit;
+                print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in config\n";
+                $attempts{$val}++;
             }
         }
         else
         {
             if($selectAnswers{$val} =~ m/anything/gi)
             {
-                my $worked = selectsChooseAnyOption($self, $domid);
+                $worked = selectsChooseAnyOption($self, $domid);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in my code TLCWebReport.pm\n";
-                    $self->takeScreenShot('filled_selects');
-                    exit;
+                    print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in config\n";
+                    $attempts{$val}++;
                 }
             }
-            else if($selectAnswers{$val} =~ m/branches/gi)
+            elsif($selectAnswers{$val} =~ m/branches/gi)
             {
                 $branchable = 1;
+                print "Getting Next Branch\n";
                 my $branch = getNextBranch($self, 0);
-                my $worked = selectsChooseSpecificOption($self, $domid, $branch);
+                $worked = selectsChooseSpecificOption($self, $domid, $branch);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in my code TLCWebReport.pm\n";
-                    $self->takeScreenShot('filled_selects');
-                    exit;
+                    print "Couldn't select option: '$branch' in dropdown '".$val."'\nPlease define it in config\n";
+                    $attempts{$val}++;
                 }
+            }
+        }
+        if($worked)
+        {
+            my @fin = @{$selectAnswers{"finished"}};
+            push(@fin, $val);
+            $selectAnswers{"finished"} = \@fin;
+        }
+        else
+        {
+            if($attempts{$val} > $attemptMax)
+            {
+                print "Exceeded $attemptMax attempts on '$val' \nGiving up\n";
+                exit;
             }
         }
     }
     else
     {
-        print "We've encountered a dropdown list that is not defined:\n'$val'\nReport: '" . $self->{name} . "'\nPlease define it in my code TLCWebReport.pm\n";
-        $self->takeScreenShot('filled_selects');
+        print "We've encountered a dropdown list that is not defined:\n'$val'\nReport: '" . $self->{name} . "'\nPlease define it in config\n";
+        $self->takeScreenShot('failed_selects');
         exit;
     }
+    return $worked;
 
-}
-
-sub selectsGetNonCorrect
-{
-    
 }
 
 sub selectsChooseSpecificOption
@@ -184,7 +488,7 @@ sub selectsChooseSpecificOption
         Array.from(doms.options).forEach(function(option_element)
         {
                 var option_text = option_element.text;
-                if(option_text.match(/".$option."/g))
+                if(option_text.match(/".$option."/gi))
                 {
                     doms.selectedIndex = index;
                     found = index;
@@ -218,10 +522,10 @@ sub selectsChooseAnyOption
     {
         Array.from(doms.options).forEach(function(option_element)
         {
-            if(index > 0)
+            if( (index > 0 ) && (found == -1) )
             {
                 var option_text = option_element.text;
-                if(!option_text.match(/\-\-\-\-\-\-/g))
+                if(!option_text.match(/\\-\\-\\-\\-\\-\\-/g))
                 {
                     doms.selectedIndex = index;
                     found = index;
@@ -240,431 +544,141 @@ sub selectsChooseAnyOption
     return 0;
 }
 
+sub clickPopulateButtons
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var doms = document.getElementsByTagName('button');
+    var found = 0;
+    for(var i=0;i<doms.length;i++)
+    {
+        var thisaction = doms[i].getAttribute('onClick');
+        if(thisaction.match(/reprompt/gi))
+        {
+            doms[i].getElementsByTagName('input')[0].click();
+            found++;
+        }
+    }
+    return found;
+    ";
+    print "Executing:
+    $script\n";
+    my $found = $self->{driver}->execute_script($script);
+    sleep 2 if($found);
+    return $found;
+}
+
+sub clickDownloadReportCSV
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var tab = document.getElementById('_NS_runIn');
+    tab.dispatchEvent(new MouseEvent('mouseup', { 'bubbles': true }));
+
+    tab = document.getElementById('_NS_viewInExcel');
+    tab.dispatchEvent(new MouseEvent('mouseover', { 'bubbles': true }));
+
+    tab = document.getElementById('_NS_viewInCSV');
+    tab.dispatchEvent(new MouseEvent('mouseup', { 'bubbles': true }));
+    ";
+    print "Executing:
+    $script\n";
+    $self->{driver}->execute_script($script);
+    my $handles = $self->{driver}->get_window_handles;
+    while(!$handles->[1])
+    {
+        print "Waiting for popup\n";
+        $handles = $self->{driver}->get_window_handles;
+        print $self->{driver}->get_current_window_handle();
+        sleep 1;
+    }
+    $handles = $self->{driver}->get_window_handles;
+    my $waiting = 1;
+    while($handles->[1])
+    {
+        if($waiting % 10 == 0)
+        {
+            $self->{driver}->switch_to_window($handles->[1]);
+            $self->takeScreenShot('new_window');
+            $self->{driver}->switch_to_window($handles->[0]);
+        }
+        print "Waiting for new window to finish - These are the handles right now:\n";
+        print Dumper($self->{driver}->get_window_handles) . "\n";
+        sleep 1;
+        $handles = $self->{driver}->get_window_handles;
+    }
+    print "Final Window Listing\n";
+    print Dumper($self->{driver}->get_window_handles) . "\n";
+    print "Download should start\n";
+}
+
+sub seeIfNewFile
+{
+    my ($self) = shift;
+    my @files = @{readSaveFolder};
+    foreach(@files)
+    {
+        if(!$filesOnDisk{$_})
+        {
+            print "Detected new file: $_\n";
+            return $_;
+        }
+    }
+    return 0;
+}
+
+sub readSaveFolder
+{
+    my ($self) = shift;
+    my $init = shift || 0;
+
+    %filesOnDisk = () if $init;
+    my $pwd = $self->{saveFolder};
+    opendir(DIR,$pwd) or die "Cannot open $pwd\n";
+    my @thisdir = readdir(DIR);
+    closedir(DIR);
+    foreach my $file (@thisdir) 
+    {
+        if(($file ne ".") and ($file ne ".."))
+        {
+            if (-f "$pwd/$file")
+            {           
+                push(@files, "$file");
+                if($init)
+                {
+                    $filesOnDisk{$file} = 1;
+                }
+            }
+        }
+    }
+    return \@files;
+}
+
 sub getNextBranch
 {
     my ($self) = shift;
-    my $justChecking shift;
+    my $justChecking = shift;
     
     my $lastBranch = "";
     my @branches = @{$self->{branches}};
-    foreach(branches)
+    my @leftover = ();
+    foreach(@branches)
     {
         my $thisBranch = $_;
+        my $skip = 0;
         foreach(@usedBranches)
         {
-            if($thisBranch ne $_)
-            {
-                push @usedBranches($thisBranch) if !justChecking;
-                return $thisBranch;
-            }
+            $skip = 1 if($thisBranch eq $_)
+        }
+        if(!$skip)
+        {
+            push (@usedBranches, $thisBranch) if !$justChecking;
+            return $thisBranch;
         }
     }
     return 0;
-}
-
-sub collectReportData
-{
-    my ($self) = shift;
-    my $dbDate = shift;
-    my @frameSearchElements = ('HOME LIBRARY TOTAL CIRCULATION');
-
-    if(handleRecalculate($self))
-    {
-        if(!$self->switchToFrame(\@frameSearchElements))
-        {
-            my $randomHash = $self->SUPER::collectReportData($dbDate);
-
-            ## Attempt to correct any unknown branches
-            translateShortCodes($self);
-
-            $self->SUPER::normalizeNames();
-        }
-        else
-        {
-            return 0;
-        }
-    }
-}
-
-sub handleRecalculate
-{
-    my ($self) = @_[0];
-    print "Clicking Recalculate\n";
-    my @frameSearchElements = ('RECAL');
-    
-    if(!$self->switchToFrame(\@frameSearchElements))
-    {   
-        my $owning = $self->{driver}->execute_script("
-            var doms = document.getElementsByTagName('form');
-            for(var i=0;i<doms.length;i++)
-            {
-                doms[i].submit();
-            }
-        ");
-        sleep 1;
-        $self->{driver}->switch_to_frame();
-        my $finished = handleReportSelection_processing_waiting($self);
-        $self->takeScreenShot('handleRecalculate');
-        return $finished;
-    }
-    else
-    {
-    print "didn't find RECAL\n";
-    $self->takeScreenShot('handleRecalculate_notfound');
-        return 0;
-    }
-}
-
-sub translateShortCodes
-{
-    my ($self) = shift;
-
-    my $worked = 0;
-    if( !$self->{postgresConnector})
-    {
-        try
-        {
-            $self->{log}->addLine("Making new DB connection to pg");
-            $self->{postgresConnector} = new DBhandler($self->{pgDB},$self->{pgURL},$self->{pgUser},$self->{pgPass},$self->{pgPort},"pg");
-            $worked = 1 if($self->{postgresConnector}->getQuote(""));
-        }
-        catch
-        {
-            print "ERROR: PG Connection = \n".$@."\n";
-            $self->{log}->addLine("ERROR: PG Connection = \n".$@);
-            $self->{postgresConnector} = 0;
-        };
-    }
-    else
-    {
-        $worked = 1 if($self->{postgresConnector}->getQuote(""));
-        $self->{log}->addLine("PG Connection = $worked") if $self->{debug};
-    }
-    if($worked)
-    {
-        my $randomHash = $self->generateRandomString(12);
-        my $query =
-        "
-        select svb.code_num,svl.code,svbn.name,svbn.branch_id 
-        from
-        sierra_view.location svl,
-        sierra_view.branch svb,
-        sierra_view.branch_name svbn
-        where
-        svbn.branch_id=svb.id and
-        svb.code_num=svl.branch_code_num and
-        svbn.name is not null and
-        btrim(svbn.name) !=''
-        ";
-        
-        $self->{log}->addLine("Connection to PG:\n$query");
-        my @results = @{$self->{postgresConnector}->query($query)};
-
-        ## re-using an already existing table to stage our results into.
-        $query = "INSERT INTO 
-        $self->{prefix}"."_bnl_stage
-        (working_hash,owning_lib,borrowing_lib)
-        values
-        ";
-        my @vals = ();
-        foreach(@results)
-        {
-            my @row = @{$_};
-            $query .= "( ?, ? , ? ),\n";
-            push @vals, ($randomHash, $self->trim(@row[1]), $self->trim(@row[2]));
-        }
-        $query = substr($query,0,-2);
-        $self->doUpdateQuery($query,"translateShortCodes INSERT $self->{prefix}"."_bnl_stage",\@vals);
-
-        # Update the full names from those from postgres but do not get overridden by the branch_shortname_translate table
-        $query = "
-        UPDATE 
-        $self->{prefix}"."_branch branch,
-        $self->{prefix}"."_bnl_stage bnl_stage,
-        $self->{prefix}"."_cluster cluster
-        set
-        branch.institution = bnl_stage.borrowing_lib
-        WHERE
-        cluster.id = branch.cluster and
-        bnl_stage.owning_lib = branch.shortname and
-        cluster.name = ? and
-        branch.shortname not in(select shortname from $self->{prefix}"."_branch_shortname_agency_translate) and
-        bnl_stage.working_hash = ?";
-        @vals = ($self->{name}, $randomHash);
-        $self->doUpdateQuery($query,"translateShortCodes branch.institution = bnl_stage.borrowing_lib UPDATE $self->{prefix}"."_branch",\@vals);
-        undef @vals;
-    }
-
-    # Update the full names from those that are overridden by the branch_shortname_translate table
-    my @vals =  ($self->{name});
-    my $query = "
-    UPDATE 
-    $self->{prefix}"."_branch branch,
-    $self->{prefix}"."_branch_shortname_agency_translate shortname_trans,
-    $self->{prefix}"."_cluster cluster
-    set
-    branch.institution = shortname_trans.institution
-    WHERE
-    cluster.id = branch.cluster and
-    cluster.name = ? and
-    branch.shortname = shortname_trans.shortname";
-    $self->doUpdateQuery($query,"translateShortCodes branch.institution = shortname_trans.institution UPDATE $self->{prefix}"."_branch",\@vals);
-
-}
-
-sub handleReportSelection
-{
-    my ($self) = @_[0];
-    my $selection = @_[1];
-    my @frameSearchElements = ('TOTAL circulation', 'Choose a STARTING and ENDING month');
-        
-    if(!$self->switchToFrame(\@frameSearchElements))
-    {   
-        my $owning = $self->{driver}->execute_script("
-            var doms = document.getElementsByTagName('td');
-            var stop = 0;
-            for(var i=0;i<doms.length;i++)
-            {
-                if(!stop)
-                {
-                    var thisaction = doms[i].innerHTML;
-
-                    if(thisaction.match(/".$selection."/gi))
-                    {
-                        doms[i].getElementsByTagName('input')[0].click();
-                        stop = 1;
-                    }
-                }
-            }
-            if(!stop)
-            {
-                return 'didnt find the button';
-            }
-
-            ");
-        sleep 1;
-        $owning = $self->{driver}->execute_script("
-            var doms = document.getElementsByTagName('form');
-            for(var i=0;i<doms.length;i++)
-            {
-                doms[i].submit();
-            }
-        ");
-        sleep 1;
-        $self->{driver}->switch_to_frame();
-        my $finished = handleReportSelection_processing_waiting($self);
-        $self->takeScreenShot('handleReportSelection');
-        return $finished;
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-sub handleReportSelection_processing_waiting
-{
-    my ($self) = @_[0];
-    $count = 0;
-    my @frameSearchElements = ('This statistical report is calculating');
-    while($count < 10)
-    {
-        my $error = $self->switchToFrame(\@frameSearchElements);
-        if(!$error) ## will only exist while server is processing the request
-        {
-            print "Having to wait for server to process: $count\n";
-            my $owning = $self->{driver}->execute_script("
-                var doms = document.getElementsByTagName('form');
-                for(var i=0;i<doms.length;i++)
-                {
-                    doms[i].submit();
-                }
-            ");
-            sleep 1;
-            $self->{driver}->switch_to_frame();
-            $count++;
-        }
-        else
-        {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-sub handleLandingPage
-{
-    my ($self) = @_[0];
-    my @frameSearchElements = ('Circ Activity', '<b>CIRCULATION<\/b>');
-        
-    if(!$self->switchToFrame(\@frameSearchElements))
-    {
-
-    # JS way
-        my $owning = $self->{driver}->execute_script("
-            var doms = document.getElementsByTagName('form');
-            var stop = 0;
-            for(var i=0;i<doms.length;i++)
-            {
-                if(!stop)
-                {
-                    var thisaction = doms[i].getAttribute('action');
-
-                    if(thisaction.match(/\\/managerep\\/startviews\\/0\\/d\\/table_1x1/g))
-                    {
-                        doms[i].submit();
-                        stop = 1;
-                    }
-                }
-            }
-            ");
-
-        # Selemnium Way
-        # my @forms = $self->{driver}->find_elements('//form');
-        # foreach(@forms)
-        # {
-            # $thisForm = $_;
-            # if($thisForm->get_attribute("action") =~ /\/managerep\/startviews\/0\/d\/table_1x1/g )
-            # {
-                # $thisForm->submit();
-            # }
-        # }
-        sleep 2;
-        $self->{driver}->switch_to_frame();
-        $self->takeScreenShot('handleLandingPage');
-        return 1;
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-sub handleCircStatOwningHome
-{
-    my ($self) = shift;
-    my $clickAllActivityFirst = shift|| 0;
-
-    my @frameSearchElements = ('Owning\/Home', 'htcircrep\/owning\/\/o\|\|\|\|\|\/');
-
-    if($clickAllActivityFirst)
-    {
-        if(!$self->switchToFrame(\@frameSearchElements))
-        {   
-            my $owning = $self->{driver}->execute_script("
-                var doms = document.getElementsByTagName('a');
-                var stop = 0;
-                for(var i=0;i<doms.length;i++)
-                {
-                    if(!stop)
-                    {
-                        var thisaction = doms[i].getAttribute('href');
-
-                        if(thisaction.match(/htcircrep\\/activity\\/\\/a0\\|y1\\|s\\|1\\|\\|/g))
-                        {
-                            doms[i].click();
-                            stop = 1;
-                        }
-                    }
-                }
-                if(!stop)
-                {
-                    return 'didnt find the button';
-                }
-
-                ");
-                sleep 1;
-                $self->{driver}->switch_to_frame();
-                $self->takeScreenShot('handleCircStatOwningHome_clickAllActivityFirst');
-        }
-    }
-
-    if(!$self->switchToFrame(\@frameSearchElements))
-    {   
-        my $owning = $self->{driver}->execute_script("
-            var doms = document.getElementsByTagName('a');
-            var stop = 0;
-            for(var i=0;i<doms.length;i++)
-            {
-                if(!stop)
-                {
-                    var thisaction = doms[i].getAttribute('onClick');
-
-                    if(thisaction.match(/htcircrep\\/owning\\/\\/o\\|\\|\\|\\|\\|\\//g))
-                    {
-                        doms[i].click();
-                        stop = 1;
-                    }
-                }
-            }
-            if(!stop)
-            {
-                return 'didnt find the button';
-            }
-
-            ");
-        sleep 1;
-        $owning = $self->{driver}->execute_script("
-            var doms = document.getElementsByTagName('form');
-            for(var i=0;i<doms.length;i++)
-            {
-                doms[i].submit();
-            }
-        ");
-        sleep 1;
-        $self->{driver}->switch_to_frame();
-        $self->takeScreenShot('handleCircStatOwningHome');
-        return 1;
-    }
-    else
-    {
-        return 0;
-    }
-}
-
-sub handleLoginPage
-{
-    my ($self) = @_[0];
-    my $body = $self->{driver}->execute_script("return document.getElementsByTagName('html')[0].innerHTML");
-    $body =~ s/[\r\n]//g;
-    # $self->{log}->addLine("Body of the HTML: " . Dumper($body));
-    if( ($body =~ m/<td>Initials<\/td>/) && ($body =~ m/<td>Password<\/td>/)  )
-    {
-        my @forms = $self->{driver}->find_elements('//form');
-        foreach(@forms)
-        {
-            $thisForm = $_;
-            if($thisForm->get_attribute("action") =~ /\/htcircrep\/\/\-1\/\/VALIDATE/g )
-            {
-                my $circActivty = $self->{driver}->execute_script("
-                var doms = document.getElementsByTagName('input');
-                for(var i=0;i<doms.length;i++)
-                {
-                    var thisaction = doms[i].getAttribute('name');
-
-                    if(thisaction.match(/NAME/g))
-                    {
-                        doms[i].value = '".$self->{webLogin}."';
-                    }
-                    if(thisaction.match(/CODE/g))
-                    {
-                        doms[i].value = '".$self->{webPass}."';
-                    }
-                }
-
-                ");
-                $thisForm->submit();
-                sleep 1;
-                $self->takeScreenShot('handleLoginPage');
-            }
-        }
-    }
-    else
-    {
-        print "no login page found\n";
-        return 0;
-    }
-    return 1;  # always return true even when it doesn't prompt to login
 }
 
 

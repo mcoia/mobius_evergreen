@@ -25,6 +25,8 @@ sub new
         webLogin => shift,
         webPass => shift,
         branches => shift,
+        selectAnswers => shift,
+        saveFolder => shift,
         error => 0,
         pageHandles => \%phandles
         
@@ -235,68 +237,6 @@ sub clickSearchResult
         return 1;
     }
     return 0;
-}
-
-
-sub switchToFrame
-{
-    my ($self) = @_[0];
-    my @pageVals = @{@_[1]};
-    my $frameNum = 0;
-    my $hasWhatIneed = 0;
-    my $tries = 0;
-    my $error = 0;
-    waitForPageLoad($self);
-    while(!$hasWhatIneed)
-    {
-        try
-        {
-            $self->{driver}->switch_to_frame($frameNum); # This can throw an error if the frame doesn't exist
-            # print "Frame: $frameNum is good\n";
-            waitForPageLoad($self);
-            my $body = $self->{driver}->execute_script("return document.getElementsByTagName('html')[0].innerHTML");            
-            $body =~ s/[\r\n]//g;
-            # $self->{log}->addLine("page HTML: $body") if $self->{debug};
-            my $notThere = 0;
-            foreach(@pageVals)
-            {
-                $notThere = 1 if (!($body =~ m/$_/) );
-            }
-            if(!$notThere)
-            {
-                $hasWhatIneed=1;
-            }
-            else
-            {
-                $frameNum++;
-            }
-        }
-        catch
-        {
-            # print "died at frame $frameNum\n";
-            $frameNum++;
-        };
-        
-        # walk back up to the parent frame        
-        $self->{driver}->switch_to_frame();
-        waitForPageLoad($self);
-        $tries++;
-        $error = 1 if $tries > 10;
-        $hasWhatIneed = 1 if $tries > 10;
-    }
-    if(!$error)
-    {
-        # print "About to switch to a real frame: $frameNum\n";
-        try
-        {
-            $self->{driver}->switch_to_frame($frameNum);
-        }
-        catch
-        {
-            takeScreenShot($self,"error_switching_frame");
-        };
-    }
-    return $error;
 }
 
 sub waitForPageLoad

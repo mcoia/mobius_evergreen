@@ -45,8 +45,8 @@ GetOptions (
 )
 or die("Error in command line arguments\nYou can specify
 --log path_to_log_output.log                  [Path to the log output file - required]
---opensrfconf /openils/conf/opensrf.xml                 [Path to the Evergreen Config file (used to get DB access, defaults to /openils/conf/opensrf.xml ]
---config path_to_config.conf              [Path to this script's config, required]
+--opensrfconf /openils/conf/opensrf.xml       [Path to the Evergreen Config file (used to get DB access, defaults to /openils/conf/opensrf.xml ]
+--config path_to_config.conf                  [Path to this script's config, required]
 \n");
 
 
@@ -125,8 +125,13 @@ while($finished < $reportCount)
         # webURL => shift,
         # webLogin => shift,
         # webPass => shift,
-        
-        my $rep = new TLCWebReport($map{$reportNum},$dbHandler,$driver,$cwd,$log,$debug,$conf{"url"},$conf{"login"},$conf{"pass"}, $branches);
+        # branches => shift,
+        # selectAnswers => shift,
+        # error => 0,
+        # pageHandles => \%phandles
+        my %props = %{$reports{$reportNum}};
+        my $attr = $props{"attr"};
+        my $rep = new TLCWebReport($map{$reportNum},$dbHandler,$driver,$cwd,$log,$debug,$conf{"url"},$conf{"login"},$conf{"pass"}, $branches, $attr, $conf{"output_folder"});
         $rep->scrape();
         $finished++;
     }
@@ -149,6 +154,7 @@ sub figureBranches
     }
     $branches = \@branchs;
 }
+
 sub figureReportConfigs
 {
     my %reports = ();
@@ -169,7 +175,7 @@ sub figureReportConfigs
                 {
                     $repProp{$_} = $conf{"report_".$thisNum."_$_"};
                 }
-                $reports{$val} = \%repProp;
+                $reports{$thisNum} = \%repProp;
                 $reportNumbers{$thisNum} = $val;
             }
         }
@@ -195,19 +201,19 @@ sub unEscapeData
 sub initializeBrowser
 {
     $Selenium::Remote::Driver::FORCE_WD3=1;
+    print "Setting Download folder:\n ".$conf{"output_folder"} . "\n";
     # my $driver = Selenium::Firefox->new();
     my $profile = Selenium::Firefox::Profile->new;
-    $profile->set_preference(
-        'browser.download.folderList' => '2',
-        'browser.download.manager.showWhenStarting' => false,
-        'browser.download.dir' => '/tmp',
-        'browser.helperApps.neverAsk.saveToDisk' => "application/xls;text/csv"
-    );
+    $profile->set_preference('browser.download.folderList' => '2');
+    $profile->set_preference('browser.download.manager.showWhenStarting' => false);
+    $profile->set_preference('browser.download.dir' => $conf{"output_folder"});
+    $profile->set_preference('browser.helperApps.neverAsk.saveToDisk' => "application/pdf;text/plain;application/text;text/xml;application/xml;application/xls;text/csv;application/xlsx");
+    $profile->set_preference('pdfjs.disabled' => true);
     $driver = Selenium::Remote::Driver->new
     (
         binary => '/usr/bin/geckodriver',
         browser_name  => 'firefox',
-        'firefox_profile' => $profile
+        firefox_profile => $profile
     );
     $driver->set_window_size(1200,1500);
 }
