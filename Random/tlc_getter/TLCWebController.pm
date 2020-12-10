@@ -12,7 +12,7 @@ our $maxPageLoops = 10;
 sub new
 {
     my $class = shift;
-    my %phandles = ( "Log On to IBM Cognos Software" => "loginPage", "Public Folders" => "reportSearch", "Search" => "clickSearchResult" );
+    my %phandles = ( "Log On to IBM Cognos Software" => "loginPage", "IBM Cognos Software" => "reportSearch", "Public Folders" => "reportSearch", "Search" => "clickSearchResult" );
     my $self = 
     {
         name => shift,
@@ -27,6 +27,7 @@ sub new
         branches => shift,
         selectAnswers => shift,
         saveFolder => shift,
+        outFileName => shift,
         error => 0,
         pageHandles => \%phandles
         
@@ -68,7 +69,7 @@ sub detectPage
         return 1;
     }
     my $function = "";
-    print "title = $title\n";
+    # print "title = $title\n";
     while ((my $key, my $val) = each(%{$self->{pageHandles}}))
     {
         my $len = length($key);
@@ -82,7 +83,7 @@ sub detectPage
     {
         my $ret = 0;
         $function = "\$ret = $function(\$self);";
-        print "Executing: $function\n";
+        # print "Executing: $function\n";
         local $@;
         eval ($function);
         # print "ret came back: $ret\n";
@@ -102,6 +103,7 @@ sub detectPage
     else
     {
         print "This page: '$title' is unknown to us. Cannot proceed\n";
+        giveUp($self);
     }
     return 0;
 }
@@ -132,7 +134,7 @@ sub goHome
 sub getTitle
 {
     my ($self) = @_[0];
-    my $head = $self->{driver}->execute_script("return document.head.innerHTML");            
+    my $head = doJS($self, "return document.head.innerHTML", 1);
     $head =~ s/[\r\n]//g;
     # $self->{log}->addLine($head);
     $head =~ s/.*?<title>([^<]*)<\/title>.*/$1/g;
@@ -142,7 +144,7 @@ sub getTitle
 sub loginPage
 {
     my ($self) = @_[0];
-    print "Handling Login Page\n";
+    # print "Handling Login Page\n";
 
     my $script = 
     "
@@ -150,14 +152,14 @@ sub loginPage
     doms.value = '".$self->{webLogin}."';
     return 1;
     ";
-    $self->{driver}->execute_script($script);
+    doJS($self, $script, 1);
     
     $script = 
     "
     var doms = document.getElementById('CAMPassword');
     doms.value = '".$self->{webPass}."';
     ";
-    $self->{driver}->execute_script($script);
+    doJS($self, $script, 1);
     $self->takeScreenShot('login');
 
     $script = 
@@ -165,7 +167,7 @@ sub loginPage
     var doms = document.getElementById('cmdOK');
     doms.click();
     ";
-    $self->{driver}->execute_script($script);
+    doJS($self, $script, 1);
     # print "finished\n";
     sleep 1;
     $self->takeScreenShot('after_login');
@@ -175,7 +177,7 @@ sub loginPage
 sub reportSearch
 {
     my ($self) = @_[0];
-    print "Handling Report Search\n";
+    # print "Handling Report Search\n";
 
     my $script = 
     "
@@ -187,7 +189,7 @@ sub reportSearch
     doms.dispatchEvent(evt);
     return 1;
     ";
-    $self->{driver}->execute_script($script);
+    doJS($self, $script, 1);
     
     # print "finished\n";
     sleep 1;
@@ -198,7 +200,9 @@ sub reportSearch
 sub clickSearchResult
 {
     my ($self) = @_[0];
-    print "Handling Report Search\n";
+    # print "Handling Report Search\n";
+    my $searchString = $self->{name};
+    $searchString =~ s/\//\\\//g;
 
     my $script = 
     "
@@ -213,7 +217,7 @@ sub clickSearchResult
             if(thisaction.match(/MainSearchTurnUrlIntoPostSubmission/gi))
             {
                 var linkText = doms[i].innerHTML;
-                if(linkText.match(/".$self->{name}."/gi))
+                if(linkText.match(/".$searchString."/gi))
                 {
                     console.log(linkText);
                     doms[i].click();
@@ -229,7 +233,7 @@ sub clickSearchResult
     }
     return 0;
     ";
-    my $answer = $self->{driver}->execute_script($script);
+    my $answer = doJS($self, $script, 1);
     if($answer)
     {
         sleep 1;
@@ -242,15 +246,15 @@ sub clickSearchResult
 sub waitForPageLoad
 {
     my ($self) = shift;
-    my $done = $self->{driver}->execute_script("return document.readyState === 'complete';");
+    my $done = doJS($self, "return document.readyState === 'complete';", 1);
     # print "Page done: $done\n";
     my $stop = 0;
     my $tries = 0;
     
     while(!$done && !$stop)
     {
-        $done = $self->{driver}->execute_script("return document.readyState === 'complete';");
-        print "Waiting for Page load check: $done\n";
+        $done = doJS($self, "return document.readyState === 'complete';", 1);
+        # print "Waiting for Page load check: $done\n";
         $tries++;
         $stop = 1 if $tries > 10;
         $tries++;
@@ -259,15 +263,36 @@ sub waitForPageLoad
     return $done;
 }
 
+sub doJS
+{
+    my ($self) = shift;
+    my $script = shift;
+    my $dontPrint = shift;
+    print "Running JS code\n" if !$dontPrint;
+    $self->{log}->addLine("------ step: $screenShotStep ------------\n$script");
+    return $self->{driver}->execute_script($script);
+}
+
 sub takeScreenShot
 {
     my ($self) = shift;
     my $action = shift;
     $screenShotStep++;
     waitForPageLoad($self);
-    # $self->{log}->addLine("screenshot self: ".Dumper($self));
-    # print "ScreenShot: ".$self->{screenshotDIR}."/".$self->{name}."_".$screenShotStep."_".$action.".png\n";
-    $self->{driver}->capture_screenshot($self->{screenshotDIR}."/".$self->{name}."_".$screenShotStep."_".$action.".png", {'full' => 1});
+    my $fullName = $self->{name}."_".$screenShotStep."_".$action.".png";
+    $fullName =~ s/\///g; # remove forward slashes from name
+    $fullName =~ s/\\//g; # remove back slashes from name
+    $fullName = $self->{screenshotDIR}."/".$fullName;
+    print "ScreenShot: $fullName\n";
+    $self->{driver}->capture_screenshot($fullName, {'full' => 1});
+}
+
+sub giveUp
+{
+    my ($self) = shift;
+    $mobUtil->boxText("HEY, This report: ". $self->{name}. " didn't work out. Press enter to confirm and I'll move on");
+    my $name = <STDIN>;
+    die;
 }
 
 sub generateRandomString

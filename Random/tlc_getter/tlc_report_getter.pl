@@ -109,31 +109,37 @@ my %map = %{$reports{"map"}};
 my $reportNum = 0;
 my $finished = 0;
 my $reportCount = keys %map;
+my $failed = 0;
 
 print "Found $reportCount report(s) in config\n";
 while($finished < $reportCount)
 {
     if($map{$reportNum})
     {
-        print "Running '" . $map{$reportNum} ."'\n";
-        # name => shift,
-        # dbHandler => shift,
-        # driver => shift,
-        # screenshotDIR => shift,
-        # log => shift,
-        # debug => shift,
-        # webURL => shift,
-        # webLogin => shift,
-        # webPass => shift,
-        # branches => shift,
-        # selectAnswers => shift,
-        # error => 0,
-        # pageHandles => \%phandles
+        print $mobUtil->boxText("Running '" . $map{$reportNum} ."'","#","|",4);
         my %props = %{$reports{$reportNum}};
         my $attr = $props{"attr"};
-        my $rep = new TLCWebReport($map{$reportNum},$dbHandler,$driver,$cwd,$log,$debug,$conf{"url"},$conf{"login"},$conf{"pass"}, $branches, $attr, $conf{"output_folder"});
-        $rep->scrape();
-        $finished++;
+        my $outFileName = $props{"migname"};
+        print Dumper($branches) if($finished > 0);
+
+        my $rep = new TLCWebReport($map{$reportNum}, $dbHandler, $driver, $cwd, $log, $debug, $conf{"url"}, $conf{"login"}, $conf{"pass"}, $branches, $attr, $conf{"output_folder"}, $outFileName);
+        local $@;
+        eval
+        {
+            $rep->scrape();
+        };
+        if( $@ )
+        {
+            $failed++;
+            print $mobUtil->boxText("We have a failure: '" . $map{$reportNum} ."'","#","|",4);
+            print "Press Enter to continue to the next report\n";
+            my $answer = <STDIN>;
+        }
+        else
+        {
+            $finished++;
+        }
+        $rep = undef;
     }
     $reportNum++;
 }
@@ -142,6 +148,149 @@ while($finished < $reportCount)
 undef $writePid;
 closeBrowser();
 $log->addLogLine("****************** Ending ******************");
+
+print $mobUtil->boxText("Completed: $finished","#","|",1);
+print $mobUtil->boxText("Failed: $failed","#","|",1);
+
+
+
+sub importFileIntoDB
+{
+    my $file = $_;
+    print "Processing $file\n";
+    my $path;
+    my @sp = split('/',$file);
+    $path=substr($file,0,( (length(@sp[$#sp]))*-1) );
+    my $bareFilename =  pop @sp;
+    @sp = split(/\./,$bareFilename);
+    $bareFilename =  shift @sp;
+    $bareFilename =~ s/^\s+//;
+    $bareFilename =~ s/^\t+//;
+    $bareFilename =~ s/\s+$//;
+    $bareFilename =~ s/\t+$//;
+    $bareFilename =~ s/^_+//;
+    $bareFilename =~ s/_+$//;
+    
+    my $tableName = $tablePrefix."_".$bareFilename;
+    
+    $inputFileFriendly .= "\r\n" . $bareFilename;
+
+
+    checkFileReady($file);
+    
+    my @colPositions = (); # two dimension array with number pairs [position, length]
+    my $lineCount = -1;
+    my @columnNames;
+    my $baseInsertHeader = "INSERT INTO $schema.$tableName (";
+    my $queryByHand = '';
+    my $queryInserts = '';
+    my @queryValues = ();
+    my $success = 0;
+    my $accumulatedTotal = 0;
+    my $parameterCount = 0;
+    
+    open(my $fh,"<:encoding(UTF-16)",$file) || die "error $!\n";
+    while(<$fh>) 
+    {
+        $lineCount++;
+        my $line = $_;
+        
+        if($lineCount == 0) #first line contains the column header names
+        {
+            # For now, we will just push the whole line because we need the second line to tell us the divisions.
+            push(@columnNames, $line);
+            next;
+        }
+        if($lineCount == 1) #second line contains the column division clues
+        {
+            my @chars = split('', $line);
+            @colPositions = @{figureColumnPositions(\@chars)};
+            @columnNames = @{getDataFromLine(\@colPositions, @columnNames[0])};
+            my $query = "DROP TABLE IF EXISTS $schema.$tableName";
+            $dbHandler->update($query);
+            $query = "CREATE TABLE $schema.$tableName (";
+            $query.="id bigserial," if ($primarykey);
+            $query .= "$_ TEXT," foreach(@columnNames);
+            $baseInsertHeader .= "$_," foreach(@columnNames);
+            $query = substr($query,0,-1);
+            $baseInsertHeader = substr($baseInsertHeader,0,-1);
+            $query .= ")";
+            $baseInsertHeader .= ")\nVALUES\n";
+            $queryByHand = $baseInsertHeader;
+            $queryInserts = $baseInsertHeader;
+            $log->addLine($query);
+            $dbHandler->update($query);
+            next;
+        }
+        
+        
+        my @lineLength = split('', $line);
+        # print $#lineLength."\n";
+        my @lastCol = @{@colPositions[$#colPositions]};
+        my $m = @lastCol[0] + @lastCol[1];
+        # print "Needs to be:\n$m";
+        next if ($#lineLength < (@lastCol[0] + @lastCol[1])); # Line is not long enough to get all columns
+        my @data = @{getDataFromLine(\@colPositions, $line)};
+        $queryInserts.="(" if ($#data > -1);
+        $queryByHand.="(" if ($#data > -1);
+        foreach(@data)
+        {
+            $parameterCount++ if (lc($_) ne 'null');
+            push(@queryValues, $_) if (lc($_) ne 'null');
+            $queryInserts .= "null, "  if (lc($_) eq 'null');
+            $queryInserts .= "\$$parameterCount, "  if (lc($_) ne 'null');
+            $queryByHand .= "null, " if (lc($_) eq 'null');
+            $queryByHand .= "\$data\$$_\$data\$, " if (lc($_) ne 'null');
+        }
+        $queryInserts = substr($queryInserts,0,-2) if ($#data > -1);
+        $queryByHand = substr($queryByHand,0,-2) if ($#data > -1);
+        $queryInserts.="),\n" if ($#data > -1);
+        $queryByHand.="),\n" if ($#data > -1);
+        $success++ if ($#data > -1);
+    
+        if( ($success % 500 == 0) && ($success != 0) )
+        {
+            $accumulatedTotal+=$success;
+            $queryInserts = substr($queryInserts,0,-2);
+            $queryByHand = substr($queryByHand,0,-2);
+            $log->addLine($queryByHand);
+            # print ("Importing $success\n");
+            $log->addLine("Importing $accumulatedTotal / $lineCount");
+            $dbHandler->updateWithParameters($queryInserts,\@queryValues);
+            $success = 0;
+            @queryValues = ();
+            $queryByHand = $baseInsertHeader;
+            $queryInserts = $baseInsertHeader;
+            $parameterCount = 0;
+        }
+
+    }
+    close($fh);
+    
+    $queryInserts = substr($queryInserts,0,-2) if $success;
+    $queryByHand = substr($queryByHand,0,-2) if $success;
+    
+    # Handle the case when there is only one row inserted
+    if($success == 1)
+    {
+        $queryInserts =~ s/VALUES \(/VALUES /;            
+        $queryInserts = substr($queryInserts,0,-1);
+    }
+
+    # $log->addLine($queryInserts);
+    $log->addLine($queryByHand);
+    # $log->addLine(Dumper(\@queryValues));
+    
+    $accumulatedTotal+=$success;
+    $log->addLine("Importing $accumulatedTotal / $lineCount") if $success;
+    
+    $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
+    
+    # # delete the file so we don't read it again
+    # Disabled because we are going to let bash do this 
+    # so that we don't halt execution of this script in case of errors
+    # unlink $file;
+}
 
 
 sub figureBranches
@@ -205,13 +354,25 @@ sub initializeBrowser
     # my $driver = Selenium::Firefox->new();
     my $profile = Selenium::Firefox::Profile->new;
     $profile->set_preference('browser.download.folderList' => '2');
-    $profile->set_preference('browser.download.manager.showWhenStarting' => false);
     $profile->set_preference('browser.download.dir' => $conf{"output_folder"});
-    $profile->set_preference('browser.helperApps.neverAsk.saveToDisk' => "application/pdf;text/plain;application/text;text/xml;application/xml;application/xls;text/csv;application/xlsx");
-    $profile->set_preference('pdfjs.disabled' => true);
+    # $profile->set_preference('browser.helperApps.neverAsk.saveToDisk' => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;application/pdf;text/plain;application/text;text/xml;application/xml;application/xls;text/csv;application/xlsx");
+    $profile->set_preference('browser.helperApps.neverAsk.saveToDisk' => "application/vnd.ms-excel; charset=UTF-16LE");
+    # $profile->set_preference('browser.helperApps.neverAsk.saveToDisk' => "");
+    $profile->set_preference("browser.helperApps.neverAsk.openFile" =>"application/vnd.ms-excel; charset=UTF-16LE");
+    # $profile->set_preference("browser.helperApps.neverAsk.openFile" => "");
+    $profile->set_boolean_preference('browser.download.manager.showWhenStarting' => 0);
+    $profile->set_boolean_preference('pdfjs.disabled' => 1);
+    $profile->set_boolean_preference('browser.helperApps.alwaysAsk.force' => 0);
+    $profile->set_boolean_preference('browser.download.manager.useWindow' => 0);
+    $profile->set_boolean_preference("browser.download.manager.focusWhenStarting" => 0);
+    $profile->set_boolean_preference("browser.download.manager.showAlertOnComplete" => 0);
+    $profile->set_boolean_preference("browser.download.manager.closeWhenDone" => 1);
+    $profile->set_boolean_preference("browser.download.manager.alertOnEXEOpen" => 0);
+
     $driver = Selenium::Remote::Driver->new
     (
         binary => '/usr/bin/geckodriver',
+        # binary => '/usr/bin/firefox',
         browser_name  => 'firefox',
         firefox_profile => $profile
     );
@@ -298,9 +459,6 @@ sub getDBconnects
     return \%conf;
 
 }
-
-
-
 
 sub DESTROY
 {

@@ -6,6 +6,8 @@ use pQuery;
 use Try::Tiny;
 use Data::Dumper;
 
+use Mobiusutil;
+
 
 use parent TLCWebController;
 
@@ -16,6 +18,7 @@ our @usedBranches = ();
 our $branchable = 0;
 our %attempts = ();
 our %filesOnDisk = ();
+our $mobUtil = new Mobiusutil();
 
 sub scrape
 {
@@ -23,59 +26,110 @@ sub scrape
     
     my $exec = '%selectAnswers = (' . $self->{selectAnswers}. ');';
     eval($exec);
-    $selectAnswers{"finished"} = ();
-    while ((my $element, my $val) = each(%selectAnswers))
-    {
-        $attempts{$element} = 0;
-    }
-
     my $reportsPage = $self->SUPER::getToReportSelectionPage();
+    my $error = 0;
     if($reportsPage)
     {
-        $self->takeScreenShot('filling_selects');
-        fillAllOptions($self);
-        print "done\n";
-        $self->takeScreenShot('filled_everything');
-        clickFinish($self);
-        my $running = isReportRunning($self);
-        my $isDone = seeIfReportIsDone($self);
-        if(!$running && !$isDone)
+        goReport($self, 1);
+        while($branchable && getNextBranch($self,1))
         {
-            print "Failed to get the report started\nSee screenshot for details";
-            $self->takeScreenShot('report_failed_to_start');
-            exit;
-        }
-        my $waiting = 0;
-        while($running || !$isDone)
-        {
-            $running = isReportRunning($self);
-            $isDone = seeIfReportIsDone($self);
-            print "Waiting for '". $self->{name}."' to finish running";
-            if($waiting % 10 == 0)
+            print $mobUtil->boxText("Looping branches: ".getNextBranch($self,1),"#","|",3);
+            sleep 1;
+            if($self->getToReportSelectionPage())
             {
-                print ",taking screenshot\n";
-                $self->takeScreenShot('report_running');
+                goReport($self, 0);
             }
             else
             {
-                print "\n";
+               print "I'm in the scrape outter loop, and I couldn't get to the main report page\n";
+               $branchable = 0;
+               $error = 1;
             }
-            $waiting++;
-            sleep 1;
         }
-        $self->takeScreenShot('report_done');
-        readSaveFolder($self,1);
-        clickDownloadReportCSV($self);
-        print "Clicked Download\n";
-        my $newFile = 0;
-        while(!$newFile)
-        {
-            $newFile = seeIfNewFile($self);
-            print Dumper(\%filesOnDisk);
-            sleep 1;
-        }
-        $self->takeScreenShot('clicked_download');
     }
+    else
+    {
+        $error = 1;
+    }
+    if($error)
+    {
+        print "Died on '".$self->{name}."' on branch '".getNextBranch($self,1)."'\n";
+        $self->takeScreenShot('failed_to_get_to_report_page');
+        $self->giveUp();
+    }
+    # while(1)
+    # {
+        # readSaveFolder($self,1);
+        # print "Files before download:\n";
+        # print Dumper(\%filesOnDisk);
+        # $self->takeScreenShot('clicked_download');
+        # my $newFile = 0;
+        # while(!$newFile)
+        # {
+            # $newFile = seeIfNewFile($self);
+            # print Dumper(\%filesOnDisk);
+            # sleep 1;
+        # }
+        # processDownloadedFile($self, $newFile, $firstTime);
+    # }
+}
+
+sub goReport
+{
+    my ($self) = shift;
+    my $firstTime = shift;
+    resetSelectAccounting($self);
+    runReport($self);
+    readSaveFolder($self,1);
+    print "Files before download:\n";
+    print Dumper(\%filesOnDisk);
+    clickDownloadReportCSV($self);
+    my $newFile = 0;
+    while(!$newFile)
+    {
+        $newFile = seeIfNewFile($self);
+        # print Dumper(\%filesOnDisk);
+        sleep 1;
+    }
+    processDownloadedFile($self, $newFile, $firstTime);
+}
+
+sub runReport
+{
+    my ($self) = shift;
+    $self->takeScreenShot('filling_selects');
+    fillAllOptions($self);
+    print "Filled all options\n";
+    $self->takeScreenShot('filled_everything');
+    clickFinish($self);
+    my $running = isReportRunning($self);
+    my $isDone = seeIfReportIsDone($self);
+    if(!$running && !$isDone)
+    {
+        print "Failed to get the report started\nSee screenshot for details";
+        $self->takeScreenShot('report_failed_to_start');
+        exit;
+    }
+    my $waiting = 0;
+    while($running || !$isDone)
+    {
+        $running = isReportRunning($self);
+        $isDone = seeIfReportIsDone($self);
+        print "Waiting for '". $self->{name}."' to finish running\n" if $waiting == 0;
+        if($waiting % 10 == 0)
+        {
+            print "\n";
+            $self->takeScreenShot('report_running');
+        }
+        else
+        {
+            print ".";
+            STDOUT->flush();
+        }
+        $waiting++;
+        sleep 1;
+    }
+    $self->takeScreenShot('report_done');
 }
 
 sub fillAllOptions
@@ -88,6 +142,7 @@ sub fillAllOptions
     my @singleResults;  #holds single dropdown menu results
     my @multiResults;   #holds multi select box results
     my $doneMultis = 0;
+    my $multisAttempts = 0;
     my $loops = 0;
     while($keepGoing)
     {
@@ -95,7 +150,7 @@ sub fillAllOptions
         @singleResults = @{fillSelects($self)};
         $totalSingles = @singleResults[0] if(!$totalSingles);
         $totalSingleChanged += @singleResults[1];
-        if(!$loops)
+        if(!$loops)  ## First time through
         {
             @multiResults = @{selectAlls($self)};
             $totalPopulateButtons = clickPopulateButtons($self);
@@ -105,15 +160,35 @@ sub fillAllOptions
         {
             if($totalSingles > $totalSingleChanged)
             {
+                print "Filling Singles\n";
                 @singleResults = @{fillSelects($self)};
                 $totalSingles = @singleResults[0] if(!$totalSingles);
                 $totalSingleChanged += @singleResults[1];
                 $somethingChanged = 1 if @singleResults[1];
             }
-            if(@multiResults[0] && !@multiResults[2] && (@multiResults[1] < @multiResults[0]) )
+            if( @multiResults[0] && @multiResults[1] )
             {
                 @multiResults = @{selectAlls($self)};
-                $somethingChanged = 1 if @multiResults[1];
+                $somethingChanged = 1 if !@multiResults[1];
+                $multisAttempts++;
+                $multisAttempts = 0 if $somethingChanged;
+                if($multisAttempts > $attemptMax)
+                {
+                    print $mobUtil->boxText("We've not been able to fill out the multi select box for $attemptMax times, moving to next branch","#","|",2);
+                    $self->takeScreenShot('incomplete');
+                    resetSelectAccounting($self);
+                    $multisAttempts = 0;
+                    $doneMultis = 0;
+                    $totalSingleChanged = 0;
+                    $totalPopulateButtons = 0;
+                    $totalSingles = 0;
+                    $loops = -1;
+                    sleep 5;
+                }
+            }
+            elsif(@multiResults[0] && @multiResults[1])
+            {
+                $doneMultis = 0;
             }
             elsif(!$doneMultis)
             {
@@ -127,10 +202,12 @@ sub fillAllOptions
         Total Dropdowns:              $totalSingles
         Total Dropdowns Changed:      $totalSingleChanged
         Total Multi Selects:          ".@multiResults[0]."
-        Total Multi Selects Changed:  ".@multiResults[1]."
-        Total Multi Selects no opts:  ".@multiResults[2]."
+        Total Multi Selects no opts:  ".@multiResults[1]."
+        Multi Attempts:               $multisAttempts
+        Multi Attempts Max:           $attemptMax
         ";
         sleep 1;
+
         if( ($totalSingles > $totalSingleChanged) || !$doneMultis)
         {
             print "\nStill clicking stuff\n";
@@ -138,7 +215,7 @@ sub fillAllOptions
         }
         else
         {
-            print "\nAll Square! Moving to run report \n";
+            print "\nAll Square! Moving to run report $totalSingles  $totalSingleChanged $doneMultis\n";
             $keepGoing = 0;
             fillDates($self);
             $self->takeScreenShot('filled_dates');
@@ -199,7 +276,7 @@ sub fillDates
         }
     }
     ";
-    $self->{driver}->execute_script($script);
+    $self->doJS($script, 1);
 }
 
 sub clickFinish
@@ -221,7 +298,7 @@ sub clickFinish
         }
     }
     ";
-    $self->{driver}->execute_script($script);
+    $self->doJS($script);
     sleep 1;
     $script = 
     "
@@ -236,7 +313,7 @@ sub clickFinish
         }
     }
     ";
-    $self->{driver}->execute_script($script);
+    $self->doJS($script);
     sleep 1;
 }
 
@@ -256,7 +333,7 @@ sub isReportRunning
     }
     return 0;
     ";
-    my $ret = $self->{driver}->execute_script($script);
+    my $ret = $self->doJS($script, 1);
     return $ret;
 }
 
@@ -276,7 +353,7 @@ sub seeIfReportIsDone
     }
     return 0;
     ";
-    my $ret = $self->{driver}->execute_script($script);
+    my $ret = $self->doJS($script, 1);
     return $ret;
 }
 
@@ -296,20 +373,20 @@ sub selectAlls
         if(multi == 'true')
         {
             var thisChanged = 0;
+            var totalAlreadySelected = 0;
             howMany++;
             var loops = 0;
             Array.from(doms[i].options).forEach(function(option_element)
             {
                 var is_option_selected = option_element.selected;
-                
                 if(!is_option_selected)
                 {
                     option_element.selected = true;
-                    if(!thisChanged)
-                    {
-                        changed++;
-                    }
                     thisChanged = 1;
+                }
+                else
+                {
+                    totalAlreadySelected++;
                 }
                 loops++;
             });
@@ -324,10 +401,15 @@ sub selectAlls
             }
         }
     }
-    return ''+howMany+','+changed+','+noOptions;
+    return ''+howMany+','+noOptions;
     ";
-    my $selects =  $self->{driver}->execute_script($script);
+    print "Filling multis\n";
+    my $selects =  $self->doJS($script);
     my @s = split(/,/, $selects);
+    foreach my $i (0 .. $#s)
+    {
+        @s[$i] += 0;
+    }
     return \@s;
 
 }
@@ -338,6 +420,9 @@ sub fillSelects
     my %sels = %{getSingleSelectIDs($self)};
     my $total = 0;
     my $changed = 0;
+    print Dumper(\%sels);
+    print Dumper($selectAnswers{"finished"});
+    sleep 1;
     while ((my $domid, my $val) = each(%sels))
     {
         $total++;
@@ -348,7 +433,7 @@ sub fillSelects
         }
         if(!$alreadyDone)
         {
-            print "Filling $domid    '$val'\n";
+            print "Filling '$val'\n";
             my $worked = fillThisSelect($self, $domid, $val);
             $changed++ if($worked);
             sleep 2;
@@ -386,7 +471,7 @@ sub getSingleSelectIDs
     }
     return allIDs.substring(0,allIDs.length - 1);
     ";
-    my $selects =  $self->{driver}->execute_script($script);
+    my $selects =  $self->doJS($script, 1);
     my @s = split(/,/, $selects);
     my %sels = ();
     my $thisOne = 0;
@@ -409,33 +494,33 @@ sub fillThisSelect
 {
     my ($self) = shift;
     my $domid = shift;
-    my $val = shift;
+    my $domName = shift;
     my $worked = 0;
-    if($selectAnswers{$val})
+    if($selectAnswers{$domName})
     {
-        if(substr($selectAnswers{$val},0,1) ne ':')
+        if(substr($selectAnswers{$domName},0,1) ne ':')
         {
-            $selectAnswers{$val} =~ s/\s/\\s/g;
-            print "Selecting '$selectAnswers{$val}' from '$domid'\n";
-            $worked = selectsChooseSpecificOption($self, $domid, $selectAnswers{$val});
+            $selectAnswers{$domName} =~ s/\s/\\s/g;
+            print "Selecting '$selectAnswers{$domName}' from '$domid'\n";
+            $worked = selectsChooseSpecificOption($self, $domid, $selectAnswers{$domName});
             if(!$worked)
             {
-                print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in config\n";
-                $attempts{$val}++;
+                print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\nPlease define it in config\n";
+                $attempts{$domName}++;
             }
         }
         else
         {
-            if($selectAnswers{$val} =~ m/anything/gi)
+            if($selectAnswers{$domName} =~ m/anything/gi)
             {
                 $worked = selectsChooseAnyOption($self, $domid);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '".$selectAnswers{$val}."' in dropdown '".$val."'\nPlease define it in config\n";
-                    $attempts{$val}++;
+                    print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\nPlease define it in config\n";
+                    $attempts{$domName}++;
                 }
             }
-            elsif($selectAnswers{$val} =~ m/branches/gi)
+            elsif($selectAnswers{$domName} =~ m/branches/gi)
             {
                 $branchable = 1;
                 print "Getting Next Branch\n";
@@ -443,29 +528,29 @@ sub fillThisSelect
                 $worked = selectsChooseSpecificOption($self, $domid, $branch);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '$branch' in dropdown '".$val."'\nPlease define it in config\n";
-                    $attempts{$val}++;
+                    print "Couldn't select option: '$branch' in dropdown '".$domName."'\nPlease define it in config\n";
+                    $attempts{$domName}++;
                 }
             }
         }
         if($worked)
         {
             my @fin = @{$selectAnswers{"finished"}};
-            push(@fin, $val);
+            push(@fin, $domName);
             $selectAnswers{"finished"} = \@fin;
         }
         else
         {
-            if($attempts{$val} > $attemptMax)
+            if($attempts{$domName} > $attemptMax)
             {
-                print "Exceeded $attemptMax attempts on '$val' \nGiving up\n";
-                exit;
+                print "Exceeded $attemptMax attempts on '$domName' \nGiving up\n";
+                $self->giveUp();
             }
         }
     }
     else
     {
-        print "We've encountered a dropdown list that is not defined:\n'$val'\nReport: '" . $self->{name} . "'\nPlease define it in config\n";
+        print "We've encountered a dropdown list that is not defined:\n'$domName'\nReport: '" . $self->{name} . "'\nPlease define it in config\n";
         $self->takeScreenShot('failed_selects');
         exit;
     }
@@ -478,6 +563,7 @@ sub selectsChooseSpecificOption
     my ($self) = shift;
     my $selectID = shift;
     my $option = shift;
+    $option =~ s/ /\\s/g;
     my $script = 
     "
     var doms = document.getElementById('".$selectID."');
@@ -500,9 +586,7 @@ sub selectsChooseSpecificOption
     }
     return found;
     ";
-    print "Executing: 
-    $script\n";
-    my $found = $self->{driver}->execute_script($script);
+    my $found = $self->doJS($script);
     $found += 0;
     return 1 if $found > -1;
     return 0;
@@ -536,9 +620,7 @@ sub selectsChooseAnyOption
     }
     return found;
     ";
-    print "Executing:
-    $script\n";
-    my $found = $self->{driver}->execute_script($script);
+    my $found = $self->doJS($script);
     $found += 0;
     return 1 if $found > -1;
     return 0;
@@ -547,6 +629,7 @@ sub selectsChooseAnyOption
 sub clickPopulateButtons
 {
     my ($self) = shift;
+    print "Clicking Populate Buttons\n";
     my $script = 
     "
     var doms = document.getElementsByTagName('button');
@@ -556,15 +639,13 @@ sub clickPopulateButtons
         var thisaction = doms[i].getAttribute('onClick');
         if(thisaction.match(/reprompt/gi))
         {
-            doms[i].getElementsByTagName('input')[0].click();
+            doms[i].click();
             found++;
         }
     }
     return found;
     ";
-    print "Executing:
-    $script\n";
-    my $found = $self->{driver}->execute_script($script);
+    my $found = $self->doJS($script);
     sleep 2 if($found);
     return $found;
 }
@@ -583,9 +664,8 @@ sub clickDownloadReportCSV
     tab = document.getElementById('_NS_viewInCSV');
     tab.dispatchEvent(new MouseEvent('mouseup', { 'bubbles': true }));
     ";
-    print "Executing:
-    $script\n";
-    $self->{driver}->execute_script($script);
+    $self->doJS($script);
+    print "Clicked Download\n";
     my $handles = $self->{driver}->get_window_handles;
     while(!$handles->[1])
     {
@@ -596,34 +676,85 @@ sub clickDownloadReportCSV
     }
     $handles = $self->{driver}->get_window_handles;
     my $waiting = 1;
+    print $mobUtil->boxText("Waiting for download to generate","#","|",2);
     while($handles->[1])
     {
         if($waiting % 10 == 0)
         {
+            print "\n";
             $self->{driver}->switch_to_window($handles->[1]);
             $self->takeScreenShot('new_window');
             $self->{driver}->switch_to_window($handles->[0]);
+            print Dumper($handles);
         }
-        print "Waiting for new window to finish - These are the handles right now:\n";
-        print Dumper($self->{driver}->get_window_handles) . "\n";
+        else
+        {
+            print ".";
+            STDOUT->flush();
+        }
         sleep 1;
         $handles = $self->{driver}->get_window_handles;
+        $waiting++;
     }
-    print "Final Window Listing\n";
-    print Dumper($self->{driver}->get_window_handles) . "\n";
-    print "Download should start\n";
+    print "\n";
+    print $mobUtil->boxText("Download should start","#","|",2);
+}
+
+sub processDownloadedFile
+{
+    my ($self) = shift;
+    my $file = shift;
+    my $trunc = shift;
+    my $saveFolder = $self->{saveFolder};
+    my $outFileName = $self->{outFileName} || $self->{name};
+    $outFileName =~ s/^\s+//;
+    $outFileName =~ s/^\t+//;
+    $outFileName =~ s/\s+$//;
+    $outFileName =~ s/\t+$//;
+    $outFileName =~ s/^_+//;
+    $outFileName =~ s/_+$//;
+    $outFileName =~ s/\s/_/g;
+    $outFileName = "$saveFolder/" . $outFileName . ".migdat" if (!($outFileName =~ m/$saveFolder/));
+    $self->{outFileName} = $outFileName;
+    print "Writing to: $outFileName\n";
+    my $outputFile = new Loghandler($outFileName);
+    $outputFile->deleteFile() if $trunc;
+
+    my $lineCount = 0;
+    my $outputText = "";
+    print "reading $file\n";
+    open(my $fh,"<:encoding(UTF-16)",$file) || die "error $!\n";
+    while(<$fh>)
+    {
+        $lineCount++;
+        my $line = $_;
+        $line =~ s/\n//g;
+        $line =~ s/\r//g;
+        if($trunc && $lineCount == 1) # Only write the header on the first file
+        {
+            $outputText .= "$line\n";
+        }
+        elsif($lineCount > 1)
+        {
+            $outputText .= "$line\n";
+        }
+    }
+    $outputText = substr($outputText,0,-1); # remove the last return
+    print "Writing $lineCount lines\n";
+    $outputFile->addLine($outputText);
 }
 
 sub seeIfNewFile
 {
     my ($self) = shift;
-    my @files = @{readSaveFolder};
+    my @files = @{readSaveFolder($self)};
     foreach(@files)
     {
         if(!$filesOnDisk{$_})
         {
             print "Detected new file: $_\n";
-            return $_;
+            checkFileReady($self, $self->{saveFolder} ."/".$_);
+            return $self->{saveFolder} . "/" . $_;
         }
     }
     return 0;
@@ -636,15 +767,18 @@ sub readSaveFolder
 
     %filesOnDisk = () if $init;
     my $pwd = $self->{saveFolder};
+    # print "Opening '".$self->{saveFolder}."'\n";
     opendir(DIR,$pwd) or die "Cannot open $pwd\n";
     my @thisdir = readdir(DIR);
     closedir(DIR);
     foreach my $file (@thisdir) 
     {
-        if(($file ne ".") and ($file ne ".."))
+        # print "Checking: $file\n";
+        if( ($file ne ".") && ($file ne "..") && !($file =~ /\.part/g))  # ignore firefox "part files"
         {
+            # print "Checking: $file\n";
             if (-f "$pwd/$file")
-            {           
+            {
                 push(@files, "$file");
                 if($init)
                 {
@@ -654,6 +788,16 @@ sub readSaveFolder
         }
     }
     return \@files;
+}
+
+sub resetSelectAccounting
+{
+    my ($self) = shift;
+    $selectAnswers{"finished"} = ();
+    while ((my $element, my $val) = each(%selectAnswers))
+    {
+        $attempts{$element} = 0;
+    }
 }
 
 sub getNextBranch
@@ -681,6 +825,25 @@ sub getNextBranch
     return 0;
 }
 
+sub checkFileReady
+{
+    my ($self) = shift;
+    my $file = shift;
+    my @stat = stat $file;
+    my $baseline = $stat[7];
+    $baseline+=0;
+    my $now = -1;
+    while($now != $baseline)
+    {
+        @stat = stat $file;
+        $now = $stat[7];
+        sleep 1;
+        @stat = stat $file;
+        $baseline = $stat[7];
+        $baseline += 0;
+        $now += 0;
+    }
+}
 
 
 1;
