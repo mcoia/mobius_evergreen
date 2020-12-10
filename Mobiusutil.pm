@@ -96,7 +96,9 @@ sub readConfFile
 			{
 		
 				my $Name, $Value;
-				($Name, $Value) = split (/=/, $cur);
+				my @s = split (/=/, $cur);
+                my $Name = shift @s;
+                my $Value = join('=', @s);
 				$$ret{trim('',$Name)} = trim('',$Value);
 			}
 		}
@@ -1130,6 +1132,82 @@ sub makeCommaFromArray
 	}
 	
  }
+
+sub boxText
+{
+    shift;
+    my $text = shift;
+    my $hChar = shift;
+    my $vChar = shift;
+    my $padding = shift;
+    my $ret = "";
+    my $totalLength = length($text) + (length($vChar)*2) + ($padding *2) + 2;
+    my $heightPadding = ($padding / 2 < 1) ? 1 : $padding / 2;
+
+    # Draw the first line
+    my $i = 0;
+    while($i < $totalLength)
+    {
+        $ret.=$hChar;
+        $i++;
+    }
+    $ret.="\n";
+    # Pad down to the data line
+    $i = 0;
+    while( $i < $heightPadding )
+    {
+        $ret.="$vChar";
+        my $j = length($vChar);
+        while( $j < ($totalLength - (length($vChar))) )
+        {
+            $ret.=" ";
+            $j++;
+        }
+        $ret.="$vChar\n";
+        $i++;
+    }
+
+    # data line
+    $ret.="$vChar";
+    $i = -1;
+    while($i < $padding )
+    {
+        $ret.=" ";
+        $i++;
+    }
+    $ret.=$text;
+    $i = -1;
+    while($i < $padding )
+    {
+        $ret.=" ";
+        $i++;
+    }
+    $ret.="$vChar\n";
+    # Pad down to the last
+    $i = 0;
+    while( $i < $heightPadding )
+    {
+        $ret.="$vChar";
+        my $j = length($vChar);
+        while( $j < ($totalLength - (length($vChar))) )
+        {
+            $ret.=" ";
+            $j++;
+        }
+        $ret.="$vChar\n";
+        $i++;
+    }
+     # Draw the last line
+    $i = 0;
+    while($i < $totalLength)
+    {
+        $ret.=$hChar;
+        $i++;
+    }
+    $ret.="\n";
+    return $ret;
+}
+
  
 sub generateRandomString
 {
