@@ -120,13 +120,15 @@ while($finished < $reportCount)
         my %props = %{$reports{$reportNum}};
         my $attr = $props{"attr"};
         my $outFileName = $props{"migname"};
-        print Dumper($branches) if($finished > 0);
+        my $colRemoves = $props{"colrem"};
+        print "sending\n".Dumper($branches) if($finished > 0);
 
-        my $rep = new TLCWebReport($map{$reportNum}, $dbHandler, $driver, $cwd, $log, $debug, $conf{"url"}, $conf{"login"}, $conf{"pass"}, $branches, $attr, $conf{"output_folder"}, $outFileName);
+        my $rep = new TLCWebReport($map{$reportNum}, $dbHandler, $driver, $cwd, $log, $debug, $conf{"url"}, $conf{"login"}, $conf{"pass"}, $branches, $attr, $conf{"output_folder"}, $outFileName, $colRemoves);
+        $rep->scrape();
         local $@;
         eval
         {
-            $rep->scrape();
+            
         };
         if( $@ )
         {
@@ -134,12 +136,13 @@ while($finished < $reportCount)
             print $mobUtil->boxText("We have a failure: '" . $map{$reportNum} ."'","#","|",4);
             print "Press Enter to continue to the next report\n";
             my $answer = <STDIN>;
+            $finished++;
         }
         else
         {
             $finished++;
         }
-        $rep = undef;
+        undef $rep;
     }
     $reportNum++;
 }

@@ -12,7 +12,7 @@ our $maxPageLoops = 10;
 sub new
 {
     my $class = shift;
-    my %phandles = ( "Log On to IBM Cognos Software" => "loginPage", "IBM Cognos Software" => "reportSearch", "Public Folders" => "reportSearch", "Search" => "clickSearchResult" );
+    my %phandles = ( "Log On to IBM Cognos Software" => "loginPage", "IBM Cognos Software" => "reportSearch", "IBM Cognos Enhanced Search" => "reportSearch", "Public Folders" => "reportSearch", "Search" => "clickSearchResult" );
     my $self = 
     {
         name => shift,
@@ -28,6 +28,7 @@ sub new
         selectAnswers => shift,
         saveFolder => shift,
         outFileName => shift,
+        colRemoves => shift,
         error => 0,
         pageHandles => \%phandles
         
@@ -178,7 +179,8 @@ sub reportSearch
 {
     my ($self) = @_[0];
     # print "Handling Report Search\n";
-
+    my $title = getTitle($self);
+    my $afterTitle = $title;
     my $script = 
     "
     var doms = document.getElementById('stext');
@@ -190,9 +192,13 @@ sub reportSearch
     return 1;
     ";
     doJS($self, $script, 1);
-    
+
+    while ($afterTitle eq $title)
+    {   
+        sleep 1;
+        $afterTitle = getTitle($self);
+    }
     # print "finished\n";
-    sleep 1;
     $self->takeScreenShot('after_search');
     return 1;
 }
@@ -283,13 +289,14 @@ sub takeScreenShot
     $fullName =~ s/\///g; # remove forward slashes from name
     $fullName =~ s/\\//g; # remove back slashes from name
     $fullName = $self->{screenshotDIR}."/".$fullName;
-    print "ScreenShot: $fullName\n";
+    print "Screen Shot: $fullName\n";
     $self->{driver}->capture_screenshot($fullName, {'full' => 1});
 }
 
 sub giveUp
 {
     my ($self) = shift;
+    $mobUtil = shift;
     $mobUtil->boxText("HEY, This report: ". $self->{name}. " didn't work out. Press enter to confirm and I'll move on");
     my $name = <STDIN>;
     die;

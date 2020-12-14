@@ -23,7 +23,8 @@ our $mobUtil = new Mobiusutil();
 sub scrape
 {
     my ($self) = shift;
-    
+    @usedBranches = ();
+    $branchable = 0;
     my $exec = '%selectAnswers = (' . $self->{selectAnswers}. ');';
     eval($exec);
     my $reportsPage = $self->SUPER::getToReportSelectionPage();
@@ -72,6 +73,7 @@ sub scrape
         # }
         # processDownloadedFile($self, $newFile, $firstTime);
     # }
+    processDownloadedFile($self, "/mnt/evergreen/migration/amy/tlc_getter/downloads/New Items for Location.t", 1);
 }
 
 sub goReport
@@ -108,13 +110,14 @@ sub runReport
     {
         print "Failed to get the report started\nSee screenshot for details";
         $self->takeScreenShot('report_failed_to_start');
-        exit;
+        $self->giveUp($mobUtil);
     }
     my $waiting = 0;
-    while($running || !$isDone)
+    while(!$isDone)
     {
         $running = isReportRunning($self);
         $isDone = seeIfReportIsDone($self);
+        # print "Running: $running  , isDone: $isDone\n";
         print "Waiting for '". $self->{name}."' to finish running\n" if $waiting == 0;
         if($waiting % 10 == 0)
         {
@@ -342,16 +345,16 @@ sub seeIfReportIsDone
     my ($self) = shift;
     my $script = 
     "
-    var doms = document.querySelectorAll('img');
+    var doms = document.querySelectorAll('button');
     for(var i=0;i<doms.length;i++)
     {   
-        var srcattr = doms[i].getAttribute('src');
-        if(srcattr && srcattr.match(/action_view_html/gi))
+        var srcattr = doms[i].getAttribute('onclick');
+        if(srcattr && srcattr.match(/finish/gi))
         {
-            return 1;
+            return 0;
         }
     }
-    return 0;
+    return 1;
     ";
     my $ret = $self->doJS($script, 1);
     return $ret;
@@ -505,7 +508,7 @@ sub fillThisSelect
             $worked = selectsChooseSpecificOption($self, $domid, $selectAnswers{$domName});
             if(!$worked)
             {
-                print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\nPlease define it in config\n";
+                print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\n";
                 $attempts{$domName}++;
             }
         }
@@ -516,7 +519,7 @@ sub fillThisSelect
                 $worked = selectsChooseAnyOption($self, $domid);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\nPlease define it in config\n";
+                    print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\n";
                     $attempts{$domName}++;
                 }
             }
@@ -528,7 +531,7 @@ sub fillThisSelect
                 $worked = selectsChooseSpecificOption($self, $domid, $branch);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '$branch' in dropdown '".$domName."'\nPlease define it in config\n";
+                    print "Couldn't select option: '$branch' in dropdown '".$domName."'\n";
                     $attempts{$domName}++;
                 }
             }
@@ -544,13 +547,13 @@ sub fillThisSelect
             if($attempts{$domName} > $attemptMax)
             {
                 print "Exceeded $attemptMax attempts on '$domName' \nGiving up\n";
-                $self->giveUp();
+                $self->giveUp($mobUtil);
             }
         }
     }
     else
     {
-        print "We've encountered a dropdown list that is not defined:\n'$domName'\nReport: '" . $self->{name} . "'\nPlease define it in config\n";
+        print "We've encountered a dropdown list that is not defined:\n'$domName'\nReport: '" . $self->{name} . "'";
         $self->takeScreenShot('failed_selects');
         exit;
     }
@@ -719,29 +722,256 @@ sub processDownloadedFile
     print "Writing to: $outFileName\n";
     my $outputFile = new Loghandler($outFileName);
     $outputFile->deleteFile() if $trunc;
-
-    my $lineCount = 0;
     my $outputText = "";
-    print "reading $file\n";
+    print $mobUtil->boxText("Loading '$file'","#","|",1);
     open(my $fh,"<:encoding(UTF-16)",$file) || die "error $!\n";
     while(<$fh>)
     {
-        $lineCount++;
         my $line = $_;
         $line =~ s/\n//g;
         $line =~ s/\r//g;
+        $outputText .= "$line\n";
+    }
+    $outputText = substr($outputText,0,-1); # remove the last return
+    print $mobUtil->boxText("Cleaning line Spans '$file'","#","|",1);
+    $outputText = cleanLineSpans($self, $outputText);
+    if(!$outputText)
+    {
+        print $mobUtil->boxText("There was a problem parsing and cleaning line spans '".$file."'","-","|",5);
+        $self->giveUp($mobUtil);
+    }
+    print $mobUtil->boxText("Removing columns from '$file'","#","|",1);
+    $outputText = removeColumns($self, $outputText);
+    if(!$outputText)
+    {
+        print $mobUtil->boxText("There was a problem parsing and removing columns from '".$file."'","-","|",5);
+        $self->giveUp($mobUtil);
+    }
+
+    my $lineCount = 0;
+    my @lines = split(/\n/, $outputText);
+    $outputText = "";
+    foreach(@lines)
+    {
+        $lineCount++;
         if($trunc && $lineCount == 1) # Only write the header on the first file
         {
-            $outputText .= "$line\n";
+            $outputText .= "$_\n";
         }
         elsif($lineCount > 1)
         {
-            $outputText .= "$line\n";
+            $outputText .= "$_\n";
         }
     }
     $outputText = substr($outputText,0,-1); # remove the last return
     print "Writing $lineCount lines\n";
     $outputFile->addLine($outputText);
+}
+
+sub cleanLineSpans
+{
+    my ($self) = shift;
+    my $fileContents = shift;
+
+    my $finalout = '';
+    my $errorout = '';
+    my $delimiter = figureDelimiter($self,$fileContents);
+    my @lines = split(/\n/, $fileContents);
+    my $header = @lines[0];
+    $header = $mobUtil->trim($header);
+    my @headers = split(/$delimiter/,$header);
+    my $headerCount = $#headers;
+    return $fileContents if($headerCount == 0); # if there is only one column, this code doesn't work
+    my $i = 1;
+    my $previousLine = "";
+    while($i <= $#lines)
+    {
+        my @thisLine = @{readFullLine($self, \@lines, $i, $delimiter, $headerCount)};
+        $i = @thisLine[1];
+        if(@thisLine[0])
+        {
+            $finalout .= @thisLine[0] . "\n";
+        }
+        else
+        {
+            print "Error on line $i\n";
+            $self->{log}->addLine($finalout);
+            return 0;
+        }
+        $i++;
+    }
+    $finalout = $mobUtil->trim($finalout);
+    $finalout = "$header\n" . substr($finalout,0,-1);
+    # $self->{log}->addLine($finalout);
+    # exit;
+    return $finalout;
+}
+
+sub isLastElementComplete
+{
+    my ($self) = shift;
+    my $line = shift;
+    my $delimiter = shift;
+    my $ret = "";
+    my @info = split(/$delimiter/,$line);
+    my $lastElement = pop @info;
+    $lastElement =~ s/""//g; # Double quotes are escapes - remove them for this string terminator exercise
+    my @lastElementChars = split(//,$lastElement);
+    # print "Last element: $lastElement\n";
+    # print "Last line first/last Char: '".@lastElementChars[0]."' / '".@lastElementChars[$#lastElementChars]."'\n";
+    return 0 if(@lastElementChars[0] && @lastElementChars[0] eq '"' && $#lastElementChars == 0 ); # Only one character long and it's a " mark
+    return 0 if(@lastElementChars[0] && @lastElementChars[0] eq '"' && @lastElementChars[$#lastElementChars] ne '"');
+    return 1;
+}
+
+sub readFullLine
+{
+    my ($self) = shift;
+    my $tlines = shift;
+    my $i = shift;
+    my $delimiter = shift;
+    my $headerCount = shift;
+    my @ret;
+    my @lines = @{$tlines};
+    my $line = readLineCorrectly($self, @lines[$i], $delimiter);
+    my @datas = split(/$delimiter/,$line);
+    foreach my $j (0 .. $#datas)
+    {
+        @datas[$j] = $mobUtil->trim(@datas[$j]);
+    }
+    while( ($headerCount > $#datas) && (@lines[$i++]) )
+    {
+        # print "looping through more lines to get more columns\n";
+        $line = readLineCorrectly($self, @lines[$i], $delimiter, isLastElementComplete($self, $line, $delimiter));
+        my @tdatas = split(/$delimiter/, $line);
+        foreach(@tdatas)
+        {
+            push @datas, $mobUtil->trim($_);
+        }
+    }
+    if($headerCount == $#datas)
+    {
+        my $retString = "";
+        foreach(@datas)
+        {
+            $retString .= $_ . $delimiter;
+        }
+        $retString = substr($retString,0,-1);
+        # Make sure the last element of the last line is finished
+        while(!isLastElementComplete($self,$retString,$delimiter, isLastElementComplete($self, $retString, $delimiter)))
+        {
+            $i++;
+            my $frag = readLineCorrectly($self, @lines[$i], $delimiter);
+            my @tdatas = split(/$delimiter/,$frag);
+            foreach(@tdatas)
+            {
+                $retString .= " " . $mobUtil->trim($_);
+            }
+        }
+        @ret = ($retString, $i);
+    }
+    else # This ended up reading some un-even number of columns
+    {
+        @ret = (0, $i);
+        # print Dumper(\@datas);
+    }
+    # print Dumper(\@ret);
+    return \@ret;
+}
+
+sub readLineCorrectly
+{
+    my ($self) = shift;
+    my $line = shift;
+    my $delimiter = shift;
+    my $lookingForTerminator = shift || 0;
+    my $ret = "";
+    my @info = split(/$delimiter/,$line);
+    
+    # print "Starting with looking = $lookingForTerminator\n";
+    foreach(@info)
+    {
+        $ret .= ' ' if($lookingForTerminator);
+        my $elem = $_;
+        my @chars = split(//,$_);
+        if(!$lookingForTerminator)
+        {
+            if(@chars[0] && @chars[0] eq '"' && @chars[$#chars] ne '"')
+            {
+                $lookingForTerminator = 1;
+            }
+        }
+        else
+        {
+            if(@chars[$#chars] && @chars[$#chars] ne '"')
+            {
+                $lookingForTerminator = 0;
+            }
+        }
+        $ret .= $elem;
+        if(!$lookingForTerminator)
+        {
+            $ret .= $delimiter;
+        }
+    }
+    $ret = substr($ret,0,-1) if(substr($ret,0,-1) eq $delimiter);
+    # print "looking = $lookingForTerminator\nreturning\n'$ret'\n";
+    return $ret;
+}
+
+sub removeColumns
+{
+    my ($self) = shift;
+    my $fileContents = shift;
+    my $ret = "";
+    my $delimiter = figureDelimiter($self,$fileContents);
+    my @lines = split(/\n/, $fileContents);
+    
+    my @colsRemove = ();
+    my @header = ();
+    my $tabs = 0;
+    my $loops = 0;
+    my $lineNum = 0;
+    foreach(@lines)
+    {
+        my @theseVals = split(/$delimiter/,$_);
+        foreach my $i (0 .. $#theseVals)
+        {
+            if($lineNum == 0)
+            {
+                %colsRemove = %{getColRemovalNums($self, \@theseVals)};
+            }
+            $ret .= @theseVals[$i].$delimiter if(!$colsRemove{$i});
+            # print "not adding '".@theseVals[$i]."' because it's in column $i\n" if($colsRemove{$i});
+            # exit if(!$colsRemove{$i} && $lineNum > 0);
+        }
+        $ret = substr($ret,0,-1) . "\n";
+        $lineNum++;
+    }
+    $ret = substr($ret,0,-1);
+    return $ret;
+}
+
+sub getColRemovalNums
+{
+    my ($self) = shift;
+    my $cols = shift;
+    my @cols = @{$cols};
+    my %ret = ();
+    my @colNamesRemove = split(/,/,$self->{colRemoves});
+    foreach my $i (0 .. $#colNamesRemove)
+    {
+        @colNamesRemove[$i] = $mobUtil->trim(@colNamesRemove[$i]);
+    }
+    foreach my $i (0 .. $#cols)
+    {
+        foreach(@colNamesRemove)
+        {   
+            my $comp = @cols[$i];
+            $ret{$i} = 1 if(@cols[$i] =~ m/$_/gi);
+        }
+    }
+    return \%ret;
 }
 
 sub seeIfNewFile
@@ -758,6 +988,27 @@ sub seeIfNewFile
         }
     }
     return 0;
+}
+
+sub figureDelimiter
+{
+    my ($self) = shift;
+    my $fileContents = shift;
+    my @lines = split(/\n/, $fileContents);
+    my $commas = 0;
+    my $tabs = 0;
+    my $loops = 0;
+    foreach(@lines)
+    {
+        my @split = split(/,/,$_);
+        $commas+=$#split;
+        @split = split(/\t/,$_);
+        $tabs+=$#split;
+        last if ($loops > 100);
+        $loops++;
+    }
+    my $delimiter = $commas > $tabs ? "," : "\t";
+    return $delimiter;
 }
 
 sub readSaveFolder
