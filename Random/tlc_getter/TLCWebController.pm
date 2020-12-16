@@ -16,7 +16,6 @@ sub new
     my $self = 
     {
         name => shift,
-        dbHandler => shift,
         driver => shift,
         screenshotDIR => shift,
         log => shift,
@@ -30,10 +29,11 @@ sub new
         outFileName => shift,
         colRemoves => shift,
         error => 0,
-        pageHandles => \%phandles
+        pageHandles => \%phandles,
+        finalFileName => 0
         
     };
-    if($self->{name} && $self->{dbHandler} && $self->{driver} && $self->{log})
+    if($self->{name} && $self->{driver} && $self->{log})
     {
         
     }
@@ -44,6 +44,22 @@ sub new
     $screenShotStep = 0;
     bless $self, $class;
     return $self;
+}
+
+sub getResultFile
+{
+    return $self->{finalFileName};
+}
+
+sub setResultFile
+{
+    shift;
+    $self->{finalFileName} = shift;
+}
+
+sub getError
+{
+    return $self->{error};
 }
 
 sub getToReportSelectionPage
@@ -103,8 +119,7 @@ sub detectPage
     }
     else
     {
-        print "This page: '$title' is unknown to us. Cannot proceed\n";
-        giveUp($self);
+        giveUp($self, "This page: '$title' is unknown to us. Cannot proceed");
     }
     return 0;
 }
@@ -297,7 +312,10 @@ sub giveUp
 {
     my ($self) = shift;
     $mobUtil = shift;
-    $mobUtil->boxText("HEY, This report: ". $self->{name}. " didn't work out. Press enter to confirm and I'll move on");
+    $error = shift || 0;
+    $error = "HEY, This report: ". $self->{name}. " didn't work out. Press enter to confirm and I'll move on" if !$error;
+    $self->{error} = $error;
+    $mobUtil->boxText($error,"-","|",5);
     my $name = <STDIN>;
     die;
 }

@@ -54,15 +54,12 @@ sub scrape
     }
     if($error)
     {
-        print "Died on '".$self->{name}."' on branch '".getNextBranch($self,1)."'\n";
         $self->takeScreenShot('failed_to_get_to_report_page');
-        $self->giveUp();
+        $self->giveUp($mobUtil, "Died on '".$self->{name}."' on branch '".getNextBranch($self,1)."'");
     }
     # while(1)
     # {
         # readSaveFolder($self,1);
-        # print "Files before download:\n";
-        # print Dumper(\%filesOnDisk);
         # $self->takeScreenShot('clicked_download');
         # my $newFile = 0;
         # while(!$newFile)
@@ -73,7 +70,11 @@ sub scrape
         # }
         # processDownloadedFile($self, $newFile, $firstTime);
     # }
-    processDownloadedFile($self, "/mnt/evergreen/migration/amy/tlc_getter/downloads/New Items for Location.t", 1);
+    # my @files = @{readSaveFolder($self)};
+    # foreach(@files)
+    # {
+        # processDownloadedFile( $self, $self->{saveFolder} . "/" . $_, 1) if $_ =~ /xls/;
+    # }
 }
 
 sub goReport
@@ -83,8 +84,6 @@ sub goReport
     resetSelectAccounting($self);
     runReport($self);
     readSaveFolder($self,1);
-    print "Files before download:\n";
-    print Dumper(\%filesOnDisk);
     clickDownloadReportCSV($self);
     my $newFile = 0;
     while(!$newFile)
@@ -108,9 +107,8 @@ sub runReport
     my $isDone = seeIfReportIsDone($self);
     if(!$running && !$isDone)
     {
-        print "Failed to get the report started\nSee screenshot for details";
         $self->takeScreenShot('report_failed_to_start');
-        $self->giveUp($mobUtil);
+        $self->giveUp($mobUtil, "Failed to get the report started\nSee screenshot for details");
     }
     my $waiting = 0;
     while(!$isDone)
@@ -177,16 +175,23 @@ sub fillAllOptions
                 $multisAttempts = 0 if $somethingChanged;
                 if($multisAttempts > $attemptMax)
                 {
-                    print $mobUtil->boxText("We've not been able to fill out the multi select box for $attemptMax times, moving to next branch","#","|",2);
-                    $self->takeScreenShot('incomplete');
-                    resetSelectAccounting($self);
-                    $multisAttempts = 0;
-                    $doneMultis = 0;
-                    $totalSingleChanged = 0;
-                    $totalPopulateButtons = 0;
-                    $totalSingles = 0;
-                    $loops = -1;
-                    sleep 5;
+                    if(containsUnfillableMulti($self) ) #handles the case when there is a multi select box that is populated by manually enterying ID numbers
+                    {
+                        $doneMultis = 1;
+                    }
+                    else
+                    {
+                        print $mobUtil->boxText("We've not been able to fill out the multi select box for $attemptMax times, moving to next branch","#","|",2);
+                        $self->takeScreenShot('incomplete');
+                        resetSelectAccounting($self);
+                        $multisAttempts = 0;
+                        $doneMultis = 0;
+                        $totalSingleChanged = 0;
+                        $totalPopulateButtons = 0;
+                        $totalSingles = 0;
+                        $loops = -1;
+                        sleep 5;
+                    }
                 }
             }
             elsif(@multiResults[0] && @multiResults[1])
@@ -218,7 +223,7 @@ sub fillAllOptions
         }
         else
         {
-            print "\nAll Square! Moving to run report $totalSingles  $totalSingleChanged $doneMultis\n";
+            print $mobUtil->boxText("All Square! Moving to run report","#","|",2);
             $keepGoing = 0;
             fillDates($self);
             $self->takeScreenShot('filled_dates');
@@ -493,6 +498,27 @@ sub getSingleSelectIDs
     return \%sels;
 }
 
+sub containsUnfillableMulti
+{
+    my ($self) = shift;
+    my $script = 
+    "
+    var allIDs = '';
+    var doms = document.querySelectorAll('span');
+    for(var i=0;i<doms.length;i++)
+    {   
+        var thisHTML = doms[i].innerHTML;
+        if(thisHTML && ( thisHTML.match(/Enter Borrower ID\\(s\\)/gi) ) )
+        {
+            return 1;
+        }
+    }
+    return 0;
+    ";
+    my $ret =  $self->doJS($script, 1);
+    return $ret;
+}
+
 sub fillThisSelect
 {
     my ($self) = shift;
@@ -546,8 +572,7 @@ sub fillThisSelect
         {
             if($attempts{$domName} > $attemptMax)
             {
-                print "Exceeded $attemptMax attempts on '$domName' \nGiving up\n";
-                $self->giveUp($mobUtil);
+                $self->giveUp($mobUtil, "Exceeded $attemptMax attempts on '$domName'");
             }
         }
     }
@@ -640,7 +665,7 @@ sub clickPopulateButtons
     for(var i=0;i<doms.length;i++)
     {
         var thisaction = doms[i].getAttribute('onClick');
-        if(thisaction.match(/reprompt/gi))
+        if(thisaction && thisaction.match(/reprompt/gi))
         {
             doms[i].click();
             found++;
@@ -709,18 +734,22 @@ sub processDownloadedFile
     my $file = shift;
     my $trunc = shift;
     my $saveFolder = $self->{saveFolder};
-    my $outFileName = $self->{outFileName} || $self->{name};
-    $outFileName =~ s/^\s+//;
-    $outFileName =~ s/^\t+//;
-    $outFileName =~ s/\s+$//;
-    $outFileName =~ s/\t+$//;
-    $outFileName =~ s/^_+//;
-    $outFileName =~ s/_+$//;
-    $outFileName =~ s/\s/_/g;
-    $outFileName = "$saveFolder/" . $outFileName . ".migdat" if (!($outFileName =~ m/$saveFolder/));
-    $self->{outFileName} = $outFileName;
-    print "Writing to: $outFileName\n";
-    my $outputFile = new Loghandler($outFileName);
+    if(!$self->{finalFileName})
+    {
+        my $outFileName = $self->{outFileName} || $self->{name};
+        $outFileName =~ s/^\s+//;
+        $outFileName =~ s/^\t+//;
+        $outFileName =~ s/\s+$//;
+        $outFileName =~ s/\t+$//;
+        $outFileName =~ s/^_+//;
+        $outFileName =~ s/_+$//;
+        $outFileName =~ s/\s/_/g;
+        $outFileName = "$saveFolder/" . $outFileName . ".migdat" if (!($outFileName =~ m/$saveFolder/));
+        $self->{finalFileName} = $outFileName;
+        $self->SUPER::setResultFile($outFileName);
+    }
+    print "Writing to: " .$self->{finalFileName}."\n";
+    my $outputFile = new Loghandler($self->{finalFileName});
     $outputFile->deleteFile() if $trunc;
     my $outputText = "";
     print $mobUtil->boxText("Loading '$file'","#","|",1);
@@ -737,15 +766,13 @@ sub processDownloadedFile
     $outputText = cleanLineSpans($self, $outputText);
     if(!$outputText)
     {
-        print $mobUtil->boxText("There was a problem parsing and cleaning line spans '".$file."'","-","|",5);
-        $self->giveUp($mobUtil);
+        $self->giveUp($mobUtil, "There was a problem parsing and cleaning line spans '".$file."'");
     }
     print $mobUtil->boxText("Removing columns from '$file'","#","|",1);
     $outputText = removeColumns($self, $outputText);
     if(!$outputText)
     {
-        print $mobUtil->boxText("There was a problem parsing and removing columns from '".$file."'","-","|",5);
-        $self->giveUp($mobUtil);
+        $self->giveUp($mobUtil, "There was a problem parsing and removing columns from '".$file."'");
     }
 
     my $lineCount = 0;
@@ -781,26 +808,29 @@ sub cleanLineSpans
     $header = $mobUtil->trim($header);
     my @headers = split(/$delimiter/,$header);
     my $headerCount = $#headers;
+    # print "Header count = $headerCount , delimiter: '$delimiter'\n";
     return $fileContents if($headerCount == 0); # if there is only one column, this code doesn't work
     my $i = 1;
     my $previousLine = "";
     while($i <= $#lines)
     {
-        my @thisLine = @{readFullLine($self, \@lines, $i, $delimiter, $headerCount)};
-        $i = @thisLine[1];
-        if(@thisLine[0])
-        {
-            $finalout .= @thisLine[0] . "\n";
-        }
-        else
-        {
-            print "Error on line $i\n";
-            $self->{log}->addLine($finalout);
-            return 0;
-        }
+        # if($i > 27362)
+        # {
+            my @thisLine = @{readFullLine($self, \@lines, $i, $delimiter, $headerCount)};
+            $i = @thisLine[1];
+            if(@thisLine[0])
+            {
+                $finalout .= @thisLine[0] . "\n";
+            }
+            else
+            {
+                print "Error on line $i\n";
+                $self->{log}->addLine($finalout);
+                return 0;
+            }
+        # }
         $i++;
     }
-    $finalout = $mobUtil->trim($finalout);
     $finalout = "$header\n" . substr($finalout,0,-1);
     # $self->{log}->addLine($finalout);
     # exit;
@@ -835,19 +865,29 @@ sub readFullLine
     my @lines = @{$tlines};
     my $line = readLineCorrectly($self, @lines[$i], $delimiter);
     my @datas = split(/$delimiter/,$line);
-    foreach my $j (0 .. $#datas)
-    {
-        @datas[$j] = $mobUtil->trim(@datas[$j]);
-    }
     while( ($headerCount > $#datas) && (@lines[$i++]) )
     {
         # print "looping through more lines to get more columns\n";
         $line = readLineCorrectly($self, @lines[$i], $delimiter, isLastElementComplete($self, $line, $delimiter));
-        my @tdatas = split(/$delimiter/, $line);
+        my @tdatas = split(/$delimiter/,$line);
         foreach(@tdatas)
         {
-            push @datas, $mobUtil->trim($_);
+            push (@datas, $mobUtil->trim($_));
         }
+        if( ($i == $#lines) && ($headerCount > $#datas) ) ## Second to last line of the file, TLC likes to trim the last null columns on the last line
+        {
+            if(length($mobUtil->trim(@lines[$i])) == 0 ) # pad the last line with blank delimiters until we've reached a complete line
+            {
+                 while($headerCount > $#datas)
+                 {
+                    push (@datas,'');
+                 }
+            }
+        }
+    }
+    if ( ($headerCount + 1 == $#datas) && (length($mobUtil->trim(@datas[$#datas])) == 0) ) #handles the case when TLC puts blank columns on the end
+    {
+        pop @datas;
     }
     if($headerCount == $#datas)
     {
@@ -856,16 +896,23 @@ sub readFullLine
         {
             $retString .= $_ . $delimiter;
         }
-        $retString = substr($retString,0,-1);
+        $retString = substr($retString, 0, -1);
         # Make sure the last element of the last line is finished
         while(!isLastElementComplete($self,$retString,$delimiter, isLastElementComplete($self, $retString, $delimiter)))
         {
-            $i++;
-            my $frag = readLineCorrectly($self, @lines[$i], $delimiter);
-            my @tdatas = split(/$delimiter/,$frag);
-            foreach(@tdatas)
+            if($#lines > $i)
             {
-                $retString .= " " . $mobUtil->trim($_);
+                $i++;
+                my $frag = readLineCorrectly($self, @lines[$i], $delimiter);
+                my @tdatas = split(/$delimiter/,$frag);
+                foreach(@tdatas)
+                {
+                    $retString .= " " . $mobUtil->trim($_);
+                }
+            }
+            else #we've encountered the bottom of the file and we still have an unterminiated string. Just end it here and be done
+            {
+                $retString .= '"';
             }
         }
         @ret = ($retString, $i);
@@ -873,9 +920,7 @@ sub readFullLine
     else # This ended up reading some un-even number of columns
     {
         @ret = (0, $i);
-        # print Dumper(\@datas);
     }
-    # print Dumper(\@ret);
     return \@ret;
 }
 
@@ -886,8 +931,8 @@ sub readLineCorrectly
     my $delimiter = shift;
     my $lookingForTerminator = shift || 0;
     my $ret = "";
-    my @info = split(/$delimiter/,$line);
-    
+    # can't use split because it ignores zero length fields, so we do it by hand
+    my @info = @{getDelimitedLine($self,$line,$delimiter)};
     # print "Starting with looking = $lookingForTerminator\n";
     foreach(@info)
     {
@@ -917,6 +962,36 @@ sub readLineCorrectly
     $ret = substr($ret,0,-1) if(substr($ret,0,-1) eq $delimiter);
     # print "looking = $lookingForTerminator\nreturning\n'$ret'\n";
     return $ret;
+}
+
+sub getDelimitedLine
+{
+    my ($self) = shift;
+    my $line = shift;
+    my $delimiter = shift;
+    # my @ret = split(/$delimiter/,$line,-1);  # This doesn't work because these files (sometimes) will put another delimiter at the end of each line
+    # print Dumper(\@ret);
+    # exit;
+    # return \@ret;
+    my @info = ();
+    my @each = split(//,$line);
+    my $ret = "";
+    foreach(@each)
+    {
+        if($_ eq $delimiter)
+        {
+            $ret = " " if(length($ret) == 0); #pad space for empty columns so we can use split function later
+            push(@info, $ret);
+            $ret = "";
+        }
+        else
+        {
+            $ret .= $_;
+        }
+    }
+    $ret = " " if(length($ret) == 0); #pad space for empty columns so we can use split function later
+    push(@info, $ret);
+    return \@info;
 }
 
 sub removeColumns
@@ -1030,10 +1105,15 @@ sub readSaveFolder
             # print "Checking: $file\n";
             if (-f "$pwd/$file")
             {
-                push(@files, "$file");
-                if($init)
+                @stat = stat "$pwd/$file";
+                my $size = $stat[7];
+                if($size ne '0')
                 {
-                    $filesOnDisk{$file} = 1;
+                    push(@files, "$file");
+                    if($init)
+                    {
+                        $filesOnDisk{$file} = 1;
+                    }
                 }
             }
         }

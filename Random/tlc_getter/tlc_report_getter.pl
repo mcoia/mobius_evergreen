@@ -95,7 +95,6 @@ mkdir $cwd unless -d $cwd;
 my $dataDir = %conf{"report_save_folder"};
 mkdir $dataDir unless -d $dataDir;
 
-
 figureBranches();
 
 if(scalar @{$branches} == 0)
@@ -123,12 +122,12 @@ while($finished < $reportCount)
         my $colRemoves = $props{"colrem"};
         print "sending\n".Dumper($branches) if($finished > 0);
 
-        my $rep = new TLCWebReport($map{$reportNum}, $dbHandler, $driver, $cwd, $log, $debug, $conf{"url"}, $conf{"login"}, $conf{"pass"}, $branches, $attr, $conf{"output_folder"}, $outFileName, $colRemoves);
-        $rep->scrape();
+        my $rep = new TLCWebReport($map{$reportNum}, $driver, $cwd, $log, $debug, $conf{"url"}, $conf{"login"}, $conf{"pass"}, $branches, $attr, $conf{"output_folder"}, $outFileName, $colRemoves);
         local $@;
         eval
         {
-            
+            $rep->scrape();
+            $props{"file"} = $rep->getResultFile();
         };
         if( $@ )
         {
@@ -136,163 +135,213 @@ while($finished < $reportCount)
             print $mobUtil->boxText("We have a failure: '" . $map{$reportNum} ."'","#","|",4);
             print "Press Enter to continue to the next report\n";
             my $answer = <STDIN>;
-            $finished++;
+            $props{"error"} = $rep->getError();
         }
         else
         {
-            $finished++;
+            $props{"error"} = $rep->getError();
+            
         }
+        $finished++;
+        $reports{$reportNum} = \%props;
         undef $rep;
     }
     $reportNum++;
 }
 
-
 undef $writePid;
 closeBrowser();
+
+my $summary = $mobUtil->boxText("Completed: $finished","#","|",1);
+$summary .=  $mobUtil->boxText("Failed: $failed","#","|",1);
+
+$reportNum = 0;
+$finished = 0;
+while($finished < $reportCount)
+{
+    if($map{$reportNum})
+    {
+        my %props = %{$reports{$reportNum}};
+        my $file = $props{"file"};
+        my $error = $props{"error"};
+        print "---- $map{$reportNum} ----\n";
+        print "->   $file\n" if !$error;
+        print "->   $error\n" if $error;
+        $finished++;
+        undef $rep;
+    }
+    $reportNum++;
+}
+
+print $summary;
+
+if($conf{"import"} =~/yes/i && $conf{"import_schema"})
+{
+    print "You've elected to automatically import these files into the database\nPress enter to continue:";
+    my $answer = <STDIN>;
+    my $data_dir = $conf{"output_folder"};
+    $data_dir .= "/" if!($data_dir =~ /\/$/);
+    my $dh;
+    opendir($dh, $data_dir) || die "Can't open the directory $data_dir";
+    my @dots;
+    while (my $file = readdir($dh)) 
+    {
+        push @dots, $file if ( !( $file =~ m/^\./) && -f "$data_dir$file" && ( $file =~ m/\.migdat$/i) )
+    }
+    closedir $dh;
+
+    foreach(@dots)
+    {
+        print $_."\n";
+        my $tablename = $_;
+        $tablename =~ s/\.migdat//gi;
+        $tablename =~ s/\s/_/g;
+        my $file = new Loghandler($data_dir.''.$_);
+        my $insertFile = new Loghandler($data_dir.''.$_.'.insert');
+        $insertFile->deleteFile();
+        my @lines = @{$file->readFile()};
+        setupTable(\@lines,$tablename,$insertFile,$conf{"import_schema"});
+    }
+    
+}
+
+
 $log->addLogLine("****************** Ending ******************");
 
-print $mobUtil->boxText("Completed: $finished","#","|",1);
-print $mobUtil->boxText("Failed: $failed","#","|",1);
 
-
-
-sub importFileIntoDB
+sub setupTable
 {
-    my $file = $_;
-    print "Processing $file\n";
-    my $path;
-    my @sp = split('/',$file);
-    $path=substr($file,0,( (length(@sp[$#sp]))*-1) );
-    my $bareFilename =  pop @sp;
-    @sp = split(/\./,$bareFilename);
-    $bareFilename =  shift @sp;
-    $bareFilename =~ s/^\s+//;
-    $bareFilename =~ s/^\t+//;
-    $bareFilename =~ s/\s+$//;
-    $bareFilename =~ s/\t+$//;
-    $bareFilename =~ s/^_+//;
-    $bareFilename =~ s/_+$//;
-    
-    my $tableName = $tablePrefix."_".$bareFilename;
-    
-    $inputFileFriendly .= "\r\n" . $bareFilename;
-
-
-    checkFileReady($file);
-    
-    my @colPositions = (); # two dimension array with number pairs [position, length]
-    my $lineCount = -1;
-    my @columnNames;
-    my $baseInsertHeader = "INSERT INTO $schema.$tableName (";
-    my $queryByHand = '';
-    my $queryInserts = '';
-    my @queryValues = ();
-    my $success = 0;
-    my $accumulatedTotal = 0;
-    my $parameterCount = 0;
-    
-    open(my $fh,"<:encoding(UTF-16)",$file) || die "error $!\n";
-    while(<$fh>) 
-    {
-        $lineCount++;
-        my $line = $_;
+	my @lines = @{@_[0]};
+	my $tablename = @_[1];
+    my $insertFile = @_[2];
+    my $schema = @_[3];
+    my $insertString = '';
+	
+    my $emptyHeaderName = 'ghost';
+    my $header = shift @lines;
+    $log->addLine($header);
+    my @cols = split(/\t/,$header);
+    $log->appendLine($_) foreach(@cols);
+    my %colTracker = ();
+    for my $i (0.. $#cols)
+	{
+        @cols[$i] =~ s/[\.\/\s\$!\-\(\)]/_/g;
+        @cols[$i] =~ s/\_{2,50}/_/g;
+        @cols[$i] =~ s/\_$//g;
+        @cols[$i] =~ s/,//g;
+        @cols[$i] =~ s/\*//g;
         
-        if($lineCount == 0) #first line contains the column header names
+        # Catch those naughty columns that don't have anything left to give
+        $emptyHeaderName.='t' if(length(@cols[$i]) == 0);
+        @cols[$i]=$emptyHeaderName if(length(@cols[$i]) == 0);
+        my $int = 1;
+        my $base = @cols[$i];
+        while($colTracker{@cols[$i]}) #Fix duplicate column names
         {
-            # For now, we will just push the whole line because we need the second line to tell us the divisions.
-            push(@columnNames, $line);
-            next;
+            @cols[$i] = $base."_".$int;
+            $int++;
         }
-        if($lineCount == 1) #second line contains the column division clues
-        {
-            my @chars = split('', $line);
-            @colPositions = @{figureColumnPositions(\@chars)};
-            @columnNames = @{getDataFromLine(\@colPositions, @columnNames[0])};
-            my $query = "DROP TABLE IF EXISTS $schema.$tableName";
-            $dbHandler->update($query);
-            $query = "CREATE TABLE $schema.$tableName (";
-            $query.="id bigserial," if ($primarykey);
-            $query .= "$_ TEXT," foreach(@columnNames);
-            $baseInsertHeader .= "$_," foreach(@columnNames);
-            $query = substr($query,0,-1);
-            $baseInsertHeader = substr($baseInsertHeader,0,-1);
-            $query .= ")";
-            $baseInsertHeader .= ")\nVALUES\n";
-            $queryByHand = $baseInsertHeader;
-            $queryInserts = $baseInsertHeader;
-            $log->addLine($query);
-            $dbHandler->update($query);
-            next;
-        }
+        $colTracker{@cols[$i]} = 1;
+	}
+	print "Gathering $tablename....";
+	$log->addLine(Dumper(\@cols));
+    $insertString.= join("\t",@cols);
+    $insertString.="\n";
+	print $#lines." rows\n";
+	
+	
+	#drop the table
+	my $query = "DROP TABLE IF EXISTS $schema.$tablename";
+	$log->addLine($query);
+	$dbHandler->update($query);
+	
+	#create the table
+	$query = "CREATE TABLE $schema.$tablename (";
+	$query.=$_." TEXT," for @cols;
+	$query=substr($query,0,-1).")";
+	$log->addLine($query);
+	$dbHandler->update($query);
+	
+	if($#lines > -1)
+	{
+		#insert the data
+		$query = "INSERT INTO $schema.$tablename (";
+		$query.=$_."," for @cols;
+		$query=substr($query,0,-1).")\nVALUES\n";
+        my $count = 0;
+		foreach(@lines)
+		{
+            last if ( $sample && ($count > $sample) );
+            # ensure that there is at least one tab
+            if($_ =~ m/\t/)
+            {
+                # $log->appendLine($_) if $count > 15000;
+                my @thisrow = split(/\t/,$_);
+                my $thisline = '';
+                my $valcount = 0;
+                # if(@thisrow[0] =~ m/2203721731/)
+                # {
+                $query.="(";
+                for(@thisrow)
+                {
+                    if($valcount < scalar @cols)
+                    {
+                        my $value = $_;
+                        #add period on trialing $ signs
+                        #print "$value -> ";
+                        $value =~ s/\$$/\$\./;
+                        $value =~ s/\n//;
+                        $value =~ s/\r//;
+                        # $value = NFD($value);
+                        $value =~ s/[\x{80}-\x{ffff}]//go;
+                        $thisline.=$value;
+                        $insertString.=$value."\t";
+                        #print "$value\n";
+                        $query.='$data$'.$value.'$data$,';
+                        $valcount++;
+                    }
+                }
+                # pad columns for lines that are too short
+                my $pad = $#cols - $#thisrow - 1;
+                for my $i (0..$pad)
+                {
+                    $thisline.='$$$$,';
+                    $query.='$$$$,';
+                    $insertString.="\t";
+                }
+                $insertString = substr($insertString,0,-1)."\n";
+                # $log->addLine( "final line $thisline");
+                $query=substr($query,0,-1)."),\n";
+                $count++;
+                if( $count % 5000 == 0)
+                {
+                    $insertFile->addLine($insertString);
+                    $insertString='';
+                    $query=substr($query,0,-2)."\n";
+                    $loginvestigationoutput.="select count(*),$_ from $schema.$tablename group by $_ order by $_\n" for @cols;
+                    print "Inserted ".$count." Rows into $schema.$tablename\n";
+                    $log->addLine($query);
+                    $dbHandler->update($query);
+                    $query = "INSERT INTO $schema.$tablename (";
+                    $query.=$_."," for @cols;
+                    $query=substr($query,0,-1).")\nVALUES\n";
+                }
+                # }
+            }
+		}
+		$query=substr($query,0,-2)."\n";
+		$loginvestigationoutput.="select count(*),$_ from $schema.$tablename group by $_ order by $_\n" for @cols;
+		print "Inserted ".$count." Rows into $schema.$tablename\n";
         
-        
-        my @lineLength = split('', $line);
-        # print $#lineLength."\n";
-        my @lastCol = @{@colPositions[$#colPositions]};
-        my $m = @lastCol[0] + @lastCol[1];
-        # print "Needs to be:\n$m";
-        next if ($#lineLength < (@lastCol[0] + @lastCol[1])); # Line is not long enough to get all columns
-        my @data = @{getDataFromLine(\@colPositions, $line)};
-        $queryInserts.="(" if ($#data > -1);
-        $queryByHand.="(" if ($#data > -1);
-        foreach(@data)
-        {
-            $parameterCount++ if (lc($_) ne 'null');
-            push(@queryValues, $_) if (lc($_) ne 'null');
-            $queryInserts .= "null, "  if (lc($_) eq 'null');
-            $queryInserts .= "\$$parameterCount, "  if (lc($_) ne 'null');
-            $queryByHand .= "null, " if (lc($_) eq 'null');
-            $queryByHand .= "\$data\$$_\$data\$, " if (lc($_) ne 'null');
-        }
-        $queryInserts = substr($queryInserts,0,-2) if ($#data > -1);
-        $queryByHand = substr($queryByHand,0,-2) if ($#data > -1);
-        $queryInserts.="),\n" if ($#data > -1);
-        $queryByHand.="),\n" if ($#data > -1);
-        $success++ if ($#data > -1);
-    
-        if( ($success % 500 == 0) && ($success != 0) )
-        {
-            $accumulatedTotal+=$success;
-            $queryInserts = substr($queryInserts,0,-2);
-            $queryByHand = substr($queryByHand,0,-2);
-            $log->addLine($queryByHand);
-            # print ("Importing $success\n");
-            $log->addLine("Importing $accumulatedTotal / $lineCount");
-            $dbHandler->updateWithParameters($queryInserts,\@queryValues);
-            $success = 0;
-            @queryValues = ();
-            $queryByHand = $baseInsertHeader;
-            $queryInserts = $baseInsertHeader;
-            $parameterCount = 0;
-        }
-
-    }
-    close($fh);
-    
-    $queryInserts = substr($queryInserts,0,-2) if $success;
-    $queryByHand = substr($queryByHand,0,-2) if $success;
-    
-    # Handle the case when there is only one row inserted
-    if($success == 1)
-    {
-        $queryInserts =~ s/VALUES \(/VALUES /;            
-        $queryInserts = substr($queryInserts,0,-1);
-    }
-
-    # $log->addLine($queryInserts);
-    $log->addLine($queryByHand);
-    # $log->addLine(Dumper(\@queryValues));
-    
-    $accumulatedTotal+=$success;
-    $log->addLine("Importing $accumulatedTotal / $lineCount") if $success;
-    
-    $dbHandler->updateWithParameters($queryInserts,\@queryValues) if $success;
-    
-    # # delete the file so we don't read it again
-    # Disabled because we are going to let bash do this 
-    # so that we don't halt execution of this script in case of errors
-    # unlink $file;
+		$log->addLine($query);
+		$dbHandler->update($query);
+        $insertFile->addLine($insertString);
+	}
+	else
+	{
+		print "Empty dataset for $tablename \n";
+		$log->addLine("Empty dataset for $tablename");
+	}
 }
 
 
