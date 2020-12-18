@@ -30,6 +30,7 @@ sleep 10
 # Wipe out the screenshots from last time
 rm screenshots/*
 
+./tlc_report_getter.pl --config tlc_report_getter.conf --log getter.log
 
 # Make sure all the leftover stuff isn't running
 #ps -ef | grep firefox | grep -v grep | awk '{print $2}' | xargs sudo kill -9

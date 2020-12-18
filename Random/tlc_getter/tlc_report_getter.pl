@@ -120,7 +120,7 @@ while($finished < $reportCount)
         my $attr = $props{"attr"};
         my $outFileName = $props{"migname"};
         my $colRemoves = $props{"colrem"};
-        print "sending\n".Dumper($branches) if($finished > 0);
+        # print "sending\n".Dumper($branches) if($finished > 0);
 
         my $rep = new TLCWebReport($map{$reportNum}, $driver, $cwd, $log, $debug, $conf{"url"}, $conf{"login"}, $conf{"pass"}, $branches, $attr, $conf{"output_folder"}, $outFileName, $colRemoves);
         local $@;

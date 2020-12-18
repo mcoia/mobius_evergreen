@@ -100,7 +100,6 @@ sub runReport
     my ($self) = shift;
     $self->takeScreenShot('filling_selects');
     fillAllOptions($self);
-    print "Filled all options\n";
     $self->takeScreenShot('filled_everything');
     clickFinish($self);
     my $running = isReportRunning($self);
@@ -161,7 +160,7 @@ sub fillAllOptions
         {
             if($totalSingles > $totalSingleChanged)
             {
-                print "Filling Singles\n";
+                # print "Filling Singles\n";
                 @singleResults = @{fillSelects($self)};
                 $totalSingles = @singleResults[0] if(!$totalSingles);
                 $totalSingleChanged += @singleResults[1];
@@ -213,17 +212,17 @@ sub fillAllOptions
         Total Multi Selects no opts:  ".@multiResults[1]."
         Multi Attempts:               $multisAttempts
         Multi Attempts Max:           $attemptMax
-        ";
+        \n";
         sleep 1;
 
         if( ($totalSingles > $totalSingleChanged) || !$doneMultis)
         {
-            print "\nStill clicking stuff\n";
+            print "Still clicking report options\n";
             $self->takeScreenShot('filling_selects');
         }
         else
         {
-            print $mobUtil->boxText("All Square! Moving to run report","#","|",2);
+            print $mobUtil->boxText("Report options are now satisfied! Moving to run report","#","|",2);
             $keepGoing = 0;
             fillDates($self);
             $self->takeScreenShot('filled_dates');
@@ -306,7 +305,7 @@ sub clickFinish
         }
     }
     ";
-    $self->doJS($script);
+    $self->doJS($script, 1);
     sleep 1;
     $script = 
     "
@@ -321,7 +320,7 @@ sub clickFinish
         }
     }
     ";
-    $self->doJS($script);
+    $self->doJS($script, 1);
     sleep 1;
 }
 
@@ -411,8 +410,7 @@ sub selectAlls
     }
     return ''+howMany+','+noOptions;
     ";
-    print "Filling multis\n";
-    my $selects =  $self->doJS($script);
+    my $selects =  $self->doJS($script, 1);
     my @s = split(/,/, $selects);
     foreach my $i (0 .. $#s)
     {
@@ -428,9 +426,9 @@ sub fillSelects
     my %sels = %{getSingleSelectIDs($self)};
     my $total = 0;
     my $changed = 0;
-    print Dumper(\%sels);
-    print Dumper($selectAnswers{"finished"});
-    sleep 1;
+    # print Dumper(\%sels);
+    # print Dumper($selectAnswers{"finished"});
+    # sleep 1;
     while ((my $domid, my $val) = each(%sels))
     {
         $total++;
@@ -534,7 +532,7 @@ sub fillThisSelect
             $worked = selectsChooseSpecificOption($self, $domid, $selectAnswers{$domName});
             if(!$worked)
             {
-                print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\n";
+                # print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\n";
                 $attempts{$domName}++;
             }
         }
@@ -545,7 +543,7 @@ sub fillThisSelect
                 $worked = selectsChooseAnyOption($self, $domid);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\n";
+                    # print "Couldn't select option: '".$selectAnswers{$domName}."' in dropdown '".$domName."'\n";
                     $attempts{$domName}++;
                 }
             }
@@ -557,7 +555,7 @@ sub fillThisSelect
                 $worked = selectsChooseSpecificOption($self, $domid, $branch);
                 if(!$worked)
                 {
-                    print "Couldn't select option: '$branch' in dropdown '".$domName."'\n";
+                    # print "Couldn't select option: '$branch' in dropdown '".$domName."'\n";
                     $attempts{$domName}++;
                 }
             }
@@ -578,12 +576,10 @@ sub fillThisSelect
     }
     else
     {
-        print "We've encountered a dropdown list that is not defined:\n'$domName'\nReport: '" . $self->{name} . "'";
         $self->takeScreenShot('failed_selects');
-        exit;
+        $self->giveUp($mobUtil, "We've encountered a dropdown list that is not defined:\n'$domName', screenshot: failed_selects");
     }
     return $worked;
-
 }
 
 sub selectsChooseSpecificOption
@@ -614,7 +610,7 @@ sub selectsChooseSpecificOption
     }
     return found;
     ";
-    my $found = $self->doJS($script);
+    my $found = $self->doJS($script, 1);
     $found += 0;
     return 1 if $found > -1;
     return 0;
@@ -648,7 +644,7 @@ sub selectsChooseAnyOption
     }
     return found;
     ";
-    my $found = $self->doJS($script);
+    my $found = $self->doJS($script, 1);
     $found += 0;
     return 1 if $found > -1;
     return 0;
@@ -657,7 +653,7 @@ sub selectsChooseAnyOption
 sub clickPopulateButtons
 {
     my ($self) = shift;
-    print "Clicking Populate Buttons\n";
+    # print "Clicking Populate Buttons\n";
     my $script = 
     "
     var doms = document.getElementsByTagName('button');
@@ -673,7 +669,7 @@ sub clickPopulateButtons
     }
     return found;
     ";
-    my $found = $self->doJS($script);
+    my $found = $self->doJS($script, 1);
     sleep 2 if($found);
     return $found;
 }
@@ -692,7 +688,7 @@ sub clickDownloadReportCSV
     tab = document.getElementById('_NS_viewInCSV');
     tab.dispatchEvent(new MouseEvent('mouseup', { 'bubbles': true }));
     ";
-    $self->doJS($script);
+    $self->doJS($script, 1);
     print "Clicked Download\n";
     my $handles = $self->{driver}->get_window_handles;
     while(!$handles->[1])
@@ -713,7 +709,7 @@ sub clickDownloadReportCSV
             $self->{driver}->switch_to_window($handles->[1]);
             $self->takeScreenShot('new_window');
             $self->{driver}->switch_to_window($handles->[0]);
-            print Dumper($handles);
+            # print Dumper($handles);
         }
         else
         {
@@ -814,21 +810,18 @@ sub cleanLineSpans
     my $previousLine = "";
     while($i <= $#lines)
     {
-        # if($i > 27362)
-        # {
-            my @thisLine = @{readFullLine($self, \@lines, $i, $delimiter, $headerCount)};
-            $i = @thisLine[1];
-            if(@thisLine[0])
-            {
-                $finalout .= @thisLine[0] . "\n";
-            }
-            else
-            {
-                print "Error on line $i\n";
-                $self->{log}->addLine($finalout);
-                return 0;
-            }
-        # }
+        my @thisLine = @{readFullLine($self, \@lines, $i, $delimiter, $headerCount)};
+        $i = @thisLine[1];
+        if(@thisLine[0])
+        {
+            $finalout .= @thisLine[0] . "\n";
+        }
+        else
+        {
+            print "Error on line $i\n";
+            $self->{log}->addLine($finalout);
+            return 0;
+        }
         $i++;
     }
     $finalout = "$header\n" . substr($finalout,0,-1);
@@ -1057,7 +1050,7 @@ sub seeIfNewFile
     {
         if(!$filesOnDisk{$_})
         {
-            print "Detected new file: $_\n";
+            # print "Detected new file: $_\n";
             checkFileReady($self, $self->{saveFolder} ."/".$_);
             return $self->{saveFolder} . "/" . $_;
         }
