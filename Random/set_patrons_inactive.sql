@@ -5,7 +5,7 @@ begin;
 update actor.usr au
 set
         active = false,
-        alert_message = 'automatically set to inactive status via Scenic policy ' || alert_message,
+        alert_message = 'automatically set to inactive status via Scenic policy ' || coalesce(alert_message,''),
         last_update_time = now()
 -- no unfinished circulations and no circulations within the last 2 years
 where not exists (
