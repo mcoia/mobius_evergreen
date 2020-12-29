@@ -21,6 +21,14 @@ successemaillist = example@example.org, example2@example.org
 #provide domain name for reports
 domainname = yourdomainname.com
 
+#######################################################################################
+#
+# Use this option if you plan on implementing a feedback loop from catalogers
+#
+#######################################################################################
+reportoutputroot = /openils/var/web/catreports
+reportHTMLSeed = /path/to/seek_and_destroy_index_seed.html
+
 # only 1 email address for alwaysemail
 alwaysemail = example@example.org
 fromemail = example@example.org

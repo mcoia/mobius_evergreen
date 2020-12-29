@@ -42,7 +42,7 @@ our $runDedupe=0;
 our $runFindElectronic856TOC=0;
 our $doNotRunFullReEval=0;
 
-                    
+our %tattleSystemDone = ();
 our $resetScores=0;
 
 my $help = "
@@ -326,7 +326,7 @@ if(! -e $xmlconf)
 				my $format = DateTime::Format::Duration->new(pattern => '%M:%S');
 				my $duration =  $format->format_duration($difference);
 				my $displayjobid = $jobid;
-				if($reportonly){$displayjobid="Report Only";}
+				$displayjobid="Report Only" if($reportonly);
 				$email->sendWithAttachments("Evergreen Utility - Catalog Audit Job # $displayjobid","$reports\r\n\r\nDuration: $duration\r\n\r\n-Evergreen Perl Squad-",\@attachments);
 				foreach(@attachments)
 				{
@@ -352,297 +352,563 @@ if(! -e $xmlconf)
 
 sub reportResults
 {
-	my $newRecordCount='';
-	my $updatedRecordCount='';
-	my $mergedRecords='';
-	my $itemsAssignedRecords='';
-	my $itemsFailedAssignedRecords='';
-	my $copyMoveRecords='';
-	my $undedupeRecords='';
-	my $largePrintItemsOnNonLargePrintBibs='';
-	my $nonLargePrintItemsOnLargePrintBibs='';
-	my $itemsAttachedToDeletedBibs='';
-	my $itemsAttachedToElectronicBibs='';
-	my $videoItemsOnNonvideoBibs='';
-	my $AudiobookItemsOnNonAudiobookBibs='';
-	my $AudiobooksPossbileEAudiobooks='';
-	my @attachments=();
-	
-	
+	my @reportBlurbs = ();
+	my @attachments = ();
+
+    my $jobSummaryReports = jobSummaryReports();
+    if($jobSummaryReports)
+    {
+        my %t = %{$jobSummaryReports};
+        push(@reportBlurbs, @{ $t{"reportBlurbs"} }) if $t{"reportBlurbs"};
+        push(@attachments, @{ $t{"attachments"} }) if $t{"attachments"};
+    }
+    my $tattleTaleReports = tattleTaleReports();
+    if($tattleTaleReports)
+    {
+        my %t = %{$tattleTaleReports};
+        push(@reportBlurbs, @{ $t{"reportBlurbs"} }) if $t{"reportBlurbs"};
+        push(@attachments, @{ $t{"attachments"} }) if $t{"attachments"};
+    }
+
+
+	my $ret=""; # $newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobooksPossbileEAudiobooks.$itemsAttachedToDeletedBibs.$itemsAttachedToElectronicBibs.$AudiobookItemsOnNonAudiobookBibs.$videoItemsOnNonvideoBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
+	#print $ret;
+	my @returns = ($ret,\@attachments);
+	return \@returns;
+}
+
+sub tattleTaleReports
+{
+    my @reportBlurbs = ();
+	my @attachments = ();
+    my %reportDivisions = ();
+    my %ret = ();
+
+    # Clear any old reports
+    $conf{"reportoutputroot"} .= '/'; # Make sure it ends with a slash. Double slashes at the end are fine for linux
+    deleteOldTattleReports() if $conf{"reportoutputroot"};
+    make_path($conf{"reportoutputroot"}, {mode => 7644, }) if !(-d $conf{"reportoutputroot"});
+
+    my $query = "select id,name,query from seekdestroy.tattle_report order by 1 -- limit 1";
+	my @reports = @{$dbHandler->query($query)};	
+	foreach(@reports)
+	{
+        my @thisReport = @{$_};
+        my $id = @thisReport[0];
+        my $name = @thisReport[1];
+        $query = @thisReport[2];
+        $query =~ s/!!!reportid!!!/$id/g;
+        updateJob("Processing","reportResults $query");
+        my @results = @{$dbHandler->query($query)};
+        if($#results>-1)
+        {
+            my @header = @{$dbHandler->getColumnNames()};
+            my $systemColID = 0;
+            my $copyidColID = 0;
+            for my $i (0..$#header)
+            {
+                $systemColID = $i if @header[$i] =~ m/systemid/gi;
+                $copyidColID = $i if @header[$i] =~ m/copyid/gi;
+            }
+            my $summary = summaryReportResults(\@results,$systemColID,"System",$name);
+            
+            my @outputs = ([@header],@results);
+            if($conf{"reportoutputroot"})  ## Signifies that this configuration is setup to write to HTML for staff review/evals
+            {
+                writeTattleHTML(\@outputs, $systemColID, $copyidColID, $name, $id);
+            }
+            else
+            {
+                my $filename = makeFriendlyFileName($name);
+                $filename .= ".csv";
+                createCSVFileFrom2DArray(\@outputs,$baseTemp.$filename);
+                push(@attachments,$baseTemp.$filename); 
+            }
+        }
+        undef @results;
+    }
+
+    createTattleReportIndex() if($conf{"reportoutputroot"});
+
+    $ret{"attachments"} = \@attachments if @attachments[0];
+    $ret{"reportBlurbs"} = \@reportBlurbs if @reportBlurbs[0];
+
+    return \%ret;
+}
+
+sub writeTattleHTML
+{
+    my @results = @{@_[0]};
+    my $systemColNum = @_[1];
+    my $copyidColID = @_[2];
+    my $reportTitle = @_[3];
+    my $reportID = @_[4];
+    my $header = shift @results;
+    my @headers = @{$header};
+    my $htmlHeader = "<thead>\n<tr>";
+    my @printCols = ();
+    my %colStyle = ();
+    for my $i (0..$#headers)
+    {
+        if(@headers[$i] =~ /bib/gi)
+        {
+            push(@printCols, $i);
+            $colStyle{$i} = "<td><a target = '_blank' href='/eg/staff/cat/catalog/record/!!!value!!!'>!!!value!!!</a></td>\n";
+            $htmlHeader .= "<th>" . @headers[$i] . "</th>\n";
+        }
+        elsif(@headers[$i] =~ /barcode/gi)
+        {
+            push(@printCols, $i);
+            $colStyle{$i} = "<td class = 'itembarcode' barcode = '!!!value!!!'><a target = '_blank' href='/eg/staff/cat/item/!!!copyid!!!'>!!!value!!!</a></td>\n";
+            $htmlHeader .= "<th>" . @headers[$i] . "</th>\n";
+        }
+        elsif(@headers[$i] =~ /copyid/gi)
+        {
+            push(@printCols, $i);
+            $colStyle{$i} = "
+            <td>
+            <span class='ignorespansucess hide'>Ignored</span>
+            <span class='ignorespanfail hide'>Failed to ignore</span>
+            <span class='loader hide'></span>
+            <button class='ignorebutton' copyid='!!!value!!!' >Ignore</button>
+            </td>\n";
+            $htmlHeader .= "<th>Ignore</th>\n";
+        }
+        elsif( (@headers[$i] =~ /call/gi) || (@headers[$i] =~ /icon/gi) || (@headers[$i] =~ /branch/gi) || (@headers[$i] =~ /issue/gi) )
+        {
+            push(@printCols, $i);
+            $colStyle{$i} = "<td>!!!value!!!</td>";
+            $htmlHeader .= "<th>" . @headers[$i] . "</th>\n";
+        }
+    }
+    $htmlHeader .= "</tr></thead>\n";
+
+    my %reports = %{reportSplitIntoGroups(\@results, $systemColNum)};
+    $log->addLine(Dumper(\%reports));
+    while ((my $system, my $rowss) = each(%reports))
+    {
+        my $shortOUName = getShortOU($system);
+        next if (!$shortOUName || $shortOUName eq '');
+        my $folderPath = $conf{"reportoutputroot"} . $shortOUName;
+        my $index = seedTattleSystemIndex($folderPath);
+        my $htmlOutput = "
+        <div class='report-title'>$reportTitle</div>
+        <div class='datatable-outter'>
+        <table reportid='$reportID' class='cell-border compact stripe hover order-column row-border'>\n$htmlHeader<tbody>";
+        my @rows = @{$rowss};
+        foreach(@rows)
+        {
+            my @thisRow = @{$_};
+            my $thisCopyID = @thisRow[$copyidColID];
+            $htmlOutput .= "<tr>";
+            foreach(@printCols)
+            {
+                my $blurb = $colStyle{$_};
+                my $replace = @thisRow[$_];
+                $replace = OpenILS::Application::AppUtils->entityize($replace) if $replace;
+                $blurb =~ s/!!!value!!!/$replace/gi;
+                $blurb =~ s/!!!copyid!!!/$thisCopyID/gi;
+                $htmlOutput .= $blurb;
+            }
+            $htmlOutput .= "</tr>";
+        }
+        $htmlOutput .= "</tbody></table></div>";
+        $index->addLine($htmlOutput);
+        if (!$tattleSystemDone{$system})
+        {
+            $tattleSystemDone{$system} = 1;
+            $index->addLine(getTattleJSMagic());
+        }
+        $htmlOutput = "";
+        undef $index;
+    }
+}
+
+sub getTattleJSMagic
+{
+    my $ret = '
+    <script>
+    
+    $(document).ready(function()
+    {
+        $("table").each(function()
+        {
+            $(this).DataTable();
+        });
+        $(".ignorebutton").each(function()
+        {
+            var reportID = $(this).parents("table");
+            if(reportID[0])
+            {
+                reportID = $(reportID[0]).attr("reportid");
+                var copyID = $(this).attr("copyid");
+                if(reportID && copyID)
+                {
+                    $(this).click(function() 
+                    {
+                        handleIgnore(reportID, copyID);
+                    });
+                }
+            }
+        });
+    });
+    
+    function handleIgnore(reportID, copyID)
+    {
+        var elements = getIgnoreButtonElements(reportID, copyID);
+        elements["a"].hide();
+        if( !elements["error"].hasClass("hide") )
+        {
+            elements["error"].addClass("hide");
+        }
+        elements["loader"].removeClass("hide");
+        var url = "/eg/opac/tattler?copyid=" + copyID + "&reportid=" + reportID;
+        console.log("attempting: " + url);
+        $.get(url, function(data)
+        {
+            elements["loader"].addClass("hide");
+            if(data && data == "1")
+            {
+                elements["success"].removeClass("hide");
+            }
+            else if (data && data == "2")
+            {
+                elements["success"].html("Already ignored. Next server execution will remove this row");
+                elements["success"].removeClass("hide");
+            }
+            else
+            {
+                elements["error"].removeClass("hide");
+                elements["a"].html("Try again");
+                elements["a"].show();
+            }
+        });
+    }
+    
+   function getIgnoreButtonElements(reportID, copyID)
+    {
+        var ret = [];
+        $("table").each(function()
+        {
+            var thisTable = $(this);
+            var repID = thisTable.attr("reportid");
+            if(repID == reportID)
+            {
+                $(this).find("button").each(function()
+                {
+                    var thisa = $(this);
+                    var cID = thisa.attr("copyid");
+                    if(cID == copyID)
+                    {
+                        ret["a"] = thisa;
+                        thisa.siblings().each(function()
+                        {
+                            if( $(this).hasClass("ignorespansucess") )
+                            {
+                                ret["success"] = $(this);
+                            }
+                            else if( $(this).hasClass("ignorespanfail") )
+                            {
+                                ret["error"] = $(this);
+                            }
+                            else if( $(this).hasClass("loader") )
+                            {
+                                ret["loader"] = $(this);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+
+        return ret;
+        
+    }
+    </script>
+    
+    ';
+    
+    return $ret;
+}
+
+sub deleteOldTattleReports
+{
+    remove_tree( $conf{"reportoutputroot"}, {keep_root => 1, error => \my $err} );
+    if ($err && @$err)
+    {
+        print "There was a problem cleaning out " .$conf{"reportoutputroot"}. "\n";
+        $log->addLogLine("There was a problem cleaning out " .$conf{"reportoutputroot"});
+        for my $diag (@$err)
+        {
+            my ($file, $message) = %$diag;
+            if ($file eq '')
+            {
+                print "general error: $message\n";
+            }
+            else
+            {
+                print "problem unlinking $file: $message\n";
+            }
+        }
+    }
+}
+
+sub createTattleReportIndex
+{
+    my $path = $conf{"reportoutputroot"};
+    my $rootIndex = $path."/index.html";
+    my $htmlOutput = "<html><body><ul>\n";
+    $rootIndex = new Loghandler($rootIndex);
+    $rootIndex->truncFile("");
+	opendir(DIR, $path) or die $!;
+	while (my $file = readdir(DIR)) 
+	{
+        if( !($file =~ /\./ ) )
+        {
+            if ( (-d "$path/$file") && (-f "$path/$file/index.html") )
+            {
+                $htmlOutput .= "<li><a href='$file/index.html'>$file</a></li>\n";
+            }
+        }
+	}
+	$htmlOutput .= "</ul></body></html>";
+    $rootIndex->addLine($htmlOutput);
+}
+
+sub getShortOU
+{
+    my $name = shift;
+    my $col = "id";
+    $col = "name" if $name =~ /\D/;
+    my $ret = 0;
+    my $query = "select shortname from actor.org_unit where $col = \$namename\$$name\$namename\$";
+    my @results = @{$dbHandler->query($query)};
+    foreach(@results)
+    {
+        my @row = @{$_};
+        $ret = @row[0];
+    }
+    return $ret;
+}
+
+sub makeFriendlyFileName
+{
+    my $outFileName = shift;
+    $outFileName =~ s/^\s+//;
+    $outFileName =~ s/^\t+//;
+    $outFileName =~ s/\s+$//;
+    $outFileName =~ s/\t+$//;
+    $outFileName =~ s/^_+//;
+    $outFileName =~ s/_+$//;
+    $outFileName =~ s/\s/_/g;
+    $outFileName =~ s/\///g;
+    $outFileName =~ s/://g;
+    return $outFileName;
+}
+
+sub jobSummaryReports
+{
+    my @reportBlurbs = ();
+    my @attachments = ();
+    my %ret = ();
+
+    return 0 if $jobid == -1;
+    
 	#bib_marc_update table report non new bibs
 	my $query = "select extra,count(*) from seekdestroy.bib_marc_update where job=$jobid and new_record is not true group by extra";
 	updateJob("Processing","reportResults $query");
 	my @results = @{$dbHandler->query($query)};
+    my $updatedRecordCount = "";
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
 		$updatedRecordCount.=@row[1]." records were updated for this reason: ".@row[0]."\r\n";
 	}
+    push(@reportBlurbs, $updatedRecordCount) if (length($updatedRecordCount) > 0);
+
 	#bib_marc_update table report new bibs
 	my $query = "select extra,count(*) from seekdestroy.bib_marc_update where job=$jobid and new_record is true group by extra";
 	updateJob("Processing","reportResults $query");
-	my @results = @{$dbHandler->query($query)};	
+	my @results = @{$dbHandler->query($query)};
+    my $newRecordCount = "";
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};		
 		$newRecordCount.=@row[1]." records were created for this reason: ".@row[0]."\r\n";
 	}
-	
+	push(@reportBlurbs, $newRecordCount) if (length($newRecordCount) > 0);
+
 	#bib_merge table report
-	$query = "select leadbib,subbib from seekdestroy.bib_merge where job=$jobid";
+	my $query = "select leadbib as \"Winning Bib\",subbib as \"Deleted or Merged Bib\" from seekdestroy.bib_merge where job=$jobid";
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};
+    my $mergedRecords = "";
 	if($#results>-1)
 	{	
 		my $count = $#results+1;
 		$mergedRecords="$count records were merged\r\n";
-		$mergedRecords."\r\n\r\n";
-		my @header = ("Winning Bib","Deleted/Merged Bib");
+		my @header =  @{$dbHandler->getColumnNames()};
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Merged_bibs.csv");
 		push(@attachments,$baseTemp."Merged_bibs.csv");
 	}
-	
+	push(@reportBlurbs, $mergedRecords) if (length($mergedRecords) > 0);
+
 	#call_number_move table report
-	$query = "select tobib,frombib,(select label from asset.call_number where id=a.call_number),
-	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number))
-	from seekdestroy.call_number_move a where job=$jobid
+	$query = "select
+    tobib as \"Destination Bib\",
+    frombib as \"Source Bib\",
+    (select label from asset.call_number where id=a.call_number) as \"Call Number\",
+	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number)) as \"Owning Library\"
+	from seekdestroy.call_number_move a
+    where job=$jobid
 	and frombib not in(select oldleadbib from seekdestroy.undedupe where job=$jobid) and tobib is not null";
 	updateJob("Processing","reportResults $query");	
 	@results = @{$dbHandler->query($query)};
+    my $itemsAssignedRecords = "";
 	if($#results>-1)
-	{	
-		my $summary = summaryReportResults(\@results,3,"Owning Library",45,"AUTOMATED FIX: Moved Call Numbers");
-		$itemsAssignedRecords="$summary\r\n\r\n\r\n";
-		my @header = ("Destination Bib","Source Bib","Call Number","Owning Library");
-		my @outputs = ([@header],@results);
+	{
+		$itemsAssignedRecords = summaryReportResults(\@results,3,"Owning Library","AUTOMATED FIX: Moved Call Numbers");
+        my @header = @{$dbHandler->getColumnNames()};
+        my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Moved_call_numbers.csv");
 		push(@attachments,$baseTemp."Moved_call_numbers.csv");
 	}
-	
+    push(@reportBlurbs, $itemsAssignedRecords) if (length($itemsAssignedRecords) > 0);
+
 	#call_number_move FAILED table report
-	$query = "select frombib,
-	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number)),
-	(select label from asset.call_number where id=a.call_number) from seekdestroy.call_number_move a where job=$jobid
+	$query = "select
+    frombib as \"Source Bib\",
+	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number)) as \"Call Number Owning Library\",
+	(select label from asset.call_number where id=a.call_number) as \"Call Number\"
+    from seekdestroy.call_number_move a
+    where job=$jobid
 	and frombib not in(select oldleadbib from seekdestroy.undedupe where job=$jobid) and tobib is null
 	order by (select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.call_number))";
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};
+    my $itemsFailedAssignedRecords = "";
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,1,"Owning Library",45,"FAILED: Call Numbers FAILED to be moved");
-		$itemsFailedAssignedRecords="$summary\r\n\r\n\r\n";
-		my @header = ("Source Bib","Call Number Owning Library","Call Number");
+		$itemsFailedAssignedRecords = summaryReportResults(\@results,1,"Owning Library","FAILED: Call Numbers FAILED to be moved");
+		my @header = @{$dbHandler->getColumnNames()};
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Failed_call_number_moves.csv");
 		push(@attachments,$baseTemp."Failed_call_number_moves.csv");
 	}
-	
+    push(@reportBlurbs, $itemsFailedAssignedRecords) if (length($itemsFailedAssignedRecords) > 0);
+
 	#copy_move table report
-	$query = "select (select barcode from asset.copy where id=a.copy),
-	(select record from asset.call_number where id=a.fromcall),
-	(select record from asset.call_number where id=a.tocall),
-	(select label from asset.call_number where id=a.tocall),
-	(select name from actor.org_unit where id=(select circ_lib from asset.copy where id=a.copy))
+	$query = "select
+    (select barcode from asset.copy where id=a.copy) as \"Barcode\",
+	(select record from asset.call_number where id=a.fromcall) as \"Source Bib\",
+	(select record from asset.call_number where id=a.tocall) as \"Destination Bib\",
+	(select label from asset.call_number where id=a.tocall) as \"Call Number\",
+	(select name from actor.org_unit where id=(select circ_lib from asset.copy where id=a.copy)) as \"Circulating Library\"
 	from seekdestroy.copy_move a where job=$jobid";
 	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
+	@results = @{$dbHandler->query($query)};
+    my $copyMoveRecords = "";
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,4,"Circulating Library",45,"AUTOMATED FIX: Copies moved");
-		$copyMoveRecords="$summary\r\n\r\n\r\n";
-		my @header = ("Barcode","Source Bib","Destination Bib","Call Number","Circulating Library");
+		$copyMoveRecords = summaryReportResults(\@results,4,"Circulating Library","AUTOMATED FIX: Copies moved");
+		my @header = @{$dbHandler->getColumnNames()};
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Copy_moves.csv");
 		push(@attachments,$baseTemp."Copy_moves.csv");
 	}
-	
+	push(@reportBlurbs, $copyMoveRecords) if (length($copyMoveRecords) > 0);
+
 	#undedupe table report
 	$query = "select 
-	undeletedbib,
-	oldleadbib,
-	(select label from asset.call_number where id=a.moved_call_number),
-	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.moved_call_number))
+	undeletedbib as \"Undeleted Bib\",
+	oldleadbib as \"Old Leading Bib\",
+	(select label from asset.call_number where id=a.moved_call_number) as \"Call Number\",
+	(select name from actor.org_unit where id=(select owning_lib from asset.call_number where id=a.moved_call_number)) as \"Owning Library\"
 	from seekdestroy.undedupe a where job=$jobid";
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};	
+    my $undedupeRecords = "";
 	if($#results>-1)
 	{	
-		my $summary = summaryReportResults(\@results,3,"Owning Library",45,"AUTOMATED FIX: Un-deduplicated Records");
-		$undedupeRecords="$summary\r\n\r\n\r\n";				
-		my @header = ("Undeleted Bib","Old Leading Bib","Call Number","Owning Library");
+		$undedupeRecords = summaryReportResults(\@results,3,"Owning Library","AUTOMATED FIX: Un-deduplicated Records");
+		my @header = @{$dbHandler->getColumnNames()};
 		my @outputs = ([@header],@results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."Undeduplicated_Bibs.csv");
 		push(@attachments,$baseTemp."Undeduplicated_Bibs.csv");
 	}
-	
-	#Possible Electronic
+	push(@reportBlurbs, $undedupeRecords) if (length($undedupeRecords) > 0);
+
+    #Possible Electronic
 	$query =  $queries{"possible_electronic"};
 	$query = "select	
-	tag902,
-	(select deleted from biblio.record_entry where id= outsidesbs.record),record,
- \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$,
- winning_score,
-  opac_icon \"opac icon\",
- winning_score_score,winning_score_distance,second_place_score,
- circ_mods,call_labels,copy_locations,
- score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score
-  from seekdestroy.bib_score outsidesbs where record in( $query )
-  order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
+	tag902 as \"903\",
+	(select deleted from biblio.record_entry where id= outsidesbs.record) as \"Deleted\",
+    record as \"BIB ID\",
+    \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$ as \"OPAC Link\",
+    winning_score as \"Winning Score\",
+    opac_icon \"opac icon\" as \"OPAC ICON\",
+    winning_score_score as \"Winning Score\",
+    winning_score_distance as \"Winning Score Distance\",
+    second_place_score as \"Second Place Score\",
+    circ_mods as \"Circ Modifiers\",
+    call_labels as \"Call Numbers\",
+    copy_locations as \"Locations\",
+    score as \"Record Quality\",
+    record_type as \"Record Type\",
+    audioformat as \"Audio Format\",
+    videoformat as \"Video Format\",
+    electronic as \"Electronic\",
+    audiobook_score as \"Audiobook Score\",
+    music_score as \"Music Score\",
+    playaway_score as \"Playaway Score\",
+    largeprint_score as \"Largeprint Score\",
+    video_score as \"Video Score\",
+    microfilm_score as \"Microfilm Score\",
+    microfiche_score as \"Microfiche Score\"
+    from
+    seekdestroy.bib_score outsidesbs where record in( $query )
+    order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
   ";
 	updateJob("Processing","reportResults $query");
 	@results = @{$dbHandler->query($query)};
+    my $AudiobooksPossbileEAudiobooks = "";
 	if($#results>-1)
 	{	
 		my $count = $#results+1;
-		$AudiobooksPossbileEAudiobooks="$count Possible Electronic (see attached bibs_possible_electronic.csv)\r\n\r\n";
-		my @header = ("903","Deleted","BIB ID","OPAC Link","Winning_score","OPAC ICON","Winning Score",
-		"Winning Score Distance","Second Place Score","Circ Modifiers","Call Numbers","Locations",
-		"Record Quality","record_type","audioformat","videoformat","electronic","audiobook_score",
-		"music_score","playaway_score","largeprint_score","video_score","microfilm_score","microfiche_score");		
+		$AudiobooksPossbileEAudiobooks = "$count Possible Electronic (see attached bibs_possible_electronic.csv)";
+		my @header = @{$dbHandler->getColumnNames()};
 		my @outputs = ([@header], @results);
 		createCSVFileFrom2DArray(\@outputs,$baseTemp."bibs_possible_electronic.csv");
 		push(@attachments,$baseTemp."bibs_possible_electronic.csv");
 	}
-	
-	#Audiobook Items attached to non Audiobook bibs and visa versa
-	$query =  $queries{"questionable_audiobook_bib_to_item"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Audiobook items/bibs mismatched");
-		$AudiobookItemsOnNonAudiobookBibs="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_audiobook_bib_to_item.csv");
-		push(@attachments,$baseTemp."questionable_audiobook_bib_to_item.csv");
-	}
-	
-	
-	#mismatch DVD
-	$query =  $queries{"questionable_dvd_bib_to_item"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: DVD items/bibs mismatched");
-		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_dvd_bib_to_item.csv");
-		push(@attachments,$baseTemp."questionable_dvd_bib_to_item.csv");
-	}
+    push(@reportBlurbs, $AudiobooksPossbileEAudiobooks) if (length($AudiobooksPossbileEAudiobooks) > 0);
 
-	
-	#mismatch VHS
-	$query =  $queries{"questionable_vhs_bib_to_item"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	if($#results>-1)
+    $ret{"attachments"} = \@attachments if @attachments[0];
+    $ret{"reportBlurbs"} = \@reportBlurbs if @reportBlurbs[0];
+
+    return \%ret;
+}
+
+sub reportSplitIntoGroups
+{
+    my @results = @{@_[0]};
+	my $namecolumnpos = @_[1];
+	my %ret = ();
+	foreach(@results)
 	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: VHS items/bibs mismatched");
-		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_vhs_bib_to_item.csv");
-		push(@attachments,$baseTemp."questionable_vhs_bib_to_item.csv");
+		my @row = @{$_};
+        my @ar = ();
+		if($ret{@row[$namecolumnpos]})
+		{
+            @ar = @{$ret{@row[$namecolumnpos]}};
+		}
+		push(@ar,[@row]);
+        $ret{@row[$namecolumnpos]} = \@ar;
 	}
-	
-	#mismatch all video formats
-	$query =  $queries{"questionable_video_bib_to_item"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: All video formats items/bibs mismatched");
-		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_video_bib_to_item.csv");
-		push(@attachments,$baseTemp."questionable_video_bib_to_item.csv");
-	}
-    
-    #mismatch all MUSIC formats
-	$query =  $queries{"questionable_music_bib_to_item"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: All music formats items/bibs mismatched");
-		$videoItemsOnNonvideoBibs.="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."questionable_music_bib_to_item.csv");
-		push(@attachments,$baseTemp."questionable_music_bib_to_item.csv");
-	}
-	
-	
-	#Large print Items attached to non large print bibs
-	$query =  $queries{"large_print_items_on_non_large_print_bibs"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Large print items attached to non-large print bibs");
-		$largePrintItemsOnNonLargePrintBibs="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
-		push(@attachments,$baseTemp."Large_print_items_on_non_large_print_bibs.csv");
-	}
-	
-	
-	#non Large print Items attached to large print bibs
-	$query =  $queries{"non_large_print_items_on_large_print_bibs"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: non large print items attached to large print bibs");
-		$nonLargePrintItemsOnLargePrintBibs="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."Non_large_print_items_on_large_print_bibs.csv");
-		push(@attachments,$baseTemp."Non_large_print_items_on_large_print_bibs.csv");
-	}
-	
-	# Items attached to deleted bibs
-	$query =  $queries{"items_attached_to_deleted_bibs"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Items attached to DELETED Bibs.");
-		$itemsAttachedToDeletedBibs="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."items_attached_to_deleted_bibs.csv");
-		push(@attachments,$baseTemp."items_attached_to_deleted_bibs.csv");
-	}
-	
-	# Items attached to Electronic bibs
-	$query =  $queries{"electronic_book_with_physical_items_attached_for_report"};
-	updateJob("Processing","reportResults $query");
-	@results = @{$dbHandler->query($query)};	
-	if($#results>-1)
-	{
-		my $summary = summaryReportResults(\@results,4,"Owning Library",45,"ACTION REQUIRED: Items attached to Electronic Bibs.");
-		$itemsAttachedToElectronicBibs="$summary\r\n\r\n\r\n";
-		my @header = ("Bib ID","Barcode","Call Number","OPAC Icon","Library");
-		my @outputs = ([@header],@results);
-		createCSVFileFrom2DArray(\@outputs,$baseTemp."electronic_book_with_physical_items_attached.csv");
-		push(@attachments,$baseTemp."electronic_book_with_physical_items_attached.csv");
-	}
-	
-	
-	my $ret=$newRecordCount."\r\n\r\n".$updatedRecordCount."\r\n\r\n".$mergedRecords.$itemsAssignedRecords.$copyMoveRecords.$undedupeRecords.$AudiobooksPossbileEAudiobooks.$itemsAttachedToDeletedBibs.$itemsAttachedToElectronicBibs.$AudiobookItemsOnNonAudiobookBibs.$videoItemsOnNonvideoBibs.$largePrintItemsOnNonLargePrintBibs.$nonLargePrintItemsOnLargePrintBibs;
-	#print $ret;
-	my @returns = ($ret,\@attachments);
-	return \@returns;
+    return \%ret;
 }
 
 sub summaryReportResults
@@ -650,8 +916,7 @@ sub summaryReportResults
 	my @results = @{@_[0]};
 	my $namecolumnpos = @_[1];
 	my $nameColumnName = @_[2];
-	my $nameWidth = @_[3];
-	my $title = @_[4];
+	my $title = @_[3];
 	my %ret = ();
 	my @sorted = ();
 	my $total = 0;
@@ -5141,7 +5406,7 @@ sub setupSchema
 		CONSTRAINT before_dedupe_hold_map_count_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
-		
+
 		$query = "CREATE TABLE seekdestroy.before_dedupe_hold_current_copy_null(
 		id serial,
 		hold bigint,
@@ -5149,9 +5414,129 @@ sub setupSchema
 		CONSTRAINT before_dedupe_hold_current_copy_null_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
 		$dbHandler->update($query);
-		
-		
+
+		$query = "CREATE TABLE seekdestroy.tattle_report(
+		id serial,
+		name TEXT NOT NULL,
+        query TEXT NOT NULL,
+        CONSTRAINT seekdestroy_report_pkey PRIMARY KEY (id)
+        )
+        ";        
+		$dbHandler->update($query);
+
+		$query = "CREATE TABLE seekdestroy.ignore_list(
+        id serial,
+		report bigint NOT NULL,
+        target_copy bigint NOT NULL,
+        CONSTRAINT seekdestroy_ignore_list_report_fkey FOREIGN KEY (report)
+        REFERENCES seekdestroy.tattle_report (id) MATCH SIMPLE)
+        ";
+		$dbHandler->update($query);
+
+        ## Seed the report query DB table from static query file. Humans can tweak the table later
+        my %seedReportQueries = (
+        'questionable_large_print' => 'Large Print item to bib mis-match',
+        'questionable_video_bib_to_item' => 'DVD/Blu-ray/VHS item to bib mis-match',
+        'questionable_music_bib_to_item' => 'Music item to bib mis-match',
+        'questionable_audiobook_bib_to_item' => 'Audiobook item to bib mis-match',
+        'items_attached_to_deleted_bibs' => 'Items attched to deleted bibs',
+        'electronic_book_with_physical_items_attached' => 'Items attched to Electronic bibs'
+        );
+        my $insertQ = "INSERT INTO seekdestroy.tattle_report(name,query)
+            VALUES
+            ";
+        while ((my $queryname, my $humanname) = each(%seedReportQueries))
+        {
+            $insertQ .= "(\$humanname\$$humanname\$humanname\$,\$queryqueryquery\$".$queries{$queryname}."\$queryqueryquery\$),\n";
+        }
+        # Remove trailing comma
+        $insertQ = substr($insertQ,0,-2);
+        updateJob("Processing",$insertQ);
+        $dbHandler->update($insertQ);
 	}
+}
+
+sub seedTattleSystemIndex
+{
+    my $folderPath = shift;
+    make_path($folderPath, {mode => 7644, }) if !(-d $folderPath);
+    $folderPath .= "/index.html";
+    my $ret = new Loghandler($folderPath);
+    if (!(-e $folderPath))
+    {
+        if(-e $conf{"reportHTMLSeed"})
+        {
+            my $indexFile = new Loghandler($conf{"reportHTMLSeed"} );
+            $indexFile->copyFile($folderPath);
+        }
+        else
+        {
+            $ret->truncFile('<html>
+<head>
+<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+<meta content="utf-8" http-equiv="encoding">
+<title>Library catalog format cleanup</title>
+<script
+			  src="https://code.jquery.com/jquery-3.5.1.min.js"
+			  integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0="
+			  crossorigin="anonymous"></script>
+<script
+			  src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"
+			  integrity="sha256-VazP97ZCwtekAsvgPBSUwPFKdrwD3unUfSGVYrahUqU="
+			  crossorigin="anonymous"></script>
+
+<link rel="stylesheet" type="text/css" href="../../jquery-ui.theme.min.css">
+<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/v/ju/dt-1.10.23/datatables.min.css"/>
+ 
+<script type="text/javascript" src="https://cdn.datatables.net/v/ju/dt-1.10.23/datatables.min.js"></script>
+
+            <style>
+            .hide {
+                display: none !important;
+            }
+            .ignorespansucess {
+                color: green;
+            }
+            .ignorespanfail {
+                color: red;
+            }
+            .dataTables_wrapper > div.fg-toolbar {
+                padding-bottom: 49px !important;
+            }
+            .datatable-outter {
+                width: 90%;
+                margin: auto;
+            }
+            .report-title {
+                width: 50%;
+                margin: auto;
+                padding: 1em;
+                font-size: 30pt;
+                text-align: center;
+            }
+             .loader {
+              border: 2px solid #f3f3f3; /* Light grey */
+              border-top: 2px solid #3498db; /* Blue */
+              border-radius: 50%;
+              width: 20px;
+              height: 20px;
+              animation: spin 2s linear infinite;
+              display: block;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            a {
+                text-decoration: none;
+                color: #046DC1;
+            }
+            </style>
+            </head>
+            <body>');
+        }
+    }
+    return $ret;
 }
 
 sub updateJob
