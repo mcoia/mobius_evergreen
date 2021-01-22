@@ -709,482 +709,555 @@ music_additional_search~~select id,marc from biblio.record_entry where
 # Possible Electronic
 #
 
-possible_electronic~~select record
- from seekdestroy.bib_score sbs where
+possible_electronic~~SELECT
+record
+FROM seekdestroy.bib_score sbs
+WHERE
 electronic>0
-and not opac_icon ~ $$eaudio$$
-and not opac_icon ~ $$ebook$$
-and not opac_icon ~ $$evideo$$
-and
-winning_score~$$electricScore$$;
+AND NOT opac_icon ~ $$eaudio$$
+AND NOT opac_icon ~ $$ebook$$
+AND NOT opac_icon ~ $$evideo$$
+AND winning_score~$$electricScore$$;
 
 
 #
 # Find items that show signs of being large print but are attached to non large print bibs
 #
- large_print_items_on_non_large_print_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
+questionable_large_print~~SELECT * from (SELECT
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is large print, bib is not$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$lpbook$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
 (
-ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ lp$$ OR LOWER(LABEL)~$$^lp$$ OR LOWER(LABEL)~$$large$$ OR LOWER(LABEL)~$$lg$$ OR LOWER(LABEL)~$$sight$$) )
-OR
-ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$ lp$$ OR LOWER(NAME)~$$^lp$$ OR LOWER(NAME)~$$large$$ OR LOWER(NAME)~$$lg$$ OR LOWER(NAME)~$$sight$$) )
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acn.id=acn_labels.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"!~$$lpbook$$
-    UNION
-    SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-) AND
-BRE.ID > 0;
+        acn_labels.label~*$$ lp$$ OR
+        acn_labels.label~*$$^lp$$ OR
+        acn_labels.label~*$$large$$ OR
+        acn_labels.label~*$$lg$$ OR
+        acn_labels.label~*$$sight$$
+    )
+)
+LEFT JOIN asset.copy_location acl_names ON
+(
+    acl.id=acl_names.id and
+    (
+        acl_names.name~*$$ lp$$ OR
+        acl_names.name~*$$^lp$$ OR
+        acl_names.name~*$$large$$ OR
+        acl_names.name~*$$lg$$ OR
+        acl_names.name~*$$sight$$
+    )
+)
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NULL OR format_icons.id IS NULL ) AND
+bre.id>0 AND bre.id < 10000 AND
+(
+    acl_names.id is not null
+    OR
+    acn_labels.id is not null
+)
+GROUP BY 1,2,3,5,6,7,8,9
 
-#
-# Find Items that do not show signs of being large print but are attached to large print bibs
-#
-non_large_print_items_on_large_print_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-(
-ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)!~$$ lp$$ AND LOWER(LABEL)!~$$^lp$$ AND LOWER(LABEL)!~$$large$$ AND LOWER(LABEL)!~$$lg$$ AND LOWER(LABEL)!~$$sight$$ AND LOWER(LABEL)!~$$s\.s\.$$) )
-AND
-ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)!~$$ lp$$ AND LOWER(NAME)!~$$^lp$$ AND LOWER(NAME)!~$$large$$ AND LOWER(NAME)!~$$lg$$ AND LOWER(NAME)!~$$sight$$ AND LOWER(NAME)!~$$s\.s\.$$) )
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
-    (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"~$$lpbook$$
-) AND
-BRE.ID > 0;
+UNION ALL
 
-#
-# Find DVD MISMATCHES
-#
-questionable_dvd_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+select
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is not large print, bib is$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$lpbook$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
 (
-ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ dvd$$ OR LOWER(LABEL)~$$^dvd$$) )
-OR
-ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$ dvd$$ OR LOWER(NAME)~$$^dvd$$) )
-OR
-lower(ac.circ_modifier) ~* $$video$$ OR
-lower(ac.circ_modifier) ~* $$^dvd$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acn.id=acn_labels.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"!~$$dvd$$
-    UNION
-    SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
+        acn_labels.label~*$$ lp$$ OR
+        acn_labels.label~*$$^lp$$ OR
+        acn_labels.label~*$$large$$ OR
+        acn_labels.label~*$$lg$$ OR
+        acn_labels.label~*$$sight$$
+    )
 )
-UNION
-select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+LEFT JOIN asset.copy_location acl_names ON
 (
-    lower(acn.label) !~* $$ dvd$$ and
-    lower(acn.label) !~* $$^dvd$$ and
-    lower(acn.label) !~* $$movie$$ and
-    lower(acn.label) !~* $$video$$
-)
-and
-(
-    lower(acl.name) !~* $$ dvd$$ and
-    lower(acl.name) !~* $$^dvd$$ and
-    lower(acl.name) !~* $$movie$$ and
-    lower(acl.name) !~* $$video$$
-)
-and
-(
-    lower(ac.circ_modifier) !~* $$video$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acl.id=acl_names.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"~$$dvd$$
+        acl_names.name~*$$ lp$$ OR
+        acl_names.name~*$$^lp$$ OR
+        acl_names.name~*$$large$$ OR
+        acl_names.name~*$$lg$$ OR
+        acl_names.name~*$$sight$$
+    )
 )
-order by 1;
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
+bre.id>0 AND bre.id < 10000 AND
+(
+    acl_names.id IS NULL
+    AND
+    acn_labels.id IS NULL
+)
 
-#
-# Find VHS mismatches
-#
-questionable_vhs_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
-(
-ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$vhs$$) )
-OR
-ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$vhs$$) )
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
-    (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"!~$$vhs$$
-    UNION
-    SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
-)
-UNION
-select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
-(
-    lower(acn.label) !~* $$movie$$ and
-    lower(acn.label) !~* $$vhs$$ and
-    lower(acn.label) !~* $$video$$
-)
-and
-(
-    lower(acl.name) !~* $$movie$$ and
-    lower(acl.name) !~* $$vhs$$ and
-    lower(acl.name) !~* $$video$$
-)
-and
-(
-    lower(ac.circ_modifier) !~* $$video$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
-    (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"~$$vhs$$
-)
-order by 1;
+GROUP BY 1,2,3,5,6,7,8,9
+) AS a
+ORDER BY lower(a."Branch");
 
 #
 # Find Questionable video format mismatches
 #
-questionable_video_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+questionable_video_bib_to_item~~SELECT * from (SELECT
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is video, bib is not$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$dvd$$ OR format_icons.value ~* $$blu$$ OR format_icons.value ~* $$vhs$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
 (
-ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$ dvd$$ OR LOWER(LABEL)~$$^dvd$$ OR LOWER(LABEL)~$$vhs$$ OR LOWER(LABEL)~$$video$$ OR LOWER(LABEL)~$$movie$$) )
-OR
-ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$ dvd$$ OR LOWER(NAME)~$$^dvd$$ OR LOWER(NAME)~$$vhs$$ OR LOWER(NAME)~$$video$$ OR LOWER(NAME)~$$movie$$) )
-OR
-lower(ac.circ_modifier) ~* $$video$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acn.id=acn_labels.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"!~$$dvd$$ AND A."FORMAT"!~$$vhs$$ AND A."FORMAT"!~$$blu$$
-    UNION
-    SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
+        acn_labels.label~*$$ dvd$$ OR
+        acn_labels.label~*$$^dvd$$ OR
+        acn_labels.label~*$$vhs$$ OR
+        acn_labels.label~*$$video$$ OR
+        acn_labels.label~*$$movie$$
+    )
 )
-UNION
-select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+LEFT JOIN asset.copy_location acl_names ON
 (
-    lower(acn.label) !~* $$ dvd$$ and
-    lower(acn.label) !~* $$^dvd$$ and
-    lower(acn.label) !~* $$movie$$ and
-    lower(acn.label) !~* $$vhs$$ and
-    lower(acn.label) !~* $$video$$
-)
-and
-(
-    lower(acl.name) !~* $$ dvd$$ and
-    lower(acl.name) !~* $$^dvd$$ and
-    lower(acl.name) !~* $$movie$$ and
-    lower(acl.name) !~* $$vhs$$ and
-    lower(acl.name) !~* $$video$$
-)
-and
-(
-    lower(ac.circ_modifier) !~* $$video$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acl.id=acl_names.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"~$$dvd$$ or A."FORMAT"~$$blu$$ or A."FORMAT"~$$vhs$$
+        acl_names.name~*$$ dvd$$ OR
+        acl_names.name~*$$^dvd$$ OR
+        acl_names.name~*$$vhs$$ OR
+        acl_names.name~*$$video$$ OR
+        acl_names.name~*$$movie$$
+    )
 )
-order by 1;
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NULL OR format_icons.id IS NULL ) AND
+bre.id>0 AND bre.id < 10000 AND
+(
+    acl_names.id IS NOT NULL
+    OR
+    acn_labels.id IS NOT NULL
+    OR
+    ac.circ_modifier ~* $$video$$
+)
+GROUP BY 1,2,3,5,6,7,8,9
+
+UNION ALL
+
+select
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is not video, bib is$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$dvd$$ OR format_icons.value ~* $$blu$$ OR format_icons.value ~* $$vhs$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
+(
+    acn.id=acn_labels.id and
+    (
+        acn_labels.label~*$$ dvd$$ OR
+        acn_labels.label~*$$^dvd$$ OR
+        acn_labels.label~*$$vhs$$ OR
+        acn_labels.label~*$$video$$ OR
+        acn_labels.label~*$$movie$$
+    )
+)
+LEFT JOIN asset.copy_location acl_names ON
+(
+    acl.id=acl_names.id and
+    (
+        acl_names.name~*$$ dvd$$ OR
+        acl_names.name~*$$^dvd$$ OR
+        acl_names.name~*$$vhs$$ OR
+        acl_names.name~*$$video$$ OR
+        acl_names.name~*$$movie$$
+    )
+)
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
+bre.id>0 AND bre.id < 10000 AND
+(
+    acl_names.id IS NULL
+    AND
+    acn_labels.id IS NULL
+    AND
+    ac.circ_modifier !~* $$video$$
+)
+
+GROUP BY 1,2,3,5,6,7,8,9
+) AS a
+ORDER BY lower(a."Branch");
 
 
 
 #
 # Find Questionable music format mismatches
 #
-questionable_music_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+questionable_music_bib_to_item~~SELECT * from (SELECT
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is music, bib is not$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$music$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
 (
-ACN.ID IN(SELECT ID FROM ASSET.CALL_NUMBER WHERE (LOWER(LABEL)~$$music$$ OR LOWER(LABEL)~$$^folk$$ OR LOWER(LABEL)~$$ folk$$ OR LOWER(LABEL)~$$classical$$) AND LOWER(LABEL)!~$$folktale$$ )
-OR
-ACL.ID IN(SELECT ID FROM ASSET.COPY_LOCATION WHERE (LOWER(NAME)~$$music$$) )
-OR
-lower(ac.circ_modifier) ~* $$music$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acn.id=acn_labels.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"!~$$music$$
-    UNION
-    SELECT ID FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$)
+        (
+        acn_labels.label~*$$music$$ OR
+        acn_labels.label~*$$^folk$$ OR
+        acn_labels.label~*$$ folk$$ OR
+        acn_labels.label~*$$classical$$ OR
+        acn_labels.label~*$$listening$$ OR
+        acn_labels.label~*$$[rock|classic|gospel|holiday]\scd$$ OR
+        acn_labels.label~*$$sound$$ OR
+        acn_labels.label~*$$casse$$
+        ) AND
+        acn_labels.label!~*$$folktale$$ AND
+        acn_labels.label!~*$$spoken$$ AND
+        acn_labels.label!~*$$audio cd$$
+    )
 )
-UNION
-select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+LEFT JOIN asset.copy_location acl_names ON
 (
-    lower(acn.label) !~* $$music$$ and
-    lower(acn.label) !~* $$ folk$$ and
-    lower(acn.label) !~* $$^folk$$ and
-    lower(acn.label) !~* $$readalong$$ and
-    lower(acn.label) !~* $$singalong$$ and
-    lower(acn.label) !~* $$classical$$
+    acl.id=acl_names.id and
+    (
+        acl_names.name~*$$music$$ OR
+        acl_names.name~*$$singalong$$ OR
+        acl_names.name~*$$readalong$$ OR
+        acl_names.name~*$$casse$$
+    )
+)
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NULL OR format_icons.id IS NULL ) AND
+bre.id>0 AND bre.id < 100000 AND
+(
+    acl_names.id is not null
+    OR
+    acn_labels.id is not null
+    OR
+    ac.circ_modifier~$$music$$
+)
+GROUP BY 1,2,3,5,6,7,8,9
 
-)
-and
+UNION ALL
+
+select
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is not music, bib is$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$music$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
 (
-    lower(acl.name) !~* $$music$$ and
-    lower(acl.name) !~* $$singalong$$ and
-    lower(acl.name) !~* $$readalong$$
-)
-and
-(
-    lower(ac.circ_modifier) !~* $$music$$
-)
-AND
-BRE.ID IN
-(
-    SELECT A.ID FROM
+    acn.id=acn_labels.id and
     (
-    SELECT STRING_AGG(VALUE,$$ $$) "FORMAT",ID from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ GROUP BY ID
-    ) AS A
-    WHERE A."FORMAT"~$$music$$
+        (
+        acn_labels.label~*$$music$$ OR
+        acn_labels.label~*$$^folk$$ OR
+        acn_labels.label~*$$ folk$$ OR
+        acn_labels.label~*$$classical$$ OR
+        acn_labels.label~*$$listening$$ OR
+        acn_labels.label~*$$[rock|classic|gospel|holiday]\scd$$ OR
+        acn_labels.label~*$$sound$$ OR
+        acn_labels.label~*$$casse$$
+        ) AND
+        acn_labels.label!~*$$folktale$$ AND
+        acn_labels.label!~*$$spoken$$ AND
+        acn_labels.label!~*$$audio cd$$
+    )
 )
-order by 1;
+LEFT JOIN asset.copy_location acl_names ON
+(
+    acl.id=acl_names.id and
+    (
+        acl_names.name~*$$music$$ OR
+        acl_names.name~*$$singalong$$ OR
+        acl_names.name~*$$readalong$$ OR
+        acl_names.name~*$$casse$$
+    )
+)
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
+bre.id>0 AND bre.id < 100000 AND
+(
+    acl_names.id IS NULL
+    AND
+    acn_labels.id IS NULL
+    AND
+    ac.circ_modifier!~*$$music$$
+)
+
+GROUP BY 1,2,3,5,6,7,8,9
+) AS a
+ORDER BY lower(a."Branch");
 
 #
-# Find Items that are probably* NOT AUDIOBOOK but are attached to Audiobook bibs
+# Find Items that are probably* AUDIOBOOK but are attached to non Audiobook bibs
 # and (union)
-# Find Items that are probably AUDIOBOOKs but are attached to non Audiobook bibs
+# Find Items that are probably not AUDIOBOOKs but are attached to Audiobook bibs
+questionable_audiobook_bib_to_item~~SELECT * from (SELECT
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is audiobook, bib is not$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$audiobook$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
+(
+    acn.id=acn_labels.id and
+    (
+        acn_labels.label~*$$cass$$ OR
+        acn_labels.label~*$$audio$$ OR
+        acn_labels.label~*$$dis[ck]$$
+    )
+)
+LEFT JOIN asset.copy_location acl_names ON
+(
+    acl.id=acl_names.id and
+    (
+	    acl_names.name~*$$cass$$ OR
+        acl_names.name~*$$audio$$ OR
+        acl_names.name~*$$dis[ck]$$
+    )
+)
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NULL OR format_icons.id IS NULL ) AND
+bre.id>0 AND bre.id < 100000 AND
+(
+    acl_names.id is not null
+    OR
+    acn_labels.id is not null
+    OR
+    ac.circ_modifier~$$audiobook$$
+)
+GROUP BY 1,2,3,5,6,7,8,9
 
-# cameron positive audiobooks
-# ACD AND CAS
-questionable_audiobook_bib_to_item~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
+UNION ALL
+
+select
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+AOU.NAME AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item is not audiobook, bib is$$ AS "Issue",
+ac.id AS "copyid"
+FROM
+biblio.record_entry bre
+LEFT JOIN metabib.record_attr_flat format_icons ON (bre.id=format_icons.id and format_icons.attr=$$icon_format$$ and (format_icons.value ~* $$audiobook$$))
+LEFT JOIN metabib.record_attr_flat mraf ON (mraf.id=bre.id and mraf.attr=$$icon_format$$)
+JOIN asset.call_number acn ON (bre.id=acn.record and not acn.deleted)
+JOIN asset.copy ac ON (ac.call_number=acn.id and not ac.deleted)
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!)
+JOIN actor.org_unit aou ON (aou.id=ac.circ_lib)
+JOIN asset.copy_location acl ON (acl.id=ac.location and not acl.deleted)
+LEFT JOIN asset.call_number acn_labels ON
 (
-    lower(acn.label) ~* $$cas$$ or
-    lower(acn.label) ~* $$aud$$ or
-    lower(acn.label) ~* $$disc$$ or
-    lower(acn.label) ~* $$mus$$ or
-    lower(acn.label) ~* $$play$$ or
-    lower(acn.label) ~* $$ cd$$ or
-    lower(acn.label) ~* $$^cd$$ or
-    lower(acn.label) ~* $$disk$$ or
-    acn.label ~* $$ACD$$
-or
-    lower(acl.name) ~* $$cas$$ or
-    lower(acl.name) ~* $$aud$$ or
-    lower(acl.name) ~* $$disc$$ or
-    lower(acl.name) ~* $$mus$$ or
-    lower(acl.name) ~* $$play$$ or
-    lower(acl.name) ~* $$ cd$$ or
-    lower(acl.name) ~* $$^cd$$ or
-    lower(acl.name) ~* $$disk$$ or
-    acl.name ~* $$ACD$$
+    acn.id=acn_labels.id and
+    (
+        acn_labels.label~*$$cass$$ OR
+        acn_labels.label~*$$audio$$ OR
+        acn_labels.label~*$$dis[ck]$$
+    )
 )
-and
-ac.circ_modifier in ( $$AUDIOBOOK$$ ) and
+LEFT JOIN asset.copy_location acl_names ON
 (
-(
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$music$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$casaudiobook$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$casmusic$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cassette$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cd$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdaudiobook$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$cdmusic$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$playaway$$ and
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) !~ $$kit$$
+    acl.id=acl_names.id and
+    (
+        acl_names.name~*$$cass$$ OR
+        acl_names.name~*$$audio$$ OR
+        acl_names.name~*$$dis[ck]$$
+    )
 )
-OR
-(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) IS NULL
-)
-UNION
-select a.id,a.barcode,a.label,a.icon,a.name from
+WHERE
+sil.report IS NULL AND
+( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
+bre.id>0 AND bre.id < 100000 AND
 (
-select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID) as "icon",AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT ACN.DELETED AND
-NOT AC.DELETED AND
-BRE.ID>0 AND
-bre.marc ~ $$<leader>......i$$ and
-(
-    lower(acn.label) !~* $$cas$$ and
-    lower(acn.label) !~* $$aud$$ and
-    lower(acn.label) !~* $$disc$$ and
-    lower(acn.label) !~* $$mus$$ and
-    lower(acn.label) !~* $$play$$ and
-    lower(acn.label) !~* $$ cd$$ and
-    lower(acn.label) !~* $$^cd$$ and
-    lower(acn.label) !~* $$disk$$ and
-    acn.label !~* $$ACD$$
+    acl_names.id IS NULL
+    AND
+    acn_labels.id IS NULL
+    AND
+    ac.circ_modifier!~*$$audiobook$$
 )
-and
-(
-    lower(acl.name) !~* $$cas$$ and
-    lower(acl.name) !~* $$aud$$ and
-    lower(acl.name) !~* $$disc$$ and
-    lower(acl.name) !~* $$mus$$ and
-    lower(acl.name) !~* $$play$$ and
-    lower(acl.name) !~* $$ cd$$ and
-    lower(acl.name) !~* $$^cd$$ and
-    lower(acl.name) !~* $$disk$$ and
-    acl.name !~* $$ACD$$
-)
-and ac.circ_modifier not in ( $$AUDIOBOOK$$ )
-) as a
-order by ID;
+
+GROUP BY 1,2,3,5,6,7,8,9
+) AS a
+ORDER BY lower(a."Branch");
 
 #
 # Find Items that are attached to deleted bibs
 #
- items_attached_to_deleted_bibs~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-BRE.DELETED AND
-BRE.ID > 0 AND
-NOT AC.DELETED;
+items_attached_to_deleted_bibs~~select 
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+aou.name AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item attached to deleted bib$$ AS "Issue",
+ac.id AS "copyid"
+from 
+biblio.record_entry bre,
+asset.copy ac
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!),
+actor.org_unit aou,
+asset.call_number acn,
+asset.copy_location acl
+where
+sil.report IS NULL AND
+aou.id=ac.circ_lib AND
+bre.id=acn.record AND
+acn.id=ac.call_number AND
+acl.id=ac.location AND
+bre.deleted AND
+bre.id > 0 and bre.id < 10000 AND
+NOT ac.deleted;
 
 #
 # Find Items that are attached to Electronic bibs
 #
-electronic_book_with_physical_items_attached_for_report~~select BRE.id,AC.BARCODE,ACN.LABEL,(SELECT STRING_AGG(VALUE,$$ $$) "FORMAT" from METABIB.RECORD_ATTR_FLAT WHERE ATTR=$$icon_format$$ AND ID=BRE.ID GROUP BY ID),AOU.NAME
-from biblio.record_entry BRE, ASSET.COPY AC, ACTOR.ORG_UNIT AOU,ASSET.CALL_NUMBER ACN,ASSET.COPY_LOCATION ACL where
-AOU.ID=AC.CIRC_LIB AND
-BRE.ID=ACN.RECORD AND
-ACN.ID=AC.CALL_NUMBER AND
-ACL.ID=AC.LOCATION AND
-NOT BRE.DELETED AND
-BRE.ID > 0 AND
-NOT AC.DELETED AND
-lower(BRE.marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$ AND
-BRE.id in
-(
-select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-)
-and
+electronic_book_with_physical_items_attached~~select 
+bre.id AS "Bib ID",
+ac.barcode AS "Barcode",
+acn.label AS "Call Number",
+(SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+aou.name AS "Branch",
+(SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
+(SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
+$$item attached to electronic bib$$ AS "Issue",
+ac.id AS "copyid"
+from 
+biblio.record_entry bre,
+asset.copy ac
+LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!),
+actor.org_unit aou,
+asset.call_number acn,
+asset.copy_location acl
+where
+sil.report IS NULL AND
+aou.id=ac.circ_lib AND
+bre.id=acn.record AND
+acn.id=ac.call_number AND
+acl.id=ac.location AND
+bre.id > 0 and bre.id < 1000000 AND
+NOT ac.deleted AND
+lower(bre.marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$ AND
 (
     BRE.marc ~ $$tag="008">.......................[oqs]$$
-    or
+    OR
     BRE.marc ~ $$tag="006">......[oqs]$$
 )
-and
+AND
 (
     BRE.marc ~ $$<leader>......[at]$$
 )
-and
+AND
 (
     BRE.marc ~ $$<leader>.......[acdm]$$
 );
