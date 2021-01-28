@@ -27,29 +27,63 @@ function bbShow(r) {
 	if(!template[thisid]) 	
 		template[thisid] = tbody.removeChild($('row_template_'+thisid));
 	
-	for( var i in bb.items() ) 
-		tbody.appendChild(bbShowItem( template[thisid], bb.items()[i] ));
-}
+	//Try something new
+	//console.log("Process bookbag items");
+	//console.log(bb);
+	//Create array of book bag item bre.id
+	var bbids = bb.items().map(function (item) {
+		return item.target_biblio_record_entry()
+	});
+	//console.log(bbids);
 
-function bbShowItem( template, item ) {
-	var row = template.cloneNode(true);
-	var tlink = $n(row, 'title');
-	var alink = $n(row, 'author');	
-
+	//Obj with bibid key and value order for use later
+	var bbitemsorder = {};
+	for ( var i in bb.items() ) {
+		//use pos if available, otherwise use bucket item id for order
+		bbitemsorder[bb.items()[i].target_biblio_record_entry()]=
+		( bb.items()[i].pos() ? bb.items()[i].pos() : bb.items()[i].id() );
+	}
+	//console.log(bbitemsorder);
+        
+	//Flesh all titles at once
 	new OpenSRF.ClientSession('open-ils.search').request({
 		method: 'open-ils.search.biblio.record.mods_slim.retrieve',
-		params: [item.target_biblio_record_entry()],
+		params: [bbids],
 		aysnc: true,
 		oncomplete: function(r) {
 			var resp = r.recv();
 			if (!resp) { return; }
-			var rec = resp.content();
-			buildTitleDetailLink(rec, tlink); 
-			tlink.setAttribute('href', ''+rec.doc_id());
-			alink.appendChild(text(rec.author()));
+			var items = resp.content();
+			//console.log(items);
+
+			//add sort position to data structure
+			// so we can use it later
+			for (var i in items ) {
+				items[i].pos=bbitemsorder[items[i].doc_id()];
+			}
+			//console.log(items);
+
+			//Use the sort position to feed items to carousel in order
+			for( var i in items.sort(function(a, b){return a.pos - b.pos}) ) {
+				tbody.appendChild(bbShowItem( template[thisid], items[i] ));
+			}
 		}
 	}).send();
-		
+}
+
+function bbShowItem( template, item ) {
+
+	//console.log("Deal with the items");
+	//console.log(item);
+
+	var row = template.cloneNode(true);
+	var tlink = $n(row, 'title');
+	var alink = $n(row, 'author');
+
+	buildTitleDetailLink(item, tlink);
+	tlink.setAttribute('href', ''+item.doc_id());
+	alink.appendChild(text(item.author()));
+
 	return row;
 }
 
