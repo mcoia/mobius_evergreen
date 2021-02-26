@@ -14,6 +14,10 @@ audio_book_score_when_audiobooks_dont_belong = 6
 electronic_score_when_bib_is_considered_electronic = 6
 queryfile=/path/to/query_file_sample.sql
 
+# This setting will cause the software (when ran with --runDedupe) to copy any 035 OCLC symbol from the sub bib to the lead bib
+# Anything other than "yes" is considered false
+dedupe_preserve_oclc_from_sub = yes
+
 tempdir = /path/to/tmp
 erroremaillist = example@example.org
 successemaillist = example@example.org, example2@example.org

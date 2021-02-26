@@ -1827,7 +1827,7 @@ sub findInvalidMARC
  circ_mods,call_labels,copy_locations,
  score,record_type,audioformat,videoformat,electronic,audiobook_score,music_score,playaway_score,largeprint_score,video_score,microfilm_score,microfiche_score,
  (select marc from biblio.record_entry where id=outsidesbs.record)
-  from seekdestroy.bib_score outsidesbs where record in( $subQueryConvert )  
+  from seekdestroy.bib_score outsidesbs where record in( $subQueryConvert )
   order by (select deleted from biblio.record_entry where id= outsidesbs.record),winning_score,winning_score_distance,electronic,second_place_score,circ_mods,call_labels,copy_locations
 ";
 	$query =~ s/\$problemphrase/$problemPhrase/g;
@@ -3096,33 +3096,37 @@ order by bib1,bib2
 	';
 	
 	my @results = @{$dbHandler->query($query)};
+    my $autoList;
+    my $needsHumans;
 	foreach(@results)
 	{
 		my $row = $_;
 		my @row = @{$row};
 		my $out = join(';',@row);
-		$log->addLine($out);
-		# Now let's merge!
-		if(!$dryrun)
-		{
-			if(@row[5] eq @row[6]) #triple check the format, no merging if they are different
-			{
-				if( (@row[5] ne 'dvd') && (@row[5] ne 'blu-ray') && (@row[5] ne 'vhs') && (@row[5] ne 'serial') && (@row[5] ne 'microform') )
-				{
-					mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
-				}
-				else
-				{
-					$log->addLine("Not merging and skipping because it is video/serial/microform format");
-				}
-			}
-			else
-			{
-				$log->addLine("Not merging - differing format");
-			}
-		}
+        my $validator = additionalDedupeValidator(@row[0], @row[1], @row[5], @row[6]);
+        if($validator eq '1')
+        {
+            $autoList .= $out . "\n";
+            if(!$dryrun)
+            {
+                # Now let's merge!
+                mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
+            }
+        }
+        else
+        {
+            $needsHumans .= "$validator;" . $out . "\n";
+        }
+        undef $out;
 	}
-	
+
+    $log->addLogLine("These were automatically merged:");
+    $log->addLine($autoList);
+    $log->addLogLine("These were leftover for humans:");
+    $log->addLine($needsHumans);
+    undef $autoList;
+    undef $needsHumans;
+
 	if(!$dryrun)
 	{
 		# Compare and contrast the before and after		
@@ -3185,9 +3189,9 @@ order by bib1,bib2
 		$log->addLine("The following are the changes to the format totals after the dedupe.\nFormat;Before;After");
 		foreach(@results)
 		{
-			my $row = $_;
-			my @row = @{$row};
-			foreach(@formatAssignmentsBefore)
+            my $row = $_;
+            my @row = @{$row};
+            foreach(@formatAssignmentsBefore)
 			{
 				my @prev = @{$_};
 				if(@prev[0] eq @row[0])
@@ -3197,6 +3201,66 @@ order by bib1,bib2
 			}
 		}
 	}
+}
+
+sub additionalDedupeValidator
+{
+    my $leadbib = shift;
+    my $subbib = shift;
+    my $leadbib_format = shift;
+    my $subbib_format = shift;
+    my @notAllowedMergedFormats =
+    (
+        'dvd',
+        'vhs',
+        'blu-ray',
+        'serial',
+        'microform'
+    );
+
+    return "different formats" if $leadbib_format ne $subbib_format;
+    foreach(@notAllowedMergedFormats)
+    {
+        return "Format not allowed to merge: $_" if $leadbib_format eq $_;
+    }
+
+    my $query = "
+    select
+    lead_list.list,sub_list.list
+    from
+    (
+        select string_agg(distinct circ_lib::text, \$\$,\$\$ order by circ_lib::text) as \"list\"
+        from
+        asset.call_number acn
+        join asset.copy ac on (ac.call_number=acn.id and not acn.deleted and not ac.deleted and acn.record=$leadbib)
+    ) as lead_list,
+    (
+        select string_agg(distinct circ_lib::text, \$\$,\$\$ order by circ_lib::text) as \"list\"
+        from
+        asset.call_number acn
+        join asset.copy ac on (ac.call_number=acn.id and not acn.deleted and not ac.deleted and acn.record=$subbib)
+    ) as sub_list
+    ";
+    my @results = @{$dbHandler->query($query)};
+	foreach(@results)
+	{
+        my $row = $_;
+        my @row = @{$row};
+        my $leadlist = @row[0];
+        my $sublist = @row[1];
+        my $bigger = length($leadlist) > length($sublist) ? $leadlist : $sublist;
+        my $smaller = length($leadlist) > length($sublist) ? $sublist : $leadlist;
+        #Wrap it in commas so we can delimit exactly
+        $bigger = ',' . $bigger . ',';
+        my @vals = split(/,/,$smaller);
+        foreach(@vals)
+        {
+            return "branch with copies on both" if $bigger =~ m/,$_,/;
+        }
+    }
+
+    return '1';
+
 }
 
 sub mergeBibsWithMetarecordHoldsInMind
@@ -3279,6 +3343,7 @@ sub mergeBibsWithMetarecordHoldsInMind
 	
 	#Merge the 856s	
 	$leadmarc = mergeMARC856($leadmarc,$submarc);
+	$leadmarc = mergeMARC035($leadmarc,$submarc) if( lc($conf{"dedupe_preserve_oclc_from_sub"}) eq 'yes');
 	$leadmarc = convertMARCtoXML($leadmarc);
 	
 	moveAllCallNumbers($subbib,$leadbib,$reason);
@@ -4834,10 +4899,61 @@ sub getsubfield
 	
 }
 
+sub mergeMARC035
+{
+	my $leadMarc = @_[0];
+	my $subMarc = @_[1];
+    my @lead035 = @{getOCLCFrom035($leadMarc)};
+    my @sub035 = @{getOCLCFrom035($subMarc)};
+    my @append = ();
+    foreach(@sub035)
+    {
+        my $sub = $_;
+        my $found = 0;
+        foreach(@lead035)
+        {
+            $found = 1 if($_ eq $sub)
+        }
+        push(@append, $sub) if !$found;
+        undef $found;
+        undef $sub;
+    }
+    foreach(@append)
+    {
+        my $field = MARC::Field->new( '035', undef, undef, 'a' => $_ );
+        $leadMarc->insert_grouped_field($field);
+    }
+    return $leadMarc;
+}
+
+sub getOCLCFrom035
+{
+    my $marc = shift;
+    my @l035s = $marc->field("035");
+    my @ret = ();
+    my %temp = {};
+    foreach(@l035s)
+    {
+        my @a = $_->subfield("a"); # just one please, the first one
+        foreach(@a)
+        {
+            if($_ =~ m/\(?OCo{0,1}LC\)?.?\d+/)
+            {
+                $temp{$_} = 1;
+            }
+        }
+    }
+    while ((my $internal, my $mvalue ) = each(%temp))
+    {
+        push(@ret, $internal);
+    }
+    return \@ret;
+}
+
 sub mergeMARC856
 {
 	my $marc = @_[0];
-	my $marc2 = @_[1];	
+	my $marc2 = @_[1];
 	my @eight56s = $marc->field("856");
 	my @eight56s_2 = $marc2->field("856");
 	my @eights;
