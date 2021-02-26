@@ -2993,16 +2993,28 @@ updateJob("Processing","findPossibleDups  looping results");
 	
 	
 	my $query="
-			select record,sd_alt_fingerprint,score from seekdestroy.bib_score sbs2 where sd_alt_fingerprint||opac_icon in(
-		select idp from(
-		select sd_alt_fingerprint||opac_icon \"idp\",count(*) from seekdestroy.bib_score sbs where length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\s\$\$,\$\$\$\$,\$\$g\$\$)))>5 
-		and record not in(select id from biblio.record_entry where deleted)
-		-- need to remove any bibs with poplarbluff's special digital collection - should not be merged
-		and record not in(select id from biblio.record_entry where not deleted and lower(marc)~'\/\/poplarbluff.org')
-		group by sd_alt_fingerprint||opac_icon having count(*) > 1) as a 
-		)
-		and record not in(select id from biblio.record_entry where deleted)
-		order by sd_alt_fingerprint,score desc, record
+select
+record,
+sd_alt_fingerprint,
+score
+from
+seekdestroy.bib_score sbs2
+join biblio.record_entry bre2 on (bre2.id=sbs2.record and not bre2.deleted)
+where
+sd_alt_fingerprint||opac_icon in
+(
+    select idp from
+    (
+        select sd_alt_fingerprint||opac_icon \"idp\",count(*)
+        from
+        seekdestroy.bib_score sbs
+        join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted)
+        where
+        length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\\s\$\$,\$\$\$\$,\$\$g\$\$)))>5
+        group by sd_alt_fingerprint||opac_icon having count(*) > 1
+    ) as a
+)
+order by sd_alt_fingerprint,score desc, record
 		";
 updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
