@@ -384,52 +384,56 @@ sub tattleTaleReports
     my %reportDivisions = ();
     my %ret = ();
 
-    # Clear any old reports
-    $conf{"reportoutputroot"} .= '/'; # Make sure it ends with a slash. Double slashes at the end are fine for linux
-    deleteOldTattleReports() if $conf{"reportoutputroot"};
-    make_path($conf{"reportoutputroot"}, {mode => 7644, }) if !(-d $conf{"reportoutputroot"});
+    ## Make sure that the output folder is defined and contains at least one slash in the file path. It's an absolute path.
+    ## We don't want to delete / folder tree!
+    if($conf{"reportoutputroot"} && $conf{"reportoutputroot"} =~ m/\//g)
+    {
+        # Clear any old reports
+        $conf{"reportoutputroot"} .= '/'; # Make sure it ends with a slash. Double slashes at the end are fine for linux
+        deleteOldTattleReports() if $conf{"reportoutputroot"};
+        make_path($conf{"reportoutputroot"}, {mode => 7644, }) if !(-d $conf{"reportoutputroot"});
 
-    my $query = "select id,name,query from seekdestroy.tattle_report order by 1 -- limit 1";
-	my @reports = @{$dbHandler->query($query)};	
-	foreach(@reports)
-	{
-        my @thisReport = @{$_};
-        my $id = @thisReport[0];
-        my $name = @thisReport[1];
-        $query = @thisReport[2];
-        $query =~ s/!!!reportid!!!/$id/g;
-        updateJob("Processing","reportResults $query");
-        my @results = @{$dbHandler->query($query)};
-        if($#results>-1)
+        my $query = "select id,name,query from seekdestroy.tattle_report order by 1 -- limit 1";
+        my @reports = @{$dbHandler->query($query)};	
+        foreach(@reports)
         {
-            my @header = @{$dbHandler->getColumnNames()};
-            my $systemColID = 0;
-            my $copyidColID = 0;
-            for my $i (0..$#header)
+            my @thisReport = @{$_};
+            my $id = @thisReport[0];
+            my $name = @thisReport[1];
+            $query = @thisReport[2];
+            $query =~ s/!!!reportid!!!/$id/g;
+            updateJob("Processing","reportResults $query");
+            my @results = @{$dbHandler->query($query)};
+            if($#results>-1)
             {
-                $systemColID = $i if @header[$i] =~ m/systemid/gi;
-                $copyidColID = $i if @header[$i] =~ m/copyid/gi;
+                my @header = @{$dbHandler->getColumnNames()};
+                my $systemColID = 0;
+                my $copyidColID = 0;
+                for my $i (0..$#header)
+                {
+                    $systemColID = $i if @header[$i] =~ m/systemid/gi;
+                    $copyidColID = $i if @header[$i] =~ m/copyid/gi;
+                }
+                my $summary = summaryReportResults(\@results,$systemColID,"System",$name);
+                
+                my @outputs = ([@header],@results);
+                if($conf{"reportoutputroot"})  ## Signifies that this configuration is setup to write to HTML for staff review/evals
+                {
+                    writeTattleHTML(\@outputs, $systemColID, $copyidColID, $name, $id);
+                }
+                else
+                {
+                    my $filename = makeFriendlyFileName($name);
+                    $filename .= ".csv";
+                    createCSVFileFrom2DArray(\@outputs,$baseTemp.$filename);
+                    push(@attachments,$baseTemp.$filename); 
+                }
             }
-            my $summary = summaryReportResults(\@results,$systemColID,"System",$name);
-            
-            my @outputs = ([@header],@results);
-            if($conf{"reportoutputroot"})  ## Signifies that this configuration is setup to write to HTML for staff review/evals
-            {
-                writeTattleHTML(\@outputs, $systemColID, $copyidColID, $name, $id);
-            }
-            else
-            {
-                my $filename = makeFriendlyFileName($name);
-                $filename .= ".csv";
-                createCSVFileFrom2DArray(\@outputs,$baseTemp.$filename);
-                push(@attachments,$baseTemp.$filename); 
-            }
+            undef @results;
         }
-        undef @results;
+
+        createTattleReportIndex() if($conf{"reportoutputroot"});
     }
-
-    createTattleReportIndex() if($conf{"reportoutputroot"});
-
     $ret{"attachments"} = \@attachments if @attachments[0];
     $ret{"reportBlurbs"} = \@reportBlurbs if @reportBlurbs[0];
 
@@ -849,7 +853,7 @@ sub jobSummaryReports
     record as \"BIB ID\",
     \$\$$domainname"."eg/opac/record/\$\$||record||\$\$?expand=marchtml\$\$ as \"OPAC Link\",
     winning_score as \"Winning Score\",
-    opac_icon \"opac icon\" as \"OPAC ICON\",
+    opac_icon as \"OPAC ICON\",
     winning_score_score as \"Winning Score\",
     winning_score_distance as \"Winning Score Distance\",
     second_place_score as \"Second Place Score\",
