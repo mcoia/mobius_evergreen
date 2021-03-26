@@ -9,30 +9,6 @@
 
 
 #
-# Find Electronic MARC with physical Items attached
-#
-electronic_book_with_physical_items_attached~~select id from biblio.record_entry where not deleted and lower(marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$
-and id in
-(
-select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-)
-and
-(
-    marc ~ $$tag="008">.......................[oqs]$$
-    or
-    marc ~ $$tag="006">......[oqs]$$
-)
-and
-(
-    marc ~ $$<leader>......[at]$$
-)
-and
-(
-    marc ~ $$<leader>.......[acdm]$$
-);
-
-
-#
 # Find Electronic Audiobook MARC with physical Items attached
 #
 electronic_audiobook_with_physical_items_attached~~select id from biblio.record_entry where not deleted and lower(marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$
