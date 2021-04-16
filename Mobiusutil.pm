@@ -331,20 +331,18 @@ sub padLeft  #line, width, fill char
 
 sub findQuery		#self, DBhandler(object), school(string), platform(string), addsorcancels(string), queries
 {
-    my $dbHandler = @_[1];
+	my $dbHandler = @_[1];
 	my $school = @_[2];
 	my $platform = @_[3];
 	my $addsOrCancels = @_[4];
 	my %queries = %{$_[5]};
     my $dbFromDate = @_[6];
-# print "got fromdate: $dbFromDate \n";
-# exit;
+
 	my $key = $platform."_".$school."_".$addsOrCancels;
 	if(!$queries{$key})
 	{
 		return "-1";
 	}
-
 	my $dt = DateTime->now;   # Stores current date and time as datetime object
 	my $ndt = DateTime->now;
 	my $yesterday = $dt->subtract(days=>1);
