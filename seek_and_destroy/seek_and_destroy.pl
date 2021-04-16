@@ -386,7 +386,7 @@ sub tattleTaleReports
 
     ## Make sure that the output folder is defined and contains at least one slash in the file path. It's an absolute path.
     ## We don't want to delete / folder tree!
-    if($conf{"reportoutputroot"} && $conf{"reportoutputroot"} =~ m/\//g)
+    if($conf{"reportoutputroot"} && $conf{"reportoutputroot"} !=~ m/^\/$/g && $conf{"reportoutputroot"} =~ m/\//g)
     {
         # Clear any old reports
         $conf{"reportoutputroot"} .= '/'; # Make sure it ends with a slash. Double slashes at the end are fine for linux

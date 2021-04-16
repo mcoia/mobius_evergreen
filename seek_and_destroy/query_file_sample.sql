@@ -743,7 +743,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NULL OR format_icons.id IS NULL ) AND
-bre.id>0 AND bre.id < 10000 AND
+bre.id>0 AND
 (
     acl_names.id is not null
     OR
@@ -797,7 +797,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
-bre.id>0 AND bre.id < 10000 AND
+bre.id>0 AND
 (
     acl_names.id IS NULL
     AND
@@ -855,7 +855,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NULL OR format_icons.id IS NULL ) AND
-bre.id>0 AND bre.id < 10000 AND
+bre.id>0 AND
 (
     acl_names.id IS NOT NULL
     OR
@@ -911,7 +911,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
-bre.id>0 AND bre.id < 10000 AND
+bre.id>0 AND
 (
     acl_names.id IS NULL
     AND
@@ -980,7 +980,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NULL OR format_icons.id IS NULL ) AND
-bre.id>0 AND bre.id < 100000 AND
+bre.id>0 AND
 (
     acl_names.id is not null
     OR
@@ -1043,7 +1043,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
-bre.id>0 AND bre.id < 100000 AND
+bre.id>0 AND
 (
     acl_names.id IS NULL
     AND
@@ -1100,7 +1100,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NULL OR format_icons.id IS NULL ) AND
-bre.id>0 AND bre.id < 100000 AND
+bre.id>0 AND
 (
     acl_names.id is not null
     OR
@@ -1152,7 +1152,7 @@ LEFT JOIN asset.copy_location acl_names ON
 WHERE
 sil.report IS NULL AND
 ( mraf.id IS NOT NULL AND format_icons.id IS NOT NULL ) AND
-bre.id>0 AND bre.id < 100000 AND
+bre.id>0 AND
 (
     acl_names.id IS NULL
     AND
@@ -1192,7 +1192,7 @@ bre.id=acn.record AND
 acn.id=ac.call_number AND
 acl.id=ac.location AND
 bre.deleted AND
-bre.id > 0 and bre.id < 10000 AND
+bre.id > 0 AND
 NOT ac.deleted;
 
 #
@@ -1221,7 +1221,7 @@ aou.id=ac.circ_lib AND
 bre.id=acn.record AND
 acn.id=ac.call_number AND
 acl.id=ac.location AND
-bre.id > 0 and bre.id < 1000000 AND
+bre.id > 0 AND
 NOT ac.deleted AND
 lower(bre.marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$ AND
 (
