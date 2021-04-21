@@ -182,7 +182,7 @@
 							my $marcOutFile = $outputMarcFile;
 							my $evergreenScraper;
 							$valid=1;
-							my $selectQuery = $mobUtil->findQuery($dbHandler,$school,$platform,$type,$queries);
+							my $selectQuery = $mobUtil->findQuery($dbHandler,$school,$platform,$type,$queries,@ARGV[2]);
 							#print "Query: $selectQuery\n";
 							#print "Path: $pathtothis\n";
 							my $gatherTime = DateTime->now();
@@ -509,8 +509,8 @@
 				$file->close();
 				undef $file;
 				#Just checking for errors - temporary file created and deleted
-				
-				my $marcout = new Loghandler('/tmp/t.mrc');
+				my $tempOutputFileName = $mobUtil->chooseNewFileName("/tmp","t","mrc");
+				my $marcout = new Loghandler($tempOutputFileName);
 				#print "processing\n";
 				my @back = @{processMARC(\@marc,$platform,$type,$school,$marcout,$log)};
 				$finishedprocessing=1;
