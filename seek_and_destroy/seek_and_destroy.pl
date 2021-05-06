@@ -3344,12 +3344,15 @@ sub mergeBibsWithMetarecordHoldsInMind
 			$submarc = MARC::Record->new_from_xml($submarc);
 		}
 	}
-	
-	#Merge the 856s	
+
+	#Merge the 856s
 	$leadmarc = mergeMARC856($leadmarc,$submarc);
+    #Merge the 035's if preferred
 	$leadmarc = mergeMARC035($leadmarc,$submarc) if( lc($conf{"dedupe_preserve_oclc_from_sub"}) eq 'yes');
+
 	$leadmarc = convertMARCtoXML($leadmarc);
-	
+
+
 	moveAllCallNumbers($subbib,$leadbib,$reason);
 	$query = "update biblio.record_entry set marc=\$1 where id=\$2";
 	my @values = ($leadmarc,$leadbib);
@@ -4907,25 +4910,38 @@ sub mergeMARC035
 {
 	my $leadMarc = @_[0];
 	my $subMarc = @_[1];
-    my @lead035 = @{getOCLCFrom035($leadMarc)};
-    my @sub035 = @{getOCLCFrom035($subMarc)};
-    my @append = ();
-    foreach(@sub035)
+    my %lead035 = %{getOCLCFrom035($leadMarc)};
+    my %sub035 = %{getOCLCFrom035($subMarc)};
+    my %append = ();
+    while ((my $subfield, my $value ) = each(%sub035))
     {
-        my $sub = $_;
-        my $found = 0;
-        foreach(@lead035)
+        foreach(@{$value})
         {
-            $found = 1 if($_ eq $sub)
+            my $subVal = $_;
+            my $found = 0;
+            foreach(@{$lead035{$subfield}})
+            {
+                $found = 1 if($_ eq $subVal)
+            }
+            if(!$found)
+            {
+                if(!$append{$subfield})
+                {
+                    my @a = ();
+                    $append{$subfield} = \@a;
+                }
+                push(@{$append{$subfield}}, $subVal);
+            }
+            undef $found;
         }
-        push(@append, $sub) if !$found;
-        undef $found;
-        undef $sub;
     }
-    foreach(@append)
+    while ((my $subfield, my $value ) = each(%append))
     {
-        my $field = MARC::Field->new( '035', undef, undef, 'a' => $_ );
-        $leadMarc->insert_grouped_field($field);
+        foreach(@{$value})
+        {
+            my $field = MARC::Field->new( '035', ' ', ' ', $subfield => $_ );
+            $leadMarc->insert_grouped_field($field);
+        }
     }
     return $leadMarc;
 }
@@ -4934,24 +4950,37 @@ sub getOCLCFrom035
 {
     my $marc = shift;
     my @l035s = $marc->field("035");
-    my @ret = ();
-    my %temp = {};
+    my @subfield_list = ('a','z');
+    my %ret = ();
     foreach(@l035s)
     {
-        my @a = $_->subfield("a"); # just one please, the first one
-        foreach(@a)
+        my $thisField = $_;
+        foreach(@subfield_list)
         {
-            if($_ =~ m/\(?OCo{0,1}LC\)?.?\d+/)
+            my $thisSubfield = $_;
+            my %temp = ();
+            my @subs = $thisField->subfield($thisSubfield);
+            foreach(@subs)
             {
-                $temp{$_} = 1;
+                if($_ =~ m/\(?OCo{0,1}LC\)?.?\d+/)
+                {
+                    $temp{$_} = 1;
+                }
             }
+            while ((my $internal, my $mvalue ) = each(%temp))
+            {
+                if(!$ret{$thisSubfield})
+                {
+                    my @a = ();
+                    $ret{$thisSubfield} = \@a;
+                }
+                push(@{$ret{$thisSubfield}}, $internal);
+            }
+            undef %temp;
+            undef @subs;
         }
     }
-    while ((my $internal, my $mvalue ) = each(%temp))
-    {
-        push(@ret, $internal);
-    }
-    return \@ret;
+    return \%ret;
 }
 
 sub mergeMARC856
