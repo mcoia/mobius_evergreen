@@ -496,6 +496,7 @@ and winning_score_score>2
 #
 
 electronic_search_phrase~~select id,marc from biblio.record_entry where
+    not deleted and
     not
     (
         (
@@ -518,6 +519,7 @@ electronic_search_phrase~~select id,marc from biblio.record_entry where
 #
 
 electronic_additional_search~~select id,marc from biblio.record_entry where
+    not deleted and
     id in (select record from metabib.real_full_rec where tag=$$856$$ and ind2=$$0$$) AND
     marc ~ $$<leader>......[at]$$
     and
@@ -536,13 +538,12 @@ electronic_additional_search~~select id,marc from biblio.record_entry where
     select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=$$$problemphrase$$
     );
 
-
-
 #
 # Audiobook Bibs search phrases
 #
 
 audiobook_search_phrase~~select id,marc from biblio.record_entry where
+    not deleted and
     (
     marc !~ $$tag="007">s..[fl]$$
     OR
@@ -557,6 +558,7 @@ audiobook_search_phrase~~select id,marc from biblio.record_entry where
     );
 
 audiobook_additional_search~~select id,marc from biblio.record_entry where
+    not deleted and
     (
     marc !~ $$tag="007">s..[fl]$$
     OR
@@ -578,6 +580,7 @@ audiobook_additional_search~~select id,marc from biblio.record_entry where
 #
 
 dvd_search_phrase~~select id,marc from biblio.record_entry where
+    not deleted and
     (
         marc !~ $$tag="007">v...[vbs]$$
     )
@@ -590,6 +593,7 @@ dvd_search_phrase~~select id,marc from biblio.record_entry where
     );
 
 dvd_additional_search~~select id,marc from biblio.record_entry where
+    not deleted and
     (
     marc !~ $$tag="007">v...[vbs]$$
     )
@@ -610,6 +614,7 @@ dvd_additional_search~~select id,marc from biblio.record_entry where
 #
 
 largeprint_search_phrase~~select id,marc from biblio.record_entry where
+    not deleted and
     (
         marc !~ $$<leader>......[atd]$$
     OR
@@ -635,6 +640,7 @@ largeprint_search_phrase~~select id,marc from biblio.record_entry where
 #
 
 music_search_phrase~~select id,marc from biblio.record_entry where
+    not deleted and
     (
     marc !~ $$tag="007">s..[lf]$$
     OR
@@ -658,6 +664,7 @@ music_search_phrase~~select id,marc from biblio.record_entry where
 
 
 music_additional_search~~select id,marc from biblio.record_entry where
+    not deleted and
     (
     marc !~ $$tag="007">s..[lf]$$
     OR
