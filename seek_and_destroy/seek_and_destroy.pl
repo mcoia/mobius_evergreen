@@ -3477,7 +3477,13 @@ sub cleanMetaRecords
 	my $query = "
 	select mmsm.metarecord \"dest\",a.master_record,a.id \"source\",mm.fingerprint,ahr.id from 
 metabib.metarecord_source_map mmsm,
-(select master_record,id from metabib.metarecord where id not in(select metarecord from metabib.metarecord_source_map)) as a,
+(
+select mm.master_record,mm.id
+from
+metabib.metarecord mm
+left join metabib.metarecord_source_map mmsm on (mmsm.metarecord=mm.id)
+where
+mmsm.id is null) as a,
 metabib.metarecord mm,
 action.hold_request ahr
 where
@@ -3504,7 +3510,12 @@ updateJob("Processing",$query);
 	}
 	
 	# Record all of the ophans
-	my $query = "select id,fingerprint,master_record from metabib.metarecord where id not in(select metarecord from metabib.metarecord_source_map)";
+	my $query = "select mm.id,mm.fingerprint,mm.master_record
+    from
+    metabib.metarecord mm
+    left join metabib.metarecord_source_map mmsm on (mmsm.metarecord=mm.id)
+    where
+    mmsm.id is null";
 	updateJob("Processing",$query);	
 	my @results = @{$dbHandler->query($query)};	
 	foreach(@results)
@@ -3518,13 +3529,27 @@ updateJob("Processing",$query);
 	}
 	
 	# Now remove the orphans
-	my $query = "delete from metabib.metarecord where id not in(select metarecord from metabib.metarecord_source_map)";
-updateJob("Processing",$query);	
+	my $query = "delete from metabib.metarecord
+    where
+    id in(
+    select mm.id
+    from
+    metabib.metarecord mm
+    left join metabib.metarecord_source_map mmsm on (mmsm.metarecord=mm.id)
+    where
+    mmsm.id is null
+    )";
+    updateJob("Processing",$query);
 	$dbHandler->update($query);
 	
 	# create metarecords for bibs that do not have one
 	my $query = "
-	select id from biblio.record_entry where not deleted and fingerprint not in(select fingerprint from metabib.metarecord)
+	select bre.id from
+    biblio.record_entry bre
+    left join metabib.metarecord mm on (mm.fingerprint = bre.fingerprint)
+    where
+    not bre.deleted and
+    mm.id is null
 	";
 	updateJob("Processing",$query);
 	my @results = @{$dbHandler->query($query)};	
@@ -3537,8 +3562,8 @@ updateJob("Processing",$query);
 		updateJob("Processing",$query);	
 		$dbHandler->update($query);
 	}
-	
-	
+
+
 	# Merge metarecords with matching fingerprints and move affected metarecord holds
 	my $query = "
 	 select mmsm.metarecord,mmsm.source,mm.fingerprint,mmsm.id from metabib.metarecord_source_map mmsm, metabib.metarecord mm where 
@@ -3752,7 +3777,7 @@ sub recordMetaRecordChange
 		holdid,
 		extra,
 		job)
-		values ($affectedmetarecord,\$\$$fingerprint\$\$,$alternatmetarecord,$bibid,$holdid,\$\$$extra\$\$,$jobid)
+		values ($affectedmetarecord,\$fingerprint\$$fingerprint\$fingerprint\$,$alternatmetarecord,$bibid,$holdid,\$extra\$$extra\$extra\$,$jobid)
 		";
 	my @values = ();	
 	#updateJob("Processing","recordMetaRecordChange  $query");
