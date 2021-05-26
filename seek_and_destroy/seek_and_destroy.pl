@@ -2076,7 +2076,7 @@ sub updateScoreCache
 		author = \$6,
 		sd_fingerprint = \$7,
 		audioformat = \$8,
-		audioformat = \$9,
+		videoformat = \$9,
 		eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),
 		sd_alt_fingerprint = \$10,
 		tag902 = \$11
@@ -2125,10 +2125,10 @@ sub updateBibCircsScore
 		my @row = @{$row};
 		my $circmod = @row[0];
 		my $record = @row[1];
-		my $q="INSERT INTO seekdestroy.bib_item_circ_mods(record,circ_modifier,different_circs,job)
+		my $q="INSERT INTO seekdestroy.bib_item_circ_mods(record,circ_modifier,job)
 		values
 		(\$1,\$2,\$3,\$4)";
-		my @values = ($record,$circmod,$#results+1,$jobid);
+		my @values = ($record,$circmod,$jobid);
 		$allcircs.=$circmod.',';
 		$dbHandler->updateWithParameters($q,\@values);
 	}
@@ -5503,7 +5503,6 @@ sub setupSchema
 		id serial,
 		record bigint,
 		circ_modifier text,
-		different_circs bigint,
 		job  bigint NOT NULL,
 		CONSTRAINT bib_item_circ_mods_fkey FOREIGN KEY (job)
 		REFERENCES seekdestroy.job (id) MATCH SIMPLE)";
@@ -5618,6 +5617,26 @@ sub setupSchema
         REFERENCES seekdestroy.tattle_report (id) MATCH SIMPLE)
         ";
 		$dbHandler->update($query);
+
+        $query = "CREATE INDEX seekdestroy_bib_score_record_idx
+        ON seekdestroy.bib_score
+        USING btree (record)";
+        $dbHandler->update($query);
+
+        $query = "CREATE INDEX seekdestroy_bib_item_circ_mods_idx
+        ON seekdestroy.bib_item_circ_mods
+        USING btree (record)";
+        $dbHandler->update($query);
+
+        $query = "CREATE INDEX seekdestroy_bib_item_call_labels_idx
+        ON seekdestroy.bib_item_call_labels
+        USING btree (record)";
+        $dbHandler->update($query);
+
+        $query = "CREATE INDEX seekdestroy_bib_item_locations_idx
+        ON seekdestroy.bib_item_locations
+        USING btree (record)";
+        $dbHandler->update($query);
 
         ## Seed the report query DB table from static query file. Humans can tweak the table later
         my %seedReportQueries = (
