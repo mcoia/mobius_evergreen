@@ -1966,7 +1966,6 @@ sub updateScoreCache
 		my $bibid = @thisone[0];
 		#$log->addLine("Adding Score ".$bibid);
 		my $marc = @thisone[1];
-		#$log->addLine("bibid = $bibid");
 		#print "bibid = $bibid";
 		#print "marc = $marc";
 		my $query = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD = $bibid";
@@ -2033,12 +2032,12 @@ sub updateScoreCache
 		$fingerprints{alternate},
 		$fingerprints{tag902}
 		);
-		#$log->addLine($query);
-		#$log->addLine(Dumper(\@values));
+		# $log->addLine($query);
+		# $log->addLine(Dumper(\@values));
 		$dbHandler->updateWithParameters($query,\@values);
 		updateBibCircsScore($bibid);
 		updateBibCallLabelsScore($bibid);
-		updateBibCopyLocationsScore($bibid);		
+		updateBibCopyLocationsScore($bibid);
 	}
 	foreach(@updateIDs)
 	{
@@ -2108,7 +2107,7 @@ sub updateBibCircsScore
 	$dbHandler->update($query);
 	
 	$query = "
-	select ac.circ_modifier,acn.record  from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
+	select ac.circ_modifier,acn.record from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
 	acn.id=ac.call_number and
 	bre.id=acn.record and
 	acn.record = $bibid and
@@ -2127,7 +2126,7 @@ sub updateBibCircsScore
 		my $record = @row[1];
 		my $q="INSERT INTO seekdestroy.bib_item_circ_mods(record,circ_modifier,job)
 		values
-		(\$1,\$2,\$3,\$4)";
+		(\$1,\$2,\$3)";
 		my @values = ($record,$circmod,$jobid);
 		$allcircs.=$circmod.',';
 		$dbHandler->updateWithParameters($q,\@values);
@@ -2913,9 +2912,9 @@ sub findPossibleDups
 		
 		# Record the unfilled holds
 		my $query = "insert into seekdestroy.before_dedupe_hold_current_copy_null (hold,job)
-		(select id,$jobid from action.hold_request where 
-		current_copy is null and 
-		cancel_time is null and 
+		(select id,$jobid from action.hold_request where
+		current_copy is null and
+		cancel_time is null and
 		not frozen and
 		expire_time is null and
 		capture_time is null)";
@@ -2923,12 +2922,17 @@ sub findPossibleDups
 		$dbHandler->update($query);
 		
 		# Record the icon format summary
-		$query = "select value ,count(*) \"count\" from metabib.record_attr_flat where attr=\$\$icon_format\$\$ 
-			and id in(select id from biblio.record_entry where not deleted)
-			group by value
-			union
-			select \$\$blank\$\$,count(*) \"count\" from biblio.record_entry where not deleted and id not in(select id from metabib.record_attr_flat where attr=\$\$icon_format\$\$)
-			order by \"count\"";
+        $query = '
+        SELECT
+        (CASE WHEN mraf.value IS NULL THEN \'blank\' ELSE mraf.value END),count(*) "count"
+        FROM
+        biblio.record_entry bre
+        LEFT JOIN metabib.record_attr_flat mraf ON (mraf.attr=$$icon_format$$ AND mraf.id=bre.id)
+        WHERE
+        NOT bre.deleted
+        GROUP BY mraf.value
+        ORDER BY "count"
+        ';
 		updateJob("Processing","findPossibleDups  $query");
 		my @results = @{$dbHandler->query($query)};
 		foreach(@results)
@@ -2944,83 +2948,86 @@ sub findPossibleDups
 # Gather up some potential candidates based on EG Fingerprints
 #
 	my $query="
-		select string_agg(to_char(id,\$\$9999999999\$\$),\$\$,\$\$),fingerprint from biblio.record_entry where fingerprint in
-		(
-		select fingerprint from(
-		select fingerprint,count(*) \"count\" from biblio.record_entry where not deleted 
-		and id not in(select record from seekdestroy.bib_score)
-		group by fingerprint
-		) as a
-		where count>1
-		)
-		and not deleted
-		and fingerprint != \$\$\$\$
-		group by fingerprint
-		--limit 100;
+        SELECT
+        id,fingerprint,marc
+        FROM
+        biblio.record_entry WHERE fingerprint IN
+        (
+            SELECT fingerprint FROM
+            (
+                SELECT fingerprint,count(*) \"count\"
+                FROM
+                biblio.record_entry bre
+                LEFT JOIN seekdestroy.bib_score sbss ON (sbss.record=bre.id)
+                WHERE
+                NOT bre.deleted AND
+                sbss.record IS NULL
+                GROUP BY fingerprint
+                HAVING count(*) > 1
+            ) AS a
+        )
+        AND NOT deleted
+        AND fingerprint != \$\$\$\$
+        GROUP BY 1,2,3
+        --limit 100;
 		";
-updateJob("Processing","findPossibleDups  $query");
-	my @results = @{$dbHandler->query($query)};
-	my @st=();
-	my %alreadycached;
-	my $deleteoldscorecache="";
-updateJob("Processing","findPossibleDups  looping results");
-	foreach(@results)
-	{
-		my $row = $_;
-		my @row = @{$row};
-		my @ids=split(',',@row[0]);
-		my $fingerprint = @row[1];
-		for my $i(0..$#ids)
-		{
-			@ids[$i]=$mobUtil->trim(@ids[$i]);
-			my $id = @ids[$i];
-			if(!$alreadycached{$id})
-			{
-				$alreadycached{$id}=1;
-				my $q = "select marc from biblio.record_entry where id=$id";
-				my @result = @{$dbHandler->query($q)};			
-				my @r = @{@result[0]};
-				my $marc = @r[0];
-				my @scorethis = ($id,$marc);
-				push(@st,[@scorethis]);
-				$deleteoldscorecache.="$id,";
-			}
-		}
-	}
+    updateJob("Processing","findPossibleDups  $query");
+    my @results = @{$dbHandler->query($query)};
+    my @st=();
+    my %alreadycached=();
+    my $deleteoldscorecache="";
+    updateJob("Processing","findPossibleDups  looping results");
+    foreach(@results)
+    {
+        my $row = $_;
+        my @row = @{$row};
+        my $id = @row[0];
+        my $fingerprint = @row[1];
+        my $marc = @row[2];
+        if(!$alreadycached{$id})
+        {
+            $alreadycached{$id}=1;
+            my @scorethis = ($id,$marc);
+            push(@st,[@scorethis]);
+            $deleteoldscorecache.="$id,";
+        }
+    }
+    undef %alreadycached;
 
-	$deleteoldscorecache=substr($deleteoldscorecache,0,-1);		
-	my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
-	updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
-	$dbHandler->update($q);
-	updateJob("Processing","findPossibleDups updating scorecache selectively");
-	updateScoreCache(\@st);
+    $deleteoldscorecache=substr($deleteoldscorecache,0,-1);
+    my $q = "delete from SEEKDESTROY.BIB_MATCH where (BIB1 IN( $deleteoldscorecache) OR BIB2 IN( $deleteoldscorecache)) and job=$jobid";
+    updateJob("Processing","findPossibleDups deleting old cache bib_match   $q");
+    $dbHandler->update($q);
+    updateJob("Processing","findPossibleDups updating scorecache selectively");
+    updateScoreCache(\@st);
 	
 	
 	my $query="
-select
-record,
-sd_alt_fingerprint,
-score
-from
-seekdestroy.bib_score sbs2
-join biblio.record_entry bre2 on (bre2.id=sbs2.record and not bre2.deleted)
-where
-sd_alt_fingerprint||opac_icon in
-(
-    select idp from
+    select
+    record,
+    sd_alt_fingerprint,
+    score
+    from
+    seekdestroy.bib_score sbs2
+    join biblio.record_entry bre2 on (bre2.id=sbs2.record and not bre2.deleted)
+    where
+    sd_alt_fingerprint||opac_icon in
     (
-        select sd_alt_fingerprint||opac_icon \"idp\",count(*)
-        from
-        seekdestroy.bib_score sbs
-        join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted)
-        where
-        length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\\s\$\$,\$\$\$\$,\$\$g\$\$)))>5
-        group by sd_alt_fingerprint||opac_icon having count(*) > 1
-    ) as a
-)
-order by sd_alt_fingerprint,score desc, record
+        select idp from
+        (
+            select sd_alt_fingerprint||opac_icon \"idp\",count(*)
+            from
+            seekdestroy.bib_score sbs
+            join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted)
+            where
+            length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\\s\$\$,\$\$\$\$,\$\$g\$\$)))>5
+            group by sd_alt_fingerprint||opac_icon having count(*) > 1
+        ) as a
+    )
+    order by sd_alt_fingerprint,score desc, record
 		";
-updateJob("Processing","findPossibleDups  $query");
+
+    updateJob("Processing","findPossibleDups  $query");
 	my @results = @{$dbHandler->query($query)};
 	my $current_fp ='';
 	my $master_record=-2;
@@ -3062,43 +3069,30 @@ updateJob("Processing","findPossibleDups  $query");
 			}
 		}
 	}
-	my $query = '
-select bib1,bib2, 
-$$'.$domainname.'eg/opac/record/$$||bib1||$$?expand=marchtml$$ "leadlink",
-$$'.$domainname.'eg/opac/record/$$||bib2||$$?expand=marchtml$$ "sublink",
-has_holds,
-(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib1) "leadicon",
-(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib2) "subicon",
-string_agg(distinct aou_bib1.shortname,\',\'),
-string_agg(distinct aou_bib2.shortname,\',\'),
-(select value from metabib.title_field_entry where source=sbm.bib1 limit 1) "title"
-from SEEKDESTROY.BIB_MATCH sbm,
-actor.org_unit aou_bib1,
-actor.org_unit aou_bib2,
-asset.call_number acn_bib1,
-asset.call_number acn_bib2
-where 
-aou_bib1.id=acn_bib1.owning_lib and
-acn_bib1.record=sbm.bib1 and
-aou_bib2.id=acn_bib2.owning_lib and
-acn_bib2.record=sbm.bib2 and
+    my $query = 'select bib1,bib2, 
+    $$'.$domainname.'eg/opac/record/$$||bib1||$$?expand=marchtml$$ "leadlink",
+    $$'.$domainname.'eg/opac/record/$$||bib2||$$?expand=marchtml$$ "sublink",
+    has_holds,
+    (select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib1) "leadicon",
+    (select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib2) "subicon",
+    string_agg(distinct aou_bib1.shortname,\',\'),
+    string_agg(distinct aou_bib2.shortname,\',\'),
+    string_agg(distinct mtfe.value,\' !! \') "title"
+    from 
+    seekdestroy.bib_match sbm
+    left join asset.call_number acn_bib1 on (acn_bib1.record=sbm.bib1 and not acn_bib1.deleted)
+    left join asset.call_number acn_bib2 on (acn_bib2.record=sbm.bib2 and not acn_bib2.deleted)
+    left join actor.org_unit aou_bib1 on (aou_bib1.id=acn_bib1.owning_lib)
+    left join actor.org_unit aou_bib2 on (aou_bib2.id=acn_bib2.owning_lib)
+    join biblio.record_entry bre1 on (sbm.bib1=bre1.id and not bre1.deleted)
+    join biblio.record_entry bre2 on (sbm.bib2=bre2.id and not bre2.deleted)
+    left join metabib.title_field_entry mtfe on (mtfe.source=sbm.bib1)
+    where
+    job='.$jobid.'
+    group by 
+    1,2,3,4,5,6,7
+    order by 1,2';
 
-bib1 not in(select id from biblio.record_entry where deleted) and
-bib2 not in(select id from biblio.record_entry where deleted) and
-job='.$jobid.'
-group by 
-bib1,bib2, 
-$$'.$domainname.'eg/opac/record/$$||bib1||$$?expand=marchtml$$,
-$$'.$domainname.'eg/opac/record/$$||bib2||$$?expand=marchtml$$,
-has_holds,
-(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib1),
-(select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib2),
-(select value from metabib.title_field_entry where source=sbm.bib1 limit 1)
-
-order by bib1,bib2
-	
-	';
-	
 	my @results = @{$dbHandler->query($query)};
     my $autoList;
     my $needsHumans;
@@ -3182,12 +3176,17 @@ order by bib1,bib2
 		}
 		
 		# Record the icon format summary
-		$query = "select value ,count(*) \"count\" from metabib.record_attr_flat where attr=\$\$icon_format\$\$ 
-			and id in(select id from biblio.record_entry where not deleted)
-			group by value
-			union
-			select \$\$blank\$\$,count(*) \"count\" from biblio.record_entry where not deleted and id not in(select id from metabib.record_attr_flat where attr=\$\$icon_format\$\$)
-			order by \"count\"";
+		$query = '
+        SELECT
+        (CASE WHEN mraf.value IS NULL THEN \'blank\' ELSE mraf.value END),count(*) "count"
+        FROM
+        biblio.record_entry bre
+        LEFT JOIN metabib.record_attr_flat mraf ON (mraf.attr=$$icon_format$$ AND mraf.id=bre.id)
+        WHERE
+        NOT bre.deleted
+        GROUP BY mraf.value
+        ORDER BY "count"
+        ';
 		updateJob("Processing","findPossibleDups  $query");
 		my @results = @{$dbHandler->query($query)};
 		$log->addLine("The following are the changes to the format totals after the dedupe.\nFormat;Before;After");
@@ -3566,15 +3565,19 @@ updateJob("Processing",$query);
 
 	# Merge metarecords with matching fingerprints and move affected metarecord holds
 	my $query = "
-	 select mmsm.metarecord,mmsm.source,mm.fingerprint,mmsm.id from metabib.metarecord_source_map mmsm, metabib.metarecord mm where 
- mmsm.metarecord=mm.id and
- mm.id in(select id from metabib.metarecord where fingerprint in(
-select fingerprint from (
-select fingerprint,count(*) from metabib.metarecord group by fingerprint having count(*) > 1
-) as a
-))
-order by mm.fingerprint
-";
+    select mmsm.metarecord,mmsm.source,mm.fingerprint,mmsm.id
+    from
+    metabib.metarecord_source_map mmsm
+    join metabib.metarecord mm on (mmsm.metarecord=mm.id)
+    join (
+    select id from metabib.metarecord where fingerprint in(
+            select fingerprint from (
+                select fingerprint,count(*) from metabib.metarecord group by fingerprint having count(*) > 1
+            ) as a
+        )
+        ) as bb on (bb.id=mm.id)
+    order by mm.fingerprint
+    ";
 	updateJob("Processing",$query);	
 	my @results = @{$dbHandler->query($query)};	
 	my $currentfingerprint='';
