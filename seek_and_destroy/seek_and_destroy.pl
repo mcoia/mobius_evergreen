@@ -40,6 +40,7 @@ our $runMoveElectronicAudioBooks=0;
 our $runMoveAudioBooks=0;
 our $runDedupe=0;
 our $runFindElectronic856TOC=0;
+our $resyncTattle=0;
 our $doNotRunFullReEval=0;
 
 our %tattleSystemDone = ();
@@ -50,7 +51,7 @@ You can specify
 [Global settings]
 --config configfilename                       [Path to the config file - required]             
 --xmlconfig pathto_opensrf.xml                [Defaults to /openils/conf/opensrf.xml]
---debug flag                                  [Cause more output - not implemented yet]
+--debug flag                                  [Cause more output]
 --dryrun flag                                 [Cause no production table updates]
 --runCleamMetarecords flag                    [Run the Metarecord clean routine]
 
@@ -73,6 +74,7 @@ You can specify
 
 [A nice flag to skip everything and just run the report]
 --reportonly flag                             [Skip everything and only run a report - Reports are always run at the end]
+--resyncTattle flag                           [Cause the software to re-import the Tattle queries from query file]
 
 **** IMPORTANT SETTING **** 
 --doNotRunFullReEval flag                     [This will cause the software to execute the bib conversion based on previously collected scores]
@@ -99,7 +101,9 @@ GetOptions (
 "runFindElectronic856TOC" => \$runFindElectronic856TOC,
 "resetScores" => \$resetScores,
 "doNotRunFullReEval" => \$doNotRunFullReEval,
-"reportonly" => \$reportonly
+"reportonly" => \$reportonly,
+"resyncTattle" => \$resyncTattle,
+"debug" => \$debug
 )
 or die("Error in command line arguments $help");
 
@@ -145,6 +149,7 @@ if(! -e $xmlconf)
 		if($queries)
 		{
 			%queries = %{$queries};
+            undef $queries;
 		}
 		else
 		{
@@ -197,7 +202,7 @@ if(! -e $xmlconf)
 		{	
 			my %dbconf = %{getDBconnects($xmlconf)};
 			$dbHandler = new DBhandler($dbconf{"db"},$dbconf{"dbhost"},$dbconf{"dbuser"},$dbconf{"dbpass"},$dbconf{"port"});
-			setupSchema($dbHandler);
+			setupSchema();
 			$baseTemp = $conf{"tempdir"};
 			$domainname = lc($conf{"domainname"});
 			$baseTemp =~ s/\/$//;
@@ -478,7 +483,7 @@ sub writeTattleHTML
             </td>\n";
             $htmlHeader .= "<th>Ignore</th>\n";
         }
-        elsif( (@headers[$i] =~ /call/gi) || (@headers[$i] =~ /icon/gi) || (@headers[$i] =~ /branch/gi) || (@headers[$i] =~ /issue/gi) )
+        elsif( (@headers[$i] =~ /call/gi) || (@headers[$i] =~ /icon/gi) || (@headers[$i] =~ /branch/gi) || (@headers[$i] =~ /issue/gi) || (@headers[$i] =~ /title/gi) )
         {
             push(@printCols, $i);
             $colStyle{$i} = "<td>!!!value!!!</td>";
@@ -5641,27 +5646,69 @@ sub setupSchema
         USING btree (record)";
         $dbHandler->update($query);
 
+        $query = "CREATE INDEX seekdestroy_bib_match_bib1_idx
+        ON seekdestroy.bib_match
+        USING btree (bib1)";
+        $dbHandler->update($query);
+
+        $query = "CREATE INDEX seekdestroy_bib_match_bib2_idx
+        ON seekdestroy.bib_match
+        USING btree (bib2)";
+        $dbHandler->update($query);
+
         ## Seed the report query DB table from static query file. Humans can tweak the table later
-        my %seedReportQueries = (
-        'questionable_large_print' => 'Large Print item to bib mis-match',
-        'questionable_video_bib_to_item' => 'DVD/Blu-ray/VHS item to bib mis-match',
-        'questionable_music_bib_to_item' => 'Music item to bib mis-match',
-        'questionable_audiobook_bib_to_item' => 'Audiobook item to bib mis-match',
-        'items_attached_to_deleted_bibs' => 'Items attched to deleted bibs',
-        'electronic_book_with_physical_items_attached' => 'Items attched to Electronic bibs'
-        );
-        my $insertQ = "INSERT INTO seekdestroy.tattle_report(name,query)
-            VALUES
-            ";
-        while ((my $queryname, my $humanname) = each(%seedReportQueries))
+        resyncTattleReportQueriesFromFile();
+	}
+    elsif($resyncTattle)
+    {
+        resyncTattleReportQueriesFromFile();
+    }
+}
+
+sub resyncTattleReportQueriesFromFile
+{
+    my %seedReportQueries = (
+    'questionable_large_print' => 'Large Print item to bib mis-match',
+    'questionable_video_bib_to_item' => 'DVD/Blu-ray/VHS item to bib mis-match',
+    'questionable_music_bib_to_item' => 'Music item to bib mis-match',
+    'questionable_audiobook_bib_to_item' => 'Audiobook item to bib mis-match',
+    'items_attached_to_deleted_bibs' => 'Items attched to deleted bibs',
+    'electronic_book_with_physical_items_attached_for_report' => 'Items attched to Electronic bibs'
+    );
+    my $needInsert = 0;
+    my $updateQ = "UPDATE seekdestroy.tattle_report SET query = ";
+    my $insertQ = "INSERT INTO seekdestroy.tattle_report(name,query)
+        VALUES
+        ";
+    while ((my $queryname, my $humanname) = each(%seedReportQueries))
+    {
+        my $query = "SELECT id FROM seekdestroy.tattle_report WHERE name = \$namedquery\$".$humanname."\$namedquery\$";
+        my @results = @{$dbHandler->query($query)};
+        if($#results > -1)
+        {
+            my @row = @{@results[0]};
+            my $id = @row[0];
+            my $thisUpdate = $updateQ ."\$queryqueryquery\$" . $queries{$queryname} . "\$queryqueryquery\$ where id = $id";
+            updateJob("Processing",$thisUpdate);
+            $dbHandler->update($thisUpdate);
+            undef $thisUpdate;
+            undef @row;
+            undef $id;
+        }
+        else
         {
             $insertQ .= "(\$humanname\$$humanname\$humanname\$,\$queryqueryquery\$".$queries{$queryname}."\$queryqueryquery\$),\n";
+            $needInsert = 1;
         }
-        # Remove trailing comma
+        undef @results;
+    }
+    # Remove trailing comma
+    if($needInsert)
+    {
         $insertQ = substr($insertQ,0,-2);
         updateJob("Processing",$insertQ);
         $dbHandler->update($insertQ);
-	}
+    }
 }
 
 sub seedTattleSystemIndex

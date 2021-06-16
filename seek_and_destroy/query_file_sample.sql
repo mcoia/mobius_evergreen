@@ -7,6 +7,28 @@
 # Program Queries
 ##########################################################
 
+#
+# Find Electronic MARC with physical Items attached
+#
+electronic_book_with_physical_items_attached~~select id from biblio.record_entry where not deleted and lower(marc) ~ $$<datafield tag="856" ind1="4" ind2="0">$$
+and id in
+(
+select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
+)
+and
+(
+    marc ~ $$tag="008">.......................[oqs]$$
+    or
+    marc ~ $$tag="006">......[oqs]$$
+)
+and
+(
+    marc ~ $$<leader>......[at]$$
+)
+and
+(
+    marc ~ $$<leader>.......[acdm]$$
+);
 
 #
 # Find Electronic Audiobook MARC with physical Items attached
@@ -711,6 +733,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -756,7 +779,7 @@ bre.id>0 AND
     OR
     acn_labels.id is not null
 )
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 
 UNION ALL
 
@@ -765,6 +788,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -811,7 +835,7 @@ bre.id>0 AND
     acn_labels.id IS NULL
 )
 
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 ) AS a
 ORDER BY lower(a."Branch");
 
@@ -823,6 +847,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -870,7 +895,7 @@ bre.id>0 AND
     OR
     ac.circ_modifier ~* $$video$$
 )
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 
 UNION ALL
 
@@ -879,6 +904,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -927,7 +953,7 @@ bre.id>0 AND
     ac.circ_modifier !~* $$video$$
 )
 
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 ) AS a
 ORDER BY lower(a."Branch");
 
@@ -941,6 +967,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -995,7 +1022,7 @@ bre.id>0 AND
     OR
     ac.circ_modifier~$$music$$
 )
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 
 UNION ALL
 
@@ -1004,6 +1031,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -1059,7 +1087,7 @@ bre.id>0 AND
     ac.circ_modifier!~*$$music$$
 )
 
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 ) AS a
 ORDER BY lower(a."Branch");
 
@@ -1072,6 +1100,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -1115,7 +1144,7 @@ bre.id>0 AND
     OR
     ac.circ_modifier~$$audiobook$$
 )
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 
 UNION ALL
 
@@ -1124,6 +1153,7 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 AOU.NAME AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
@@ -1168,7 +1198,7 @@ bre.id>0 AND
     ac.circ_modifier!~*$$audiobook$$
 )
 
-GROUP BY 1,2,3,5,6,7,8,9
+GROUP BY 1,2,3,5,6,7,8,9,10
 ) AS a
 ORDER BY lower(a."Branch");
 
@@ -1180,12 +1210,13 @@ bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 aou.name AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
 $$item attached to deleted bib$$ AS "Issue",
 ac.id AS "copyid"
-from 
+from
 biblio.record_entry bre,
 asset.copy ac
 LEFT JOIN seekdestroy.ignore_list sil ON (sil.target_copy=ac.id and report=!!!reportid!!!),
@@ -1205,11 +1236,12 @@ NOT ac.deleted;
 #
 # Find Items that are attached to Electronic bibs
 #
-electronic_book_with_physical_items_attached~~select 
+electronic_book_with_physical_items_attached_for_report~~select 
 bre.id AS "Bib ID",
 ac.barcode AS "Barcode",
 acn.label AS "Call Number",
 (SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.record_attr_flat WHERE attr=$$icon_format$$ AND id=bre.id GROUP BY id) AS "OPAC Icon",
+LEFT((SELECT string_agg(value,$$ $$) "FORMAT" FROM metabib.title_field_entry WHERE source=bre.id GROUP BY source),30) AS "Title",
 aou.name AS "Branch",
 (SELECT name FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "System",
 (SELECT id FROM actor.org_unit_ancestor_at_depth(aou.id,1)) AS "SystemID",
