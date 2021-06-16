@@ -127,8 +127,7 @@ sub readConfFile
 	my $fullFile = "";
 	foreach my $line (@lines)
 	{
-		$line =~ s/\n//;  #remove newline characters
-		$line =~ s/^\s+//; #left trim
+		$line =~ s/\n/ASDF!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!ASDF/g;  #remove newline characters
 		my $cur = trim('',$line);
 		my $len = length($cur);
 		if($len>0)
@@ -140,15 +139,18 @@ sub readConfFile
 			}
 		}
 	}
-	
+
 	my @div = split(";", $fullFile); #split the string by semi colons
 	foreach(@div)
 	{
 		my $Name, $Value;
 		($Name, $Value) = split (/\~\~/, $_); #split each by the equals sign (left of equal is the name and right is the query
-		$$ret{trim('',$Name)} = trim('',$Value);
-	}	
-	
+        $Value = trim('',$Value);
+        $Name =~ s/ASDF!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!ASDF//g;  # just in case
+        $Value =~ s/ASDF!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!ASDF/\n/g;  # put the line breaks back in
+		$$ret{trim('',$Name)} = $Value;
+	}
+
 	return \%ret;
  }
  
@@ -320,7 +322,7 @@ sub padLeft  #line, width, fill char
 	return $ret;
 }
  
- sub trim
+sub trim
 {
 	my $self = shift;
 	my $string = shift;
@@ -350,12 +352,12 @@ sub findQuery		#self, DBhandler(object), school(string), platform(string), addso
 	$yesterday = $yesterday->set_minute(0);
 	$yesterday = $yesterday->set_second(0);
 	#$dt = $yesterday->add(days=>1); #midnight to midnight
-	
-	
+
+
 #
 # Now create the time string for the SQL query
 #
-    
+
 	my $fdate = $yesterday->ymd;   # Retrieves date as a string in 'yyyy-mm-dd' format
 	my $ftime = $yesterday->hms;   # Retrieves time as a string in 'hh:mm:ss' format
 	my $todate = $ndt;
