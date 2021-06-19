@@ -18,6 +18,15 @@ queryfile=/path/to/query_file_sample.sql
 # Anything other than "yes" is considered false
 dedupe_preserve_oclc_from_sub = yes
 
+# This setting will cause the dedupe routine to require that all of the ISBN's be equal between two potiential matching bibs.
+# Otherwise, the software only requires one common ISBN between to potiential matching bibs.
+# Anything other than "yes" is considered false
+dedupe_match_all_isbns = no
+
+# This setting will cause the dedupe routine to copy over any 020's from the subordinate bib upon dedupe
+# Anything other than "yes" is considered false
+dedupe_merge_isbns_to_lead = yes
+
 tempdir = /path/to/tmp
 erroremaillist = example@example.org
 successemaillist = example@example.org, example2@example.org
