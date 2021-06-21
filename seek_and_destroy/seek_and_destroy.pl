@@ -39,6 +39,7 @@ our $runMoveElectronicBooks=0;
 our $runMoveElectronicAudioBooks=0;
 our $runMoveAudioBooks=0;
 our $runDedupe=0;
+our $runDedupeSample;
 our $runFindElectronic856TOC=0;
 our $resyncTattle=0;
 our $reIndexTattle=0;
@@ -71,6 +72,7 @@ You can specify
 
 [This is used AFTER all of the formats have been ran]
 --runDedupe flag                              [Find Duplicate bibs and merge those that are close enough]
+--runDedupeSample integer                     [Same as runDedupe, but allows you to specify the sample size of the DB]
 --resetScores flag                            [Empty out the schema table of any bib scores - recommended when running dedupe]
 
 [A nice flag to skip everything and just run the report]
@@ -100,6 +102,7 @@ GetOptions (
 "runMoveElectronicAudioBooks" => \$runMoveElectronicAudioBooks,
 "runMoveAudioBooks" => \$runMoveAudioBooks,
 "runDedupe" => \$runDedupe,
+"runDedupeSample=i" => \$runDedupeSample,
 "runFindElectronic856TOC" => \$runFindElectronic856TOC,
 "resetScores" => \$resetScores,
 "doNotRunFullReEval" => \$doNotRunFullReEval,
@@ -240,7 +243,7 @@ if(! -e $xmlconf)
                     findItemsCircedAsAudioBooksButAttachedNonAudioBib() if $runMoveAudioBooks;
                     findItemsNotCircedAsAudioBooksButAttachedAudioBib() if $runMoveAudioBooks;
 
-                    findPossibleDups() if $runDedupe;
+                    findPossibleDups() if ($runDedupe || $runDedupeSample);
                     findInvalid856TOCURL() if $runFindElectronic856TOC;
 
 
@@ -2978,16 +2981,21 @@ sub findPossibleDups
                 LEFT JOIN seekdestroy.bib_score sbss ON (sbss.record=bre.id)
                 WHERE
                 NOT bre.deleted AND
+                bre.id > -1 AND
                 sbss.record IS NULL
                 GROUP BY fingerprint
                 HAVING count(*) > 1
+                !!!sample_limit!!!
             ) AS a
         )
         AND NOT deleted
+        AND id > -1
         AND fingerprint != \$\$\$\$
         GROUP BY 1,2,3
-        --limit 100;
         ";
+    my $sample = "";
+    $sample = "limit $runDedupeSample" if $runDedupeSample;
+    $query =~ s/!!!sample_limit!!!/$sample/g;
     updateJob("Processing","findPossibleDups  $query");
     my @results = @{$dbHandler->query($query)};
     my @st=();
@@ -3029,7 +3037,7 @@ sub findPossibleDups
     score
     from
     seekdestroy.bib_score sbs2
-    join biblio.record_entry bre2 on (bre2.id=sbs2.record and not bre2.deleted)
+    join biblio.record_entry bre2 on (bre2.id=sbs2.record and not bre2.deleted and bre2.id > -1)
     where
     sd_alt_fingerprint||opac_icon in
     (
@@ -3038,7 +3046,7 @@ sub findPossibleDups
             select sd_alt_fingerprint||opac_icon \"idp\",count(*)
             from
             seekdestroy.bib_score sbs
-            join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted)
+            join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted and bre2.id > -1)
             where
             length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\\s\$\$,\$\$\$\$,\$\$g\$\$)))>5
             group by sd_alt_fingerprint||opac_icon having count(*) > 1
@@ -3294,9 +3302,10 @@ sub additionalDedupeValidator
         $marc =~ s/(<leader>.........)./${1}a/;
         $marc = MARC::Record->new_from_xml($marc);
         my @isbns = @{getISBNDeduped($marc)};
-        push (@isbnMatches, [@isbns]) if @isbns[0]; # at least one isbn, otherwise we don't add it to the array
+        push (@isbnMatches, [@isbns]) if $#isbns > -1; # at least one isbn, otherwise we don't add it to the array
     }
-    return "no ISBNs in common" if(@isbnMatches[0] && !@isbnMatches[1]); # case where one bib has ISBN's and the other one doesn't
+    return '1' if($#isbnMatches == -1);  # if neither record has an 020, then I guess we're a match.
+    return "no ISBNs in common" if($#isbnMatches < 1); # if one record has some 020s, the other one is required to have some too :)
     my $isbnMatch = 0;
     foreach( @{@isbnMatches[0]} )
     {
