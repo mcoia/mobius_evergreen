@@ -551,8 +551,15 @@ sub getTattleJSMagic
     {
         $("table").each(function()
         {
-            $(this).DataTable();
+           var dt = $(this).DataTable();
+           dt.on("draw",SetUpIgnore);
         });
+        SetUpIgnore();        
+    });
+
+
+    function SetUpIgnore()
+    {
         $(".ignorebutton").each(function()
         {
             var reportID = $(this).parents("table");
@@ -569,8 +576,8 @@ sub getTattleJSMagic
                 }
             }
         });
-    });
-
+    }
+    
     function handleIgnore(reportID, copyID)
     {
         var elements = getIgnoreButtonElements(reportID, copyID);
