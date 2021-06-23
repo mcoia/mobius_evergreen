@@ -554,7 +554,7 @@ sub getTattleJSMagic
            var dt = $(this).DataTable();
            dt.on("draw",SetUpIgnore);
         });
-        SetUpIgnore();        
+        SetUpIgnore();
     });
 
 
@@ -577,7 +577,7 @@ sub getTattleJSMagic
             }
         });
     }
-    
+
     function handleIgnore(reportID, copyID)
     {
         var elements = getIgnoreButtonElements(reportID, copyID);
