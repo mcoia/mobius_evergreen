@@ -225,9 +225,8 @@ package evergreenScraper;
 
     my @cha = split("",$selects);
     my $tselects = "";
-    my $chunks = 0;
     my $zeroAdded = 0;
-    my $chunkGoal = 100;
+    my $chunkGoal = 1900;
     my $title = $self->{'title'};
     my $masterfile = new Loghandler($mobUtil->chooseNewFileName('/tmp',"master_$title",'pid'));
     my $previousTime=DateTime->now;
@@ -274,6 +273,7 @@ package evergreenScraper;
         my $workingThreads=0;
         my @newThreads=();
         my $threadJustFinished=0;
+        my $reMaxed = 0;
         #print Dumper(\@threadTracker);
         #print "Looping through the threads\n";
         $recordsCollectedTotalPerLoop = $finishedRecordCount;
@@ -336,7 +336,11 @@ package evergreenScraper;
                         if(@lines[1] == 0)
                         {
                             $zeroAdded++;
-                            $max = findMaxRecordCount($self,$maxQuery);
+                            if( !$reMaxed && ($zeroAdded > ($threadsAllowed*2)) )
+                            {
+                                $max = findMaxRecordCount($self,$maxQuery);
+                                $reMaxed = 1;
+                            }
                             print "Got 0 records $zeroAdded times\n";
                             if($zeroAdded>100) #we have looped 100 times with not a single record added to the collection. Time to quit.
                             {
@@ -394,6 +398,7 @@ package evergreenScraper;
                 $workingThreads++;
                 push(@newThreads,$_);
             }
+            undef $reMaxed;
         }
         @threadTracker=@newThreads;
         #print "$workingThreads / $threadsAllowed Threads\n";
@@ -417,6 +422,7 @@ package evergreenScraper;
                 if($finishedRecordCount<$max)
                 {
                     my $loops=0;
+                    my $sentOff = 0;
                     while ($workingThreads<($threadsAllowed-1))#&& ($finishedRecordCount+($loops*$chunkGoal)<$max))
                     {
                         $loops++;
@@ -441,11 +447,19 @@ package evergreenScraper;
                         {
                             if((scalar @recovers) == 0)
                             {
-                                #print "Sending off for range....\n";
-                                $thisOffset = calcDBMinID($self,$thisOffset,$dbHandler,$tselects);
-                                $thisIncrement = $thisOffset + $range if (!$zeroAdded && $range > 0);
-                                $thisIncrement = calcDBRange($self,$thisOffset,$chunkGoal,$dbHandler,$tselects) if ($zeroAdded || $range == 0);
-                                #print "Got range: $thisIncrement\n";
+                                # this can be slow, so we want to limit the number of times this kicks off
+                                if( !$sentOff && ( ($range == 0) || ($zeroAdded > $threadsAllowed)) )
+                                {
+                                    # print "range: $range\nsentOff: $sentOff\nzeroAdded: $zeroAdded\nthreadsAllowed: $threadsAllowed\n";
+                                    $thisOffset = calcDBMinID($self,$thisOffset,$dbHandler,$tselects);
+                                    $thisIncrement = calcDBRange($self,$thisOffset,$chunkGoal,$dbHandler,$tselects);
+                                    #print "Got range: $thisIncrement\n";
+                                    $sentOff = 1;
+                                }
+                                else
+                                {
+                                    $thisIncrement = $thisOffset + $range;
+                                }
                             }
                             else
                             {
@@ -483,6 +497,7 @@ package evergreenScraper;
                         $workingThreads++;
                         #print "End of while loop for $workingThreads< ( $threadsAllowed - 1 )\n";
                     }
+                    undef $sentOff;
                 }
                 else
                 {
