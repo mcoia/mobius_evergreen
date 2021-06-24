@@ -367,15 +367,11 @@ package evergreenScraper;
                             {
                                 $chunkGoal-=100;
                             }
-                            if($chunkGoal<1)
-                            {
-                                $chunkGoal=200;
-                            }
+                            $chunkGoal=200 if($chunkGoal<1);
                             #print "Thread time: ".@lines[4]."\n";
-                            if(@lines[4] > 280)
-                            {
-                                $chunkGoal=200;
-                            }
+                            $chunkGoal=200 if(@lines[4] > 280);
+                            $chunkGoal=2000 if($chunkGoal > 2000); # keep it sane
+
                             $rps = $trps;
                             #print "Adjusted chunk to $chunkGoal\n";
                             push(@dumpedFiles,@lines[0]);
@@ -446,6 +442,7 @@ package evergreenScraper;
                             if((scalar @recovers) == 0)
                             {
                                 #print "Sending off for range....\n";
+                                $thisOffset = calcDBMinID($self,$thisOffset,$dbHandler,$tselects);
                                 $thisIncrement = $thisOffset + $range if (!$zeroAdded && $range > 0);
                                 $thisIncrement = calcDBRange($self,$thisOffset,$chunkGoal,$dbHandler,$tselects) if ($zeroAdded || $range == 0);
                                 #print "Got range: $thisIncrement\n";
@@ -593,11 +590,11 @@ package evergreenScraper;
         if($yeild<$chunkGoal)
         {
             $trys++;
-            if($trys>20)    #well, 100 * 10 and we didn't get 1000 rows returned, so we are stopping here.
+            if($trys > 5)   #so we are stopping here.
             {
                 $yeild=$chunkGoal;
             }
-            $thisIncrement+=$chunkGoal+($trys*$chunkGoal);
+            $thisIncrement+=$chunkGoal+($trys*$chunkGoal) if($trys < 5); # keep from ballooning
         }
     }
     my $secondsElapsed = calcTimeDiff($self,$previousTime);
@@ -605,6 +602,29 @@ package evergreenScraper;
 
     #print "ending rangefinding\n";
     return $thisIncrement;
+ }
+
+ sub calcDBMinID
+ {
+    my $self = @_[0];
+    my $thisOffset = @_[1];
+    my $dbHandler = @_[2];
+    my $countQ = @_[3];
+    my $previousTime=DateTime->now;
+    my $thisIncrement = $thisOffset;
+    $countQ =~s/\$recordSearch/MIN(ID)/gi;
+    my $min = 1;
+    my $selects = $countQ." AND ID >= $thisOffset";
+    my @results = @{$dbHandler->query($selects)};
+    foreach(@results)
+    {
+        my $row = $_;
+        my @row = @{$row};
+        $min = @row[0];
+    }
+    $min = $thisOffset + 1  if($min !=~ m/^[^\d]/); # Failsafe
+    my $secondsElapsed = calcTimeDiff($self,$previousTime);
+    return ($min--);
  }
 
  sub getRecordCount
