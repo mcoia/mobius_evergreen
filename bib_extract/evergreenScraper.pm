@@ -41,6 +41,8 @@ package evergreenScraper;
  use utf8;
  use Encode;
  use Time::HiRes;
+ 
+ our @allIDs = ();
 
  sub new
  {
@@ -93,7 +95,6 @@ package evergreenScraper;
         $self->{'title'} = $title;
     }
     $pidfile->addLine("starting up....");
-    #print "4: $t\n";
     if($t)
     {
         $self->{'type'}=$t;
@@ -104,11 +105,11 @@ package evergreenScraper;
     #print "Max calc: $max\n";
     if(($t) && ($t ne 'thread') && ($max > 5000))
     {
-        gatherDataFromDB_spinThread_Controller($self);
+        gatherDataFromDB_spinThread_Controller($self, $max);
     }
     elsif(($t) && ($t eq 'full'))
     {
-        gatherDataFromDB_spinThread_Controller($self);
+        gatherDataFromDB_spinThread_Controller($self, $max);
     }
     elsif(($t) && ($t eq 'thread'))
     {
@@ -150,6 +151,7 @@ package evergreenScraper;
     undef $pidReader;
     if(scalar @lines >1)
     {
+        # print "Thread $pidFile done!\n";
         return 1;
     }
     elsif(scalar @lines ==1)
@@ -162,6 +164,7 @@ package evergreenScraper;
         }
         else
         {
+            # print "Thread $pidFile done!\n";
             return 1;
         }
     }
@@ -199,14 +202,17 @@ package evergreenScraper;
  sub gatherDataFromDB_spinThread_Controller
  {
     my $self = @_[0];
+    my $max = @_[1];
+    my $title = $self->{'title'};
+    $title =~ s/[\s\t\\\/'"]/_/g;
     #This file is written to by each of the threads to debug the database ID's selected for each thread
-    my $rangeWriter = new Loghandler("/tmp/rangepid.pid");
+    my $rangeWriter = new Loghandler("/tmp/rangepid_$title.pid");
     $rangeWriter->deleteFile();
     my $dbUserMaxConnection=$self->{'maxdbconnection'};
     my $mobUtil = $self->{'mobiusutil'};
     my $dbHandler = $self->{'dbhandler'};
     my $log = $self->{'log'};
-    my $selects = $self->{'selects'};
+    my $tselects = $self->{'selects'};
     my $pidfile = $self->{'pidfile'};
     my $pathtothis = $self->{'pathtothis'};
     my $conffile = $self->{'conffile'};
@@ -215,41 +221,23 @@ package evergreenScraper;
     my @dbUsers = @{$mobUtil->makeArrayFromComma($conf{"dbuser"})};
     my %dbUserTrack = ();
     my @recovers;
-    my $i=0;
-    foreach(@dbUsers)
-    {
-        $dbUserTrack{$_}=0;
-        $i++;
-    }
+    my %deadRangeTrack = ();
+
+    $dbUserTrack{$_}=0 foreach(@dbUsers);
+
     $dbUserTrack{@dbUsers[0]}=1;
 
-    my @cha = split("",$selects);
-    my $tselects = "";
+    my $chunks = 0;
     my $zeroAdded = 0;
-    my $chunkGoal = 1900;
-    my $title = $self->{'title'};
+    my $chunkGoal = 100;
     my $masterfile = new Loghandler($mobUtil->chooseNewFileName('/tmp',"master_$title",'pid'));
     my $previousTime=DateTime->now;
-    foreach(@cha)
-    {
-        $tselects.=$_;
-    }
 
-    my $query = "SELECT MIN(ID) FROM BIBLIO.RECORD_ENTRY";
-    my @results = @{$dbHandler->query($query)};
+    getAllIDs($self, $dbHandler, $tselects);
+
     my $min = 0;
-    my $max = 1;
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        $min = @row[0];
-    }
-    $min--;
-    #print "Min: $min\n";
-    my $maxQuery = $tselects;
-    $maxQuery =~ s/\$recordSearch/COUNT(\*)/gi;
-    $max = findMaxRecordCount($self,$maxQuery);
+    my $offset = $min;
+    my $increment = $min+$chunkGoal;
 
     my @dumpedFiles = (0);
     my $finishedRecordCount=0;
@@ -260,9 +248,7 @@ package evergreenScraper;
     #print "$userCount users\n";
     my $threadsAllowed = $dbUserMaxConnection * (scalar @dbUsers);
     my $threadsAlive=1;
-    my $offset = $min;
-    my $increment = $min+$chunkGoal;
-    my $slowestQueryTime = 0;
+
     my $rps = 0;
     my $range=0;
     my $recordsCollectedTotalPerLoop=0;
@@ -273,132 +259,225 @@ package evergreenScraper;
         my $workingThreads=0;
         my @newThreads=();
         my $threadJustFinished=0;
-        my $reMaxed = 0;
         #print Dumper(\@threadTracker);
         #print "Looping through the threads\n";
         $recordsCollectedTotalPerLoop = $finishedRecordCount;
         foreach(@threadTracker)
         {
             #print "Checking to see if thread $_ is done\n";
-            my $done = threadDone($_);
-            if($done)
+            my @attr = @{$_};
+            my $thisPidfile = @attr[0];
+            my $thisOff = @attr[1];
+            my $thisInc = @attr[2];
+            my $checkcount = @attr[3];
+            @attr[3]++;
+            my $duser = @attr[4];
+            my $continueChecking=1;
+            # print "$thisPidfile $thisOff $thisInc: $checkcount\n";
+            #give thread time to get started and create pidfile (20 seconds)
+            if($checkcount > 10)
             {
-                #print "$_ Thread Finished.... Cleaning up\n";
-                $threadJustFinished=1;
-                my $pidReader = new Loghandler($_);
-                my @lines = @{ $pidReader->readFile() };
-                $pidReader->deleteFile();
-
-                undef $pidReader;
-                if(scalar @lines >6)
+                my $abandonThread=0;
+                my $splitChunk=0;
+                unless (-e $thisPidfile)
                 {
-                    @lines[0] =~ s/\n//; # Output marc file location
-                    @lines[1] =~ s/\n//; # Total Records Gathered
-                    @lines[2] =~ s/\n//; # $self->{'toobig'} = $extraInformationOutput;
-                    @lines[3] =~ s/\n//; # $self->{'toobigtocut'}
-                    @lines[4] =~ s/\n//; # Slowest Query Time
-                    @lines[5] =~ s/\n//; # Chunk Size
-                    @lines[6] =~ s/\n//; # DB Username
-                    @lines[7] =~ s/\n//; # Execute Time in Seconds
-                    my $dbuser = @lines[6];
-                    if(@lines[8])
+                    $abandonThread=1;
+                }
+                if((-e $thisPidfile) && ($checkcount>100))
+                {
+                    $abandonThread=1;
+                    $splitChunk=1;
+                }
+                if($abandonThread)
+                {
+                    my $deadName = "$thisOff,$thisInc";
+                    if(!$deadRangeTrack{$deadName})
                     {
-                        @lines[8] =~ s/\n//;
+                        $deadRangeTrack{$deadName} = 0;
                     }
-                    if(scalar @lines >8 && @lines[8]==1)
-                    {
-                        #print "************************ RECOVERING ************************\n";
+                    $deadRangeTrack{$deadName}++;
 
-                        #print "This thread died, going to restart it\n";
-                        #This thread failed, we are going to try again (this is usually due to a database connection)
-                        @lines[9] =~ s/\n//;
-                        @lines[10] =~ s/\n//;
-                        #print Dumper(\@lines);
-                        my $off = @lines[9];
-                        my $inc = @lines[10];
-                        my @add = ($off,$inc);
-                        push(@recovers,[@add]);
-                        if($dbUserTrack{$dbuser})
+                    if($deadRangeTrack{$deadName} > 10)
+                    {
+                        $splitChunk = 1;  # I think 10 tries is enough for this range, time to divide into more pieces
+                    }
+                    undef $deadName;
+                    # Split the chunk because it too so long for it to finish
+                    if($splitChunk)
+                    {
+                        if($deadRangeTrack{$deadName} < 30)
                         {
-                            $dbUserTrack{$dbuser}--;
+                            print "##########\nI've tried this range: $deadName\nToo many times, we're splitting up\n##########\n";
+                            @recovers = @{splitThread($self, \@recovers, $thisInc, $thisOff, $thisPidfile)};
                         }
-                        my $check = new Loghandler(@lines[0]);
-                        if($check->fileExists())
-                        {
-                            #print "Deleting @lines[0]\n";
-                            $check->deleteFile();
-                        }
-                        #print "Done recovering\n";
                     }
                     else
                     {
-                        #print "Completed thread success, now cleaning\n";
-                        if(@lines[1] == 0)
+                        my @add = ($thisOff,$thisInc);
+                        push(@recovers,[@add]);
+                        undef @add;
+                    }
+                    if($dbUserTrack{$duser})
+                    {
+                        $dbUserTrack{$duser}--;
+                    }
+                    $threadJustFinished=1;
+                    $continueChecking=0;
+                }
+            }
+
+            if($continueChecking)
+            {
+                my $done = threadDone($thisPidfile);
+                if($done)
+                {
+                    #print "$thisPidfile Thread Finished.... Cleaning up\n";
+                    $threadJustFinished=1;
+                    my $pidReader = new Loghandler($thisPidfile);
+                    my @lines = @{ $pidReader->readFile() };
+                    $pidReader->deleteFile();
+
+                    undef $pidReader;
+                    if(scalar @lines >6)
+                    {
+                        @lines[0] =~ s/\n//; # Output marc file location
+                        @lines[1] =~ s/\n//; # Total Records Gathered
+                        @lines[2] =~ s/\n//; # $self->{'toobig'} = $extraInformationOutput;
+                        @lines[3] =~ s/\n//; # $self->{'toobigtocut'}
+                        @lines[4] =~ s/\n//; # Slowest Query Time
+                        @lines[5] =~ s/\n//; # Chunk Size
+                        @lines[6] =~ s/\n//; # DB Username
+                        @lines[7] =~ s/\n//; # Execute Time in Seconds
+                        my $dbuser = @lines[6];
+                        if(@lines[8])
                         {
-                            $zeroAdded++;
-                            if( !$reMaxed && ($zeroAdded > ($threadsAllowed*2)) )
+                            @lines[8] =~ s/\n//;
+                        }
+                        if(scalar @lines >8 && @lines[8]==1)
+                        {
+                            #print "************************ RECOVERING ************************\n";
+
+                            #print "This thread died, going to restart it\n";
+                            #This thread failed, we are going to try again (this is usually due to a database connection)
+                            @lines[9] =~ s/\n//;
+                            @lines[10] =~ s/\n//;
+                            #print Dumper(\@lines);
+                            my $off = @lines[9];
+                            my $inc = @lines[10];
+                            my $deadName = "$off,$inc";
+                            if(!$deadRangeTrack{$deadName})
                             {
-                                $max = findMaxRecordCount($self,$maxQuery);
-                                $reMaxed = 1;
+                                $deadRangeTrack{$deadName} = 0;
                             }
-                            print "Got 0 records $zeroAdded times\n";
-                            if($zeroAdded>100) #we have looped 100 times with not a single record added to the collection. Time to quit.
+                            $deadRangeTrack{$deadName}++;
+
+                            if($deadRangeTrack{$deadName} > 10)
                             {
-                                $finishedRecordCount = $max;
+                                if($deadRangeTrack{$deadName} < 30) # We gotta stop trying this or we'll be here all day
+                                {
+                                    print "##########\nI've tried this range: $deadName\nToo many times, we're splitting up\n##########\n";
+                                    @recovers = @{splitThread($self, \@recovers, $inc, $off, $thisPidfile)};
+                                }
                             }
+                            else
+                            {   
+                                my @add = ($off,$inc);
+                                push(@recovers,[@add]);
+                            }
+                            undef $deadName;
+
+                            if($dbUserTrack{$dbuser})
+                            {
+                                $dbUserTrack{$dbuser}--;
+                            }
+                            my $check = new Loghandler(@lines[0]);
+                            if($check->fileExists())
+                            {
+                                #print "Deleting @lines[0]\n";
+                                $check->deleteFile();
+                            }
+                            #print "Done recovering\n";
                         }
                         else
                         {
-                            $zeroAdded=0;
-                        }
+                            #print "Completed thread success, now cleaning\n";
+                            if(@lines[1] == 0)
+                            {
+                                $zeroAdded++;
+                                $max = findMaxRecordCount($self,$tselects) if $zeroAdded > 100; # maybe our original maximum has changed during runtime
+                                print "Got 0 records $zeroAdded times\n";
+                                if($zeroAdded>1200) #we have looped 2400 times (20 minutes) and not a single record added to the collection. Time to quit.
+                                {
+                                    $finishedRecordCount = $max;
+                                }
+                            }
+                            else
+                            {
+                                $zeroAdded=0;
+                            }
 
-                        $dbUserTrack{$dbuser}--;
-                        if(@lines[1] !=0)
-                        {
-                            $self->{'toobig'}.=@lines[2];
-                            $self->{'toobigtocut'}.=@lines[3];
-                            if(@lines[7]<1)
+                            $dbUserTrack{$dbuser}--;
+                            if(@lines[1] !=0)
                             {
-                                @lines[7]=1;
+                                $self->{'toobig'}.=@lines[2];
+                                $self->{'toobigtocut'}.=@lines[3];
+                                if(@lines[7]<1)
+                                {
+                                    @lines[7]=1;
+                                }
+                                my $trps = @lines[1] / @lines[7];
+                                #print "Performed math\n";
+                                if($rps < $trps-1)
+                                {
+                                    $chunkGoal+=100;
+                                }
+                                elsif($rps > $trps+3)
+                                {
+                                    $chunkGoal-=100;
+                                }
+                                if($chunkGoal<1)
+                                {
+                                    $chunkGoal=200;
+                                }
+                                #print "Thread time: ".@lines[4]."\n";
+                                if(@lines[4] > 280)
+                                {
+                                    $chunkGoal=200;
+                                }
+                                $rps = $trps;
+                                $rps =~ s/^([^\.]*\.?\d{3}?).*/$1/g;
+                                $rps += 0; # back to numeric
+                                #print "Adjusted chunk to $chunkGoal\n";
+                                push(@dumpedFiles,@lines[0]);
+                                #print "Added dump files to array\n";
+                                $finishedRecordCount += @lines[1];
+                                #print "Added dump count to total\n";
+                                #print Dumper(\@dumpedFiles);
                             }
-                            my $trps = @lines[1] / @lines[7];
-                            #print "Performed math\n";
-                            if($rps < $trps-1)
-                            {
-                                $chunkGoal+=100;
-                            }
-                            elsif($rps > $trps+3)
-                            {
-                                $chunkGoal-=100;
-                            }
-                            $chunkGoal=200 if($chunkGoal<1);
-                            #print "Thread time: ".@lines[4]."\n";
-                            $chunkGoal=200 if(@lines[4] > 280);
-                            $chunkGoal=2000 if($chunkGoal > 2000); # keep it sane
-
-                            $rps = $trps;
-                            #print "Adjusted chunk to $chunkGoal\n";
-                            push(@dumpedFiles,@lines[0]);
-                            #print "Added dump files to array\n";
-                            $finishedRecordCount += @lines[1];
-                            #print "Added dump count to total\n";
-                            #print Dumper(\@dumpedFiles);
                         }
                     }
+                    else
+                    {
+                        print "For some reason the thread PID file did not output the expected stuff\n";
+                    }
+                    #print "Looping back through the rest of running threads\n";
+                    undef @lines;
                 }
                 else
                 {
-                    print "For some reason the thread PID file did not output the expected stuff\n";
+                    #print "Thread not finished, adding it to \"running\"\n";
+                    $workingThreads++;
+                    push(@newThreads,[@attr]);
                 }
-                #print "Looping back through the rest of running threads\n";
+                undef $done;
             }
-            else
-            {
-                #print "Thread not finished, adding it to \"running\"\n";
-                $workingThreads++;
-                push(@newThreads,$_);
-            }
-            undef $reMaxed;
+            undef @attr;
+            undef $thisPidfile;
+            undef $thisOff;
+            undef $thisInc;
+            undef $checkcount;
+            undef $duser;
+            undef $continueChecking;
         }
         @threadTracker=@newThreads;
         #print "$workingThreads / $threadsAllowed Threads\n";
@@ -422,8 +501,7 @@ package evergreenScraper;
                 if($finishedRecordCount<$max)
                 {
                     my $loops=0;
-                    my $sentOff = 0;
-                    while ($workingThreads<($threadsAllowed-1))#&& ($finishedRecordCount+($loops*$chunkGoal)<$max))
+                    while ($loops<($threadsAllowed-1))
                     {
                         $loops++;
                         my $thisOffset = $offset;
@@ -439,7 +517,6 @@ package evergreenScraper;
                             {
                                 $keepsearching=0;
                                 $dbuser=$internal;
-                                $dbUserTrack{$dbuser}++;
                                 #print "$dbuser: $value\n";
                             }
                         }
@@ -447,23 +524,16 @@ package evergreenScraper;
                         {
                             if((scalar @recovers) == 0)
                             {
-                                # this can be slow, so we want to limit the number of times this kicks off
-                                if( !$sentOff && ( ($range == 0) || ($zeroAdded > $threadsAllowed)) )
-                                {
-                                    # print "range: $range\nsentOff: $sentOff\nzeroAdded: $zeroAdded\nthreadsAllowed: $threadsAllowed\n";
-                                    $thisOffset = calcDBMinID($self,$thisOffset,$dbHandler,$tselects);
-                                    $thisIncrement = calcDBRange($self,$thisOffset,$chunkGoal,$dbHandler,$tselects);
-                                    #print "Got range: $thisIncrement\n";
-                                    $sentOff = 1;
-                                }
-                                else
-                                {
-                                    $thisIncrement = $thisOffset + $range;
-                                }
+                                # print "Sending off for range min: $thisOffset\n";
+                                my @ranges = @{calcDBRange($self,$chunkGoal)};
+                                $thisOffset = @ranges[0];
+                                # print "got min: $thisOffset\n";
+                                $thisIncrement = @ranges[1];
+                                # print "Got range: $thisIncrement\n";
                             }
                             else
                             {
-                                print "There are some threads that died, so we are using those ranges for new threads\n";
+                                print "Processing re-dos: $#recovers\n";
                                 $choseRecover=1;
                                 $thisOffset = @{@recovers[0]}[0];
                                 $thisIncrement = @{@recovers[0]}[1];
@@ -474,30 +544,40 @@ package evergreenScraper;
                                 }
                                 shift(@recovers);
                             }
-                            $range=$thisIncrement-$thisOffset;
-                            #print "Starting new thread\n";
-                            #print "Max: $max   From: $thisOffset To: $thisIncrement\n";
-                            my $thisPid = $mobUtil->chooseNewFileName("/tmp",$pidFileNameStart,"evergreenpid");
-                            my $ty = $self->{'type'};
-                            #print "Spawning: $pathtothis $conffile thread $thisOffset $thisIncrement $thisPid $dbuser $ty\n";
-                            system("$pathtothis $conffile thread $thisOffset $thisIncrement $thisPid $dbuser $ty &");
-                            push(@threadTracker,$thisPid);
-                            #print "Just pushed thread onto stack\n";
-                            $pidFileNameStart++;
-                            if(!$choseRecover)
+                            if($thisOffset && $thisIncrement) # make sure we're not at the end of the ID array
                             {
-                                $offset=$thisIncrement;
-                                $increment=$thisIncrement;
+                                $range=$thisIncrement-$thisOffset;
+                                #print "Starting new thread\n";
+                                #print "Max: $max   From: $thisOffset To: $thisIncrement\n";
+                                my $thisPid = $mobUtil->chooseNewFileName("/tmp",$pidFileNameStart,"evergreenpid");
+                                my $ty = $self->{'type'};
+                                # print "Spwaning: $thisPid\n";
+                                #print "Spawning: $pathtothis $conffile thread $thisOffset $thisIncrement $thisPid $dbuser $ty\n";
+                                system("$pathtothis $conffile thread $thisOffset $thisIncrement $thisPid $dbuser $ty &");
+                                $dbUserTrack{$dbuser}++;
+                                my @ran = ($thisPid,$thisOffset,$thisIncrement,0,$dbuser);
+                                push(@threadTracker,[@ran]);
+                                #print "Just pushed thread onto stack\n";
+                                $pidFileNameStart++;
+                                if(!$choseRecover)
+                                {
+                                    $offset=$thisIncrement;
+                                    $increment=$thisIncrement;
+                                }
+                                $workingThreads++;
                             }
                         }
                         else
                         {
                             #print "Could not find an available db user - going to have to wait\n";
                         }
-                        $workingThreads++;
                         #print "End of while loop for $workingThreads< ( $threadsAllowed - 1 )\n";
+                        undef $thisOffset;
+                        undef $thisIncrement;
+                        undef $choseRecover;
+                        undef $dbuser;
+                        undef $keepsearching;
                     }
-                    undef $sentOff;
                 }
                 else
                 {
@@ -519,13 +599,16 @@ package evergreenScraper;
         my $secondsElapsed = calcTimeDiff($self,$previousTime);
         my $minutesElapsed = $secondsElapsed / 60;
         my $overAllRPS = $finishedRecordCount / $secondsElapsed;
+        $overAllRPS =~ s/^([^\.]*\.?\d{3}?).*/$1/g;
+        $minutesElapsed =~ s/^([^\.]*\.\d{3}).*/$1/g;
         my $devideTemp = $overAllRPS;
         if($devideTemp<1)
         {
             $devideTemp=1;
         }
-
+        $devideTemp =~ s/^([^\.]*\.?\d{3}?).*/$1/g;
         my $remaining = ($max - $finishedRecordCount) / $devideTemp / 60;
+        $remaining =~ s/^([^\.]*\.?\d{3}?).*/$1/g;
         $self->{'rps'}=$overAllRPS;
         $masterfile->truncFile($pidfile->getFileName);
         $masterfile->addLine("$rps records/s Per Thread\n$overAllRPS records/s Average\nChunking: $chunkGoal\nRange: $range\n$remaining minutes remaining\n$minutesElapsed minute(s) elapsed\n");
@@ -549,13 +632,8 @@ package evergreenScraper;
  sub findMaxRecordCount
  {
     my $self = @_[0];
-    my $mm = @_[1];
-    my @cha = split("",$mm);
-    my $maxQuery;
-    foreach(@cha)
-    {
-        $maxQuery.=$_;
-    }
+    my $maxQuery = @_[1];
+
     $maxQuery =~ s/\$recordSearch/COUNT(\*)/gi;
 
     my $dbHandler = $self->{'dbhandler'};
@@ -570,76 +648,99 @@ package evergreenScraper;
     #print "max: $max\n";
     return $max;
  }
-
- sub calcDBRange
+ 
+ sub splitThread
  {
-    #print "starting rangefinding\n";
     my $self = @_[0];
-    my $previousTime=DateTime->now;
-    my $thisOffset = @_[1];
-    my $chunkGoal = @_[2];
-    my $dbHandler = @_[3];
-    my $countQ = @_[4];
-    my $thisIncrement = $thisOffset;
-
-    $countQ =~s/\$recordSearch/COUNT(\*)/gi;
-    my $yeild=0;
-    if($chunkGoal<1)
+    my @recovers = @{@_[1]};
+    my $thisInc = @_[2];
+    my $thisOff = @_[3];
+    my $thisPidfile = @_[4];
+    print "Splitting Chunk $thisOff - $thisInc \n";
+    my $dif = $thisInc - $thisOff;
+    if($dif > 1) # for those peski records that will not parse out of the database, we'll just have to leave them behind
     {
-        $chunkGoal=1;
-    }
-    $thisIncrement+=$chunkGoal;
-    my $trys = 0;
-    while($yeild<$chunkGoal)  ## Figure out how many rows to read into the database to get the goal number of records
-    {
-        my $selects = $countQ." AND ID > $thisOffset AND ID <= $thisIncrement";
-        #print "$selects\n";
-        my @results = @{$dbHandler->query($selects)};
-        foreach(@results)
+        if($dif > 500)
         {
-            my $row = $_;
-            my @row = @{$row};
-            $yeild = @row[0];
+            print "dif: $dif\n";
+            my $newd = int($dif/2) + $thisOff;
+            print "newd: $newd\n";
+            my @add = ($thisOff,$newd);
+            print "add: $thisOff , $newd\n";
+            push(@recovers,[@add]);
+            $newd++;
+            my @add = ($newd,$thisInc);
+            print "add: $newd , $thisInc\n";
+            push(@recovers,[@add]);
+            undef @add;
         }
-        #print "Yeild: $yeild\n";
-        if($yeild<$chunkGoal)
+        else # a small chunk, we can make singles out of, to narrow the focus a bit qucker
         {
-            $trys++;
-            if($trys > 5)   #so we are stopping here.
+            my $v = $thisOff;
+            while($v < ($thisInc + 1))
             {
-                $yeild=$chunkGoal;
+                my $s = $v - 1;
+                my @add = ($s,$v);
+                print "add: $s , $v\n";
+                push(@recovers,[@add]);
+                $v++;
+                undef @add;
             }
-            $thisIncrement+=$chunkGoal+($trys*$chunkGoal) if($trys < 5); # keep from ballooning
         }
+        my @fil = split('/',$thisPidfile);
+        my $kill = @fil[$#fil];
+        print "kill \$(ps aux | grep '$kill' | grep -v 'grep' | awk '{print \$2}')\n";
+        system("kill \$(ps aux | grep '$kill' | grep -v 'grep' | awk '{print \$2}')");
+        unlink $thisPidfile;
     }
-    my $secondsElapsed = calcTimeDiff($self,$previousTime);
-    #print "Range Finding: $secondsElapsed after $trys trys\n";
-
-    #print "ending rangefinding\n";
-    return $thisIncrement;
+    else
+    {
+        my @add = ($thisOff,$thisInc);
+        push(@recovers, [@add]);
+        undef @add;
+    }
+    return \@recovers;
  }
-
- sub calcDBMinID
+ 
+ sub getAllIDs
  {
     my $self = @_[0];
-    my $thisOffset = @_[1];
-    my $dbHandler = @_[2];
-    my $countQ = @_[3];
-    my $previousTime=DateTime->now;
-    my $thisIncrement = $thisOffset;
-    $countQ =~s/\$recordSearch/MIN(ID)/gi;
-    my $min = 1;
-    my $selects = $countQ." AND ID >= $thisOffset";
+    my $dbHandler = @_[1];
+    my $selects = @_[2];
+    @allIDs = ();
+    $selects =~ s/\$recordSearch/ID/gi;
+    $selects .= " AND ID > 0 ORDER BY 1";
     my @results = @{$dbHandler->query($selects)};
     foreach(@results)
     {
         my $row = $_;
         my @row = @{$row};
-        $min = @row[0];
+        push @allIDs, @row[0];
     }
-    $min = $thisOffset + 1  if($min !=~ m/^[^\d]/); # Failsafe
-    my $secondsElapsed = calcTimeDiff($self,$previousTime);
-    return ($min--);
+    undef @results;
+    print $#allIDs . " ID's remaining\n";
+ }
+
+ sub calcDBRange
+ {
+    #print "starting rangefinding\n";
+    my $self = @_[0];
+    my $chunkGoal = @_[1];
+    $chunkGoal = $#allIDs if($chunkGoal > $#allIDs);
+    my $endingID = @allIDs[$chunkGoal];
+    my $startingID = @allIDs[0];
+    $startingID--; #Because the query logic uses greater than >
+    my $done = 0;
+    while(!$done)
+    {
+        $done=1 if(@allIDs[0] == $endingID);
+        shift @allIDs;
+    }
+
+    print $#allIDs . " ID's remaining\n" if $#allIDs > -1;
+    print "We've reached the end of the ID's for collection, waiting for the spawns to finish\n" if $#allIDs == -1;
+    my @ret = ($startingID, $endingID);
+    return \@ret;
  }
 
  sub getRecordCount
@@ -887,15 +988,23 @@ package evergreenScraper;
     my $previousTime = @_[1];
     my $currentTime=DateTime->now;
     my $difference = $currentTime - $previousTime;#
-    my $format = DateTime::Format::Duration->new(pattern => '%M');
+    my $format = DateTime::Format::Duration->new(pattern => '%D');
+    my $days = $format->format_duration($difference);
+    $format = DateTime::Format::Duration->new(pattern => '%M');
     my $minutes = $format->format_duration($difference);
     $format = DateTime::Format::Duration->new(pattern => '%S');
     my $seconds = $format->format_duration($difference);
-    my $duration = ($minutes * 60) + $seconds;
+    my $duration = ($days * 86400) + ($minutes * 60) + $seconds;
     if($duration<.1)
     {
         $duration=.1;
     }
+    $duration += ''; # Making it a string
+    if($duration !=~ m/\./) # putting a decimal point if none exists
+    {
+        $duration .= ".000";
+    }
+    $duration =~ s/^([^\.]*\.\d{3}).*/$1/g;
     return $duration;
  }
 

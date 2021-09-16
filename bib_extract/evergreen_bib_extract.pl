@@ -25,6 +25,7 @@
  use MARC::Batch;
  use File::stat;
 
+
    #If you have weird control fields...
 
     # use MARC::Field;
@@ -55,7 +56,6 @@
     if ($conf{"logfile"})
     {
         $log = new Loghandler($conf->{"logfile"});
-        $log->addLogLine(" ---------------- Script Starting ---------------- ");
         my @reqs = ("dbhost","db","dbuser","dbpass","port","fileprefix","marcoutdir","school","alwaysemail","fromemail","queryfile","platform","pathtothis","maxdbconnections");
         my $valid = 1;
         for my $i (0..$#reqs)
@@ -82,6 +82,7 @@
                 {
                     thread(\%conf);
                 }
+                $log->addLogLine(" ---------------- Script Starting ---------------- ");
                 my $platform = $conf{"platform"};#ebsco or summon
                 my $fileNamePrefix = $conf{"fileprefix"}."_cancels_";
                 if(defined($type))
@@ -234,7 +235,7 @@
                                         {
                                             $log->addLine($marcfile);
                                             my $file = MARC::File::USMARC->in( $marcfile );
-                                            my $r =0;
+                                            my $r = 0;
                                             while ( my $marc = $file->next() )
                                             {
                                                 $r++;
@@ -246,21 +247,26 @@
                                             $check->deleteFile();
                                         }
                                         my @back = @{processMARC(\@marc,$platform,$type,$school,$marcout,$log)};
-                                        $extraInformationOutput.=@back[0];
+                                        $extraInformationOutput.=@back[0]."," if (length(@back[0]) > 0);
                                         $barcodes.=@back[1];
                                         $couldNotBeCut.=@back[2];
                                         #print "Adding ".@back[3];
                                         $recCount+=@back[3];
                                     }
+                                    $extraInformationOutput =~ s/,$//;
                                 }
 
 
                                 if(length($extraInformationOutput)>0)
                                 {
+                                    $log->addLogLine("These records were TRUNCATED due to the 100000 size limits:");
+                                    $log->addLogLine($extraInformationOutput);
                                     $extraInformationOutput="These records were TRUNCATED due to the 100000 size limits: $extraInformationOutput \r\n\r\n";
                                 }
                                 if(length($couldNotBeCut)>0)
                                 {
+                                    $log->addLogLine("Records that could not be written due to MARC size limitation:");
+                                    $log->addLogLine($couldNotBeCut);
                                     $couldNotBeCut="These records were OMITTED due to the 100000 size limits: $couldNotBeCut \r\n\r\n";
                                 }
                                 my @tolist = ($conf{"alwaysemail"});
@@ -446,12 +452,12 @@
         {
             $marc = @count[0];
             print "Extrainformation adding: ".$marc->subfield('901',"a");
-            $extraInformationOutput.=$marc->subfield('901',"a");
+            $extraInformationOutput.=$marc->subfield('901',"a").",";
             print "Now it's\n $extraInformationOutput";
         }
         elsif(@count[1]==0)
         {
-            $addThisone=0;
+            $couldNotBeCut.=$marc->subfield('901',"a").",";
         }
 
         if($addThisone) #ISO2709 MARC record is limited to 99,999 octets
@@ -469,11 +475,8 @@
             #print "Done appending master marc file\n";
             $recCount++;
         }
-        else
-        {
-            $couldNotBeCut.=$marc->subfield('901',"a");
-        }
     }
+    $extraInformationOutput = substr($extraInformationOutput,0,-1);
     my @ret=($extraInformationOutput,$barcodes,$couldNotBeCut,$recCount);
     return \@ret;
  }
@@ -482,7 +485,6 @@
  {
     my %conf = %{@_[0]};
     my $previousTime=DateTime->now;
-    my $rangeWriter = new Loghandler("/tmp/rangepid.pid");
     my $mobUtil = new Mobiusutil();
     my $offset = @ARGV[2];
     my $increment = @ARGV[3];
@@ -491,7 +493,6 @@
     my $dbuser = @ARGV[5];
     my $typ = @ARGV[6];
     #print "Type = $typ\n";
-    $rangeWriter->addLine("$offset $increment");
     #print "$pid: $offset - $increment $dbuser\n";
     my $dbpass = "";
     my @dbUsers = @{$mobUtil->makeArrayFromComma($conf{"dbuser"})};
@@ -512,6 +513,10 @@
     my $school = $conf{"school"};
     my $type = @ARGV[1];
     my $platform = $conf{"platform"};
+    my $title = $conf{"school"};
+    $title =~ s/[\s\t\\\/'"]/_/g;
+    my $rangeWriter = new Loghandler("/tmp/rangepid_$title.pid");
+    $rangeWriter->addLine("$offset $increment");
     my $dbHandler;
     eval{$dbHandler = new DBhandler($conf{"db"},$conf{"dbhost"},$dbuser,$dbpass,$conf{"port"});};
 
@@ -567,8 +572,9 @@
                 $file->close();
                 undef $file;
                 #Just checking for errors - temporary file created and deleted
+                my $randNum=int(rand(100000));
 
-                my $marcout = new Loghandler('/tmp/t.mrc');
+                my $marcout = new Loghandler('/tmp/t_'.$randNum.'.mrc');
                 #print "processing\n";
                 my @back = @{processMARC(\@marc,$platform,$type,$school,$marcout,$log)};
                 $finishedprocessing=1;
@@ -577,7 +583,7 @@
 
             if($@ && $finishedprocessing==0)
             {
-            print "fail\n";
+                print "fail, don't worry, we're going to try again\n";
                 $check->deleteFile();
                 $pidWriter->truncFile("none\nnone\nnone\nnone\nnone\nnone\n$dbuser\nnone\n1\n$offset\n$increment");
                 $rangeWriter->addLine("$offset $increment BAD OUTPUT".$check->getFileName()."\t".$@);
