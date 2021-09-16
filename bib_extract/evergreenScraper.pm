@@ -668,7 +668,6 @@ package evergreenScraper;
             my @add = ($thisOff,$newd);
             print "add: $thisOff , $newd\n";
             push(@recovers,[@add]);
-            $newd++;
             my @add = ($newd,$thisInc);
             print "add: $newd , $thisInc\n";
             push(@recovers,[@add]);
