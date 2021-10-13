@@ -26,27 +26,30 @@ use Getopt::Long;
 
 my $configFile = @ARGV[0];
 my $xmlconf = "/openils/conf/opensrf.xml";
-our $dryrun=0;
-our $debug=0;
-our $reportonly=0;
-our $runCleamMetarecords=0;
-our $runElectronic=0;
-our $runAudioBook=0;
-our $runVideo=0;
-our $runLargePrint=0;
-our $runMusic=0;
-our $runMoveElectronicBooks=0;
-our $runMoveElectronicAudioBooks=0;
-our $runMoveAudioBooks=0;
-our $runDedupe=0;
-our $runDedupeSample;
-our $runFindElectronic856TOC=0;
-our $resyncTattle=0;
-our $reIndexTattle=0;
-our $doNotRunFullReEval=0;
 
+our $dryrun                                 = 0;
+our $debug                                  = 0;
+our $reportonly                             = 0;
+our $runCleamMetarecords                    = 0;
+our $runElectronic                          = 0;
+our $runAudioBook                           = 0;
+our $runVideo                               = 0;
+our $runLargePrint                          = 0;
+our $runMusic                               = 0;
+our $runMoveElectronicBooks                 = 0;
+our $runMoveElectronicAudioBooks            = 0;
+our $runMoveAudioBooks                      = 0;
+our $runDedupe                              = 0;
+our $runFindElectronic856TOC                = 0;
+our $resyncTattle                           = 0;
+our $reIndexTattle                          = 0;
+our $reCreateDBSchema                       = 0;
+our $doNotRunFullReEval                     = 0;
+our $resetScores                            = 0;
+our $skipReports                            = 0;
+
+our $runDedupeSample;
 our %tattleSystemDone = ();
-our $resetScores=0;
 
 my $help = "
 You can specify
@@ -79,6 +82,8 @@ You can specify
 --reportonly flag                             [Skip everything and only run a report - Reports are always run at the end]
 --resyncTattle flag                           [Cause the software to re-import the Tattle queries from query file]
 --reIndexTattle flag                          [Cause the software to re-create the index.html file at the root of the catreports folder]
+--reCreateDBSchema flag                       [Careful! This will drop the schema and create it again]
+--skipReports flag                            [Skip reports (always executed last)]
 
 **** IMPORTANT SETTING ****
 --doNotRunFullReEval flag                     [This will cause the software to execute the bib conversion based on previously collected scores]
@@ -109,6 +114,8 @@ GetOptions (
 "reportonly" => \$reportonly,
 "resyncTattle" => \$resyncTattle,
 "reIndexTattle" => \$reIndexTattle,
+"reCreateDBSchema" => \$reCreateDBSchema,
+"skipReports" => \$skipReports,
 "debug" => \$debug
 )
 or die("Error in command line arguments $help");
@@ -369,19 +376,22 @@ sub reportResults
     my @reportBlurbs = ();
     my @attachments = ();
 
-    my $jobSummaryReports = jobSummaryReports();
-    if($jobSummaryReports)
+    if(!$skipReports)
     {
-        my %t = %{$jobSummaryReports};
-        push(@reportBlurbs, @{ $t{"reportBlurbs"} }) if $t{"reportBlurbs"};
-        push(@attachments, @{ $t{"attachments"} }) if $t{"attachments"};
-    }
-    my $tattleTaleReports = tattleTaleReports();
-    if($tattleTaleReports)
-    {
-        my %t = %{$tattleTaleReports};
-        push(@reportBlurbs, @{ $t{"reportBlurbs"} }) if $t{"reportBlurbs"};
-        push(@attachments, @{ $t{"attachments"} }) if $t{"attachments"};
+        my $jobSummaryReports = jobSummaryReports();
+        if($jobSummaryReports)
+        {
+            my %t = %{$jobSummaryReports};
+            push(@reportBlurbs, @{ $t{"reportBlurbs"} }) if $t{"reportBlurbs"};
+            push(@attachments, @{ $t{"attachments"} }) if $t{"attachments"};
+        }
+        my $tattleTaleReports = tattleTaleReports();
+        if($tattleTaleReports)
+        {
+            my %t = %{$tattleTaleReports};
+            push(@reportBlurbs, @{ $t{"reportBlurbs"} }) if $t{"reportBlurbs"};
+            push(@attachments, @{ $t{"attachments"} }) if $t{"attachments"};
+        }
     }
 
 
@@ -502,7 +512,7 @@ sub writeTattleHTML
     $htmlHeader .= "</tr></thead>\n";
 
     my %reports = %{reportSplitIntoGroups(\@results, $systemColNum)};
-    $log->addLine(Dumper(\%reports));
+    $log->addLine(Dumper(\%reports)) if $debug;
     while ((my $system, my $rowss) = each(%reports))
     {
         my $shortOUName = getShortOU($system);
@@ -553,6 +563,12 @@ sub getTattleJSMagic
         {
            var dt = $(this).DataTable();
            dt.on("draw",SetUpIgnore);
+            var title = $(this).parent().parent().prev(".report-title").html();
+            $(this).parent().parent().append(create_csv_download_link(title, $(this).attr(\'id\'))).promise().done(
+                function()
+                {
+                    wire_download();
+                });
         });
         SetUpIgnore();
     });
@@ -649,10 +665,75 @@ sub getTattleJSMagic
         return ret;
 
     }
+    function create_csv_download_link(title, table_dom)
+    {
+        var ret = "<div class = \'csv_download_link\' table_dom = \'"+table_dom+"\' title = \'"+title+"\'>" +
+        "<div class = \'download-icon glyphicon glyphicon-download\'></div>"+
+        "Download Spreadsheet</div>";
+        return ret;
+    }
+
+    function wire_download()
+    {
+        jQuery(".csv_download_link").each(function(){
+            jQuery(this).unbind("click");
+            jQuery(this).click(
+            function()
+            {
+                var table_dom  = "#" + jQuery(this).attr(\'table_dom\');
+                var title = jQuery(this).attr(\'title\');
+                if(jQuery(table_dom).length > 0)
+                {
+                    var filestream = \'\';
+                    var table = new jQuery.fn.dataTable.Api( table_dom );
+
+                    // Get header (this will include hidden columns)
+                    table.columns().every(function()
+                    {
+                        var colheader = jQuery(this.header()).html();
+                        var colheader = colheader.replace(/^(.*?)(<.*?[^>]*?>)([^<]*)(.*)/,\'$1 $3\').trim();
+                        filestream += colheader + ",";
+                    });
+
+                    filestream = filestream.substring(0, filestream.length - 1);
+                    filestream += \'\n\';
+                    var data = table.data().toArray();
+
+                    data.forEach(function(row, i)
+                    {
+                        row.forEach(function(column, j)
+                        {
+                            while(column.match(/<[Aa]/))
+                            {
+                                // Scrub out any HTML wrappers in the data
+                                column = column.replace(/^(.*?)(<.*?[^>]*?>)([^<]*)(.*)/,\'$1 $3\').trim();
+                            }
+                            if(!column.match(/ignore/)) // remove ignore column
+                            {
+                                filestream += \'"\' + column + \'",\';
+                            }
+                        });
+                        filestream = filestream.substring(0, filestream.length - 1);
+                        filestream += \'\n\';
+                    });
+                    var e = document.createElement(\'a\');
+                    e.setAttribute(\'href\',\'data:text/csv;charset=utf-8,\' + encodeURIComponent(filestream));
+                    e.setAttribute(\'download\', title+".csv");
+                    e.style.display = \'none\';
+                    document.body.appendChild(e);
+                    e.click();
+                    document.body.removeChild(e);
+                }
+                else
+                {
+                    alert("Sorry, nothing to download");
+                }
+            });
+        });
+    }
     </script>
 
     ';
-
     return $ret;
 }
 
@@ -3053,7 +3134,7 @@ sub findPossibleDups
             select sd_alt_fingerprint||opac_icon \"idp\",count(*)
             from
             seekdestroy.bib_score sbs
-            join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted and bre2.id > -1)
+            join biblio.record_entry bre on (bre.id=sbs.record and not bre.deleted and bre.id > -1)
             where
             length(btrim(regexp_replace(regexp_replace(sbs.sd_fingerprint,\$\$\\t\$\$,\$\$\$\$,\$\$g\$\$),\$\$\\s\$\$,\$\$\$\$,\$\$g\$\$)))>5
             group by sd_alt_fingerprint||opac_icon having count(*) > 1
@@ -5551,7 +5632,7 @@ sub marc_isvalid {
 sub setupSchema
 {
     my $query = "DROP SCHEMA seekdestroy CASCADE";
-    #$dbHandler->update($query);
+    $dbHandler->update($query) if($reCreateDBSchema);
     my $query = "SELECT schema_name FROM information_schema.schemata WHERE schema_name = 'seekdestroy'";
     my @results = @{$dbHandler->query($query)};
     if($#results==-1)
