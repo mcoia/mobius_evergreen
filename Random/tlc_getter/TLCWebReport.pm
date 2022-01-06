@@ -55,7 +55,7 @@ sub scrape
     if($error)
     {
         $self->takeScreenShot('failed_to_get_to_report_page');
-        $self->giveUp($mobUtil, "Died on '".$self->{name}."' on branch '".getNextBranch($self,1)."'");
+        $self->giveUp("Died on '".$self->{name}."' on branch '".getNextBranch($self,1)."'");
     }
     # while(1)
     # {
@@ -107,7 +107,7 @@ sub runReport
     if(!$running && !$isDone)
     {
         $self->takeScreenShot('report_failed_to_start');
-        $self->giveUp($mobUtil, "Failed to get the report started\nSee screenshot for details");
+        $self->giveUp("Failed to get the report started\nSee screenshot for details");
     }
     my $waiting = 0;
     while(!$isDone)
@@ -570,14 +570,14 @@ sub fillThisSelect
         {
             if($attempts{$domName} > $attemptMax)
             {
-                $self->giveUp($mobUtil, "Exceeded $attemptMax attempts on '$domName'");
+                $self->giveUp("Exceeded $attemptMax attempts on '$domName'");
             }
         }
     }
     else
     {
         $self->takeScreenShot('failed_selects');
-        $self->giveUp($mobUtil, "We've encountered a dropdown list that is not defined:\n'$domName', screenshot: failed_selects");
+        $self->giveUp("We've encountered a dropdown list that is not defined:\n'$domName', screenshot: failed_selects");
     }
     return $worked;
 }
@@ -749,6 +749,7 @@ sub processDownloadedFile
     $outputFile->deleteFile() if $trunc;
     my $outputText = "";
     print $mobUtil->boxText("Loading '$file'","#","|",1);
+
     open(my $fh,"<:encoding(UTF-16)",$file) || die "error $!\n";
     while(<$fh>)
     {
@@ -760,15 +761,16 @@ sub processDownloadedFile
     $outputText = substr($outputText,0,-1); # remove the last return
     print $mobUtil->boxText("Cleaning line Spans '$file'","#","|",1);
     $outputText = cleanLineSpans($self, $outputText);
+    # print "back from cleaning\n";
     if(!$outputText)
     {
-        $self->giveUp($mobUtil, "There was a problem parsing and cleaning line spans '".$file."'");
+        $self->giveUp("There was a problem parsing and cleaning line spans '".$file."'");
     }
     print $mobUtil->boxText("Removing columns from '$file'","#","|",1);
     $outputText = removeColumns($self, $outputText);
     if(!$outputText)
     {
-        $self->giveUp($mobUtil, "There was a problem parsing and removing columns from '".$file."'");
+        $self->giveUp("There was a problem parsing and removing columns from '".$file."'");
     }
 
     my $lineCount = 0;
@@ -811,6 +813,8 @@ sub cleanLineSpans
     while($i <= $#lines)
     {
         my @thisLine = @{readFullLine($self, \@lines, $i, $delimiter, $headerCount)};
+        # print "LINE:\n";
+        # print Dumper(\@thisLine);
         $i = @thisLine[1];
         if(@thisLine[0])
         {
@@ -823,6 +827,7 @@ sub cleanLineSpans
             return 0;
         }
         $i++;
+        # exit if $i > 6;
     }
     $finalout = "$header\n" . substr($finalout,0,-1);
     # $self->{log}->addLine($finalout);
@@ -856,19 +861,33 @@ sub readFullLine
     my $headerCount = shift;
     my @ret;
     my @lines = @{$tlines};
+    # print Dumper($tlines);
     my $line = readLineCorrectly($self, @lines[$i], $delimiter);
     my @datas = split(/$delimiter/,$line);
-    while( ($headerCount > $#datas) && (@lines[$i++]) )
+    # print "First read through:\n" . Dumper($line);
+    # print "Headercount = $headerCount\nDatacolumns: ".$#datas."\n";
+    $i++;
+    while( ($headerCount > $#datas) && ($i < $#lines + 1) )
     {
-        # print "looping through more lines to get more columns\n";
-        $line = readLineCorrectly($self, @lines[$i], $delimiter, isLastElementComplete($self, $line, $delimiter));
+        print "looping through more lines to get more columns\n";
+        my $lookingForTerminator = !isLastElementComplete($self, @datas[$#datas], $delimiter);
+        print "We are looking for terminator\n" if($lookingForTerminator);
+        
+        $line = readLineCorrectly($self, @lines[$i], $delimiter, $lookingForTerminator);
         my @tdatas = split(/$delimiter/,$line);
+        @datas[$#datas] .= shift @tdatas if($lookingForTerminator);
         foreach(@tdatas)
         {
             push (@datas, $mobUtil->trim($_));
         }
+        # print "Final line so far:\n";
+        # print Dumper(\@datas);
+        # print "Headercount = $headerCount\nDatacolumns: ".$#datas."\n";
+        # my $temp = $i + 1;
+        # print "Next line: '" . @lines[$temp] . "'\n";
         if( ($i == $#lines) && ($headerCount > $#datas) ) ## Second to last line of the file, TLC likes to trim the last null columns on the last line
         {
+            # print "We are on the second to last line of the file\n";
             if(length($mobUtil->trim(@lines[$i])) == 0 ) # pad the last line with blank delimiters until we've reached a complete line
             {
                  while($headerCount > $#datas)
@@ -877,9 +896,13 @@ sub readFullLine
                  }
             }
         }
+        $i++;
+        undef $lookingForTerminator;
     }
+    $i--;
     if ( ($headerCount + 1 == $#datas) && (length($mobUtil->trim(@datas[$#datas])) == 0) ) #handles the case when TLC puts blank columns on the end
     {
+        # print "Popping last element from the line\n";
         pop @datas;
     }
     if($headerCount == $#datas)
@@ -891,7 +914,7 @@ sub readFullLine
         }
         $retString = substr($retString, 0, -1);
         # Make sure the last element of the last line is finished
-        while(!isLastElementComplete($self,$retString,$delimiter, isLastElementComplete($self, $retString, $delimiter)))
+        while(!isLastElementComplete($self,$retString,$delimiter))
         {
             if($#lines > $i)
             {
@@ -925,35 +948,26 @@ sub readLineCorrectly
     my $lookingForTerminator = shift || 0;
     my $ret = "";
     # can't use split because it ignores zero length fields, so we do it by hand
-    my @info = @{getDelimitedLine($self,$line,$delimiter)};
+    my @info = @{getDelimitedLine($self,$line,$delimiter,$lookingForTerminator)};
+
     # print "Starting with looking = $lookingForTerminator\n";
+    # print Dumper(\@info);
     foreach(@info)
     {
-        $ret .= ' ' if($lookingForTerminator);
+        # $ret .= ' ' if($lookingForTerminator);
         my $elem = $_;
-        my @chars = split(//,$_);
-        if(!$lookingForTerminator)
-        {
-            if(@chars[0] && @chars[0] eq '"' && @chars[$#chars] ne '"')
-            {
-                $lookingForTerminator = 1;
-            }
-        }
-        else
-        {
-            if(@chars[$#chars] && @chars[$#chars] ne '"')
-            {
-                $lookingForTerminator = 0;
-            }
-        }
+        $lookingForTerminator = !isLastElementComplete($self, ($lookingForTerminator ? '#' : '' ) . $elem, $delimiter);
         $ret .= $elem;
         if(!$lookingForTerminator)
         {
+            # print "Added delimiter after '$elem'\n";
             $ret .= $delimiter;
         }
     }
     $ret = substr($ret,0,-1) if(substr($ret,0,-1) eq $delimiter);
+    # my @prin = split(/$delimiter/,$ret);
     # print "looking = $lookingForTerminator\nreturning\n'$ret'\n";
+    # print Dumper(\@prin);
     return $ret;
 }
 
@@ -962,6 +976,7 @@ sub getDelimitedLine
     my ($self) = shift;
     my $line = shift;
     my $delimiter = shift;
+    my $middleOfField = shift || 0;
     # my @ret = split(/$delimiter/,$line,-1);  # This doesn't work because these files (sometimes) will put another delimiter at the end of each line
     # print Dumper(\@ret);
     # exit;
@@ -969,17 +984,30 @@ sub getDelimitedLine
     my @info = ();
     my @each = split(//,$line);
     my $ret = "";
+    
     foreach(@each)
     {
-        if($_ eq $delimiter)
+        if( ($_ eq $delimiter) && !$middleOfField)
         {
             $ret = " " if(length($ret) == 0); #pad space for empty columns so we can use split function later
+            # print "Pushing '$ret'\n";
             push(@info, $ret);
             $ret = "";
         }
         else
         {
-            $ret .= $_;
+            if( $_ eq '"' ) # this field is qoute wrapped
+            {
+                $middleOfField = !$middleOfField;
+            }
+            if( ($_ eq $delimiter) && $middleOfField)
+            {
+                $ret .= ''; #don't introduce the delimiter in the middle of the data. Removing those for our purposes.
+            }
+            else
+            {
+                $ret .= $_;
+            }
         }
     }
     $ret = " " if(length($ret) == 0); #pad space for empty columns so we can use split function later

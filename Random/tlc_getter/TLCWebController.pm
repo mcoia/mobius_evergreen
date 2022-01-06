@@ -311,11 +311,13 @@ sub takeScreenShot
 sub giveUp
 {
     my ($self) = shift;
-    $mobUtil = shift;
-    $error = shift || 0;
+    my $mobUtil = new Mobiusutil();
+    my $error = shift || 0;
     $error = "HEY, This report: ". $self->{name}. " didn't work out. Press enter to confirm and I'll move on" if !$error;
     $self->{error} = $error;
     $mobUtil->boxText($error,"-","|",5);
+    undef $mobUtil;
+    print "Press enter to continue\n";
     my $name = <STDIN>;
     die;
 }
