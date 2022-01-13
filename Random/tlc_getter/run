@@ -32,6 +32,9 @@ rm screenshots/*
 
 ./tlc_report_getter.pl --config tlc_report_getter.conf --log getter.log
 
+# Manually running a CSV example
+# ./tlc_report_getter.pl --config tlc_report_getter.conf --log getter.log --manual_process_fileconfig report_3 --processfile "/path/tlc_getter/downloads/test.csv"
+
 # Make sure all the leftover stuff isn't running
 #ps -ef | grep firefox | grep -v grep | awk '{print $2}' | xargs sudo kill -9
 #ps -ef | grep Xvfb | grep -v grep | awk '{print $2}' | xargs sudo kill -9

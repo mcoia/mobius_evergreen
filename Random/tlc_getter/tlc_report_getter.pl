@@ -37,16 +37,22 @@ our $log;
 our $debug = 0;
 our %conf;
 our $branches;
+our $processfile;
+our $fileconfig;
 
 GetOptions (
 "log=s" => \$log,
 "opensrfconf=s" => \$xmlconf,
 "config=s" => \$configFile,
+"processfile=s" => \$processfile,
+"manual_process_fileconfig=s" => \$fileconfig,
 )
 or die("Error in command line arguments\nYou can specify
 --log path_to_log_output.log                  [Path to the log output file - required]
 --opensrfconf /openils/conf/opensrf.xml       [Path to the Evergreen Config file (used to get DB access, defaults to /openils/conf/opensrf.xml ]
 --config path_to_config.conf                  [Path to this script's config, required]
+--processfile path_to_raw_csv_from_TLC        [Path to the TLC downloaded report]
+--manual_process_fileconfig name_of_config_report_match      [When specifying a manually downloaded file, you need to provide the configuration map that it belongs to, AKA 'report_3']
 \n");
 
 
@@ -126,7 +132,14 @@ while($finished < $reportCount)
         local $@;
         eval
         {
-            $rep->scrape();
+            if(!$fileconfig)
+            {
+                $rep->scrape();
+            }
+            elsif($fileconfig && $processfile)
+            {
+                $rep->processDownloadedFile($processfile, 1);
+            }
             $props{"file"} = $rep->getResultFile();
         };
         if( $@ )
@@ -140,8 +153,9 @@ while($finished < $reportCount)
         else
         {
             $props{"error"} = $rep->getError();
-            
         }
+        
+       
         $finished++;
         $reports{$reportNum} = \%props;
         undef $rep;
@@ -369,7 +383,16 @@ sub figureReportConfigs
             my $thisNum = $key;
             $thisNum =~ s/[^_]*_([^_]*)_.*/$1/g;
             # print $thisNum ."\n";
-            if( ($key eq 'report_'.$thisNum.'_tlcname') && (%conf{'report_'.$thisNum.'_migname'}) )
+            my $process = 0;
+            if(!$processfile) #if bash arguments specified a specific file to process, then we only want the matching report config, otherwise, we do them all
+            {
+                $process = 1 if( ($key eq 'report_'.$thisNum.'_tlcname') && (%conf{'report_'.$thisNum.'_migname'}) );
+            }
+            else
+            {
+                $process = 1 if( ($key eq $fileconfig.'_tlcname') && (%conf{$fileconfig.'_migname'}) );
+            }
+            if( $process )
             {
                 my %repProp = ();
                 foreach(@reportTypes)
