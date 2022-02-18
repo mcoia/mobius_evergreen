@@ -41,7 +41,7 @@ package evergreenScraper;
  use utf8;
  use Encode;
  use Time::HiRes;
- 
+
  our @allIDs = ();
 
  sub new
@@ -380,7 +380,7 @@ package evergreenScraper;
                                 }
                             }
                             else
-                            {   
+                            {
                                 my @add = ($off,$inc);
                                 push(@recovers,[@add]);
                             }
@@ -648,7 +648,7 @@ package evergreenScraper;
     #print "max: $max\n";
     return $max;
  }
- 
+
  sub splitThread
  {
     my $self = @_[0];
@@ -700,7 +700,7 @@ package evergreenScraper;
     }
     return \@recovers;
  }
- 
+
  sub getAllIDs
  {
     my $self = @_[0];
