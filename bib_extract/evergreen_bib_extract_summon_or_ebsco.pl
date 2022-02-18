@@ -180,7 +180,7 @@
                             my $marcOutFile = $outputMarcFile;
                             my $evergreenScraper;
                             $valid=1;
-							my $selectQuery = $mobUtil->findQuery($dbHandler,$school,$platform,$type,$queries,@ARGV[2]);
+                            my $selectQuery = $mobUtil->findQuery($dbHandler,$school,$platform,$type,$queries,@ARGV[2]);
                             #print "Query: $selectQuery\n";
                             #print "Path: $pathtothis\n";
                             my $gatherTime = DateTime->now();
