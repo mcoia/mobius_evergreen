@@ -2481,6 +2481,12 @@ sub findRecord
         biblio.record_entry bre
         where
         bre.id=" . $marcsearch->subfield('901',"c");
+        my $fetch = getMatchingMARC($query, 'sha1');
+        if(ref $fetch eq 'ARRAY')
+        {
+            $none = 0;
+            @ret = @{dedupeMatchArray(\@ret, $fetch)};
+        }
     }
     else
     {
@@ -2500,7 +2506,8 @@ sub findRecord
             bre.id=ebs.bib and
             ebs.$shacol = \$sha\$@shas[$i]\$sha\$ and
             ebs.bib_source=$bibsourceid and
-            not bre.deleted
+            not bre.deleted and
+            bre.id > -1
             ";
 
             $query.="
@@ -2511,6 +2518,7 @@ sub findRecord
             biblio.record_entry bre left join e_bib_import.bib_sha1 ebs on(ebs.bib=bre.id)
             where
             not bre.deleted and
+            bre.id > -1 and
             bre.source=$bibsourceid and
             bre.tcn_source~\$sha\$@shas[$i]\$sha\$ and
             ebs.bib is null
@@ -2768,7 +2776,7 @@ sub doMARCEdit
         while($pos < $howmany)
         {
             my $thisField = @field[$pos];
-            
+
             if($thisField->subfield(@def[1]))
             {
                 $thisField->delete_subfield(code => @def[1]);
