@@ -2363,36 +2363,44 @@ sub chooseWinnerAndDeleteRest
         undef $score;
         undef $marcxml;
     }
-    $finalMARC = @{@list[$chosenWinner]}[1];
-    $i=0;
-    #
-    # This loop is merging all of the existing bibs in the database into the winning bib ID (in the database)
-    # And before it merges them, it soaks up the 856's from the about-to-be deleted bib into $finalMARC
-    #
-    foreach(@list)
-    {
-        my @attrs = @{$_};
-        my $id = @attrs[0];
-        my $marc = @attrs[1];
-        my $marcxml = @attrs[3];
-        if($i!=$chosenWinner)
-        {
-            $finalMARC = mergeMARC856($finalMARC, $marc);
-            mergeBIBs($id, $winnerBibID, $overdriveMatchString, $statusID);
-        }
-        $i++;
-        undef @attrs;
-        undef $id;
-        undef $marc;
-        undef $marcxml;
-    }
-    # Marc manipulations need to be ran upon the target bib in the DB as well.
-    $finalMARC = readyMARCForInsertIntoDB($finalMARC);
 
-    # here we prefer the incoming file MARC as "the" marc, but we need the gathered 856's.
-    # which is why it's passed as the second argument
-    # At this point, the 9's have been added to the newMarc (data from e_bib_import)
-    $finalMARC = mergeMARC856($newMarc, $finalMARC);
+    if($conf{'import_as_is'})
+    {
+        $finalMARC = $newMarc;
+    }
+    else
+    {
+        $finalMARC = @{@list[$chosenWinner]}[1];
+        $i=0;
+        #
+        # This loop is merging all of the existing bibs in the database into the winning bib ID (in the database)
+        # And before it merges them, it soaks up the 856's from the about-to-be deleted bib into $finalMARC
+        #
+        foreach(@list)
+        {
+            my @attrs = @{$_};
+            my $id = @attrs[0];
+            my $marc = @attrs[1];
+            my $marcxml = @attrs[3];
+            if($i!=$chosenWinner)
+            {
+                $finalMARC = mergeMARC856($finalMARC, $marc);
+                mergeBIBs($id, $winnerBibID, $overdriveMatchString, $statusID);
+            }
+            $i++;
+            undef @attrs;
+            undef $id;
+            undef $marc;
+            undef $marcxml;
+        }
+        # Marc manipulations need to be ran upon the target bib in the DB as well.
+        $finalMARC = readyMARCForInsertIntoDB($finalMARC);
+
+        # here we prefer the incoming file MARC as "the" marc, but we need the gathered 856's.
+        # which is why it's passed as the second argument
+        # At this point, the 9's have been added to the newMarc (data from e_bib_import)
+        $finalMARC = mergeMARC856($newMarc, $finalMARC);
+    }
 
     my $newmarcforrecord = convertMARCtoXML($finalMARC);
     print "Headed into recordBIBMARCChanges\n" if $debug;
@@ -2923,8 +2931,6 @@ sub mergeMARC856
     my $marc = @_[0];
     my $marc2 = @_[1];
 
-    # no melting, just overlay when import as is
-    return $marc2 if ($conf{'import_as_is'});
     my @eight56s = $marc->field("856");
     my @eight56s_2 = $marc2->field("856");
     my @eights;
