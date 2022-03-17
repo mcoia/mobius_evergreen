@@ -2343,7 +2343,7 @@ sub chooseWinnerAndDeleteRest
     my $winnerBibID;
     my $winnerOGMARCxml;
     my $matchnum = $#list+1;
-    my $overdriveMatchString = $newMarc->field('001')->data();
+    my $overdriveMatchString = $newMarc->field('001') ? $newMarc->field('001')->data() : '';
     foreach(@list)
     {
         my @attrs = @{$_};
@@ -2551,22 +2551,30 @@ sub findRecord
         $count++;
     }
 
-    if($searchDeepMatch)  ## This matches other bibs based upon the vendor's 001 which is usually moved to the 035, hence MARC ~
+
+    if($zero01)
     {
-        $foundIDs = substr($foundIDs,0,-1);
-        if(length($foundIDs)<1)
+        # fail safe, so that we don't match a huge number of marc records based upon a super tiny 001
+        # We are requiring at least 6 non-whitespace characters to appear in the 001 for matching
+        my $z01Check = $zero01;
+        $z01Check =~ s/[\s\t]//g;
+        if($searchDeepMatch && length($z01Check) > 5)  ## This matches other bibs based upon the vendor's 001 which is usually moved to the 035, hence MARC ~
         {
-            $foundIDs="-1";
-        }
-        my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
-        my $fetch = getMatchingMARC($query, '001');
-        if(ref $fetch eq 'ARRAY')
-        {
-            $none = 0;
-            my $c = $#ret;
-            @ret = @{dedupeMatchArray(\@ret, $fetch)};
-            $c = $#ret - $c;
-            $count += $c;
+            $foundIDs = substr($foundIDs,0,-1);
+            if(length($foundIDs)<1)
+            {
+                $foundIDs="-1";
+            }
+            my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE MARC ~ \$\$$zero01\$\$ and ID not in($foundIDs) and deleted is false ";
+            my $fetch = getMatchingMARC($query, '001');
+            if(ref $fetch eq 'ARRAY')
+            {
+                $none = 0;
+                my $c = $#ret;
+                @ret = @{dedupeMatchArray(\@ret, $fetch)};
+                $c = $#ret - $c;
+                $count += $c;
+            }
         }
     }
 
@@ -2765,12 +2773,16 @@ sub doMARCEdit
             my $ind2Def = shift @splits;
             my $subfieldDef = shift @splits;
             my @f = @{findMatchingFields($marc, $fieldDef, $ind1Def, $ind2Def, $subfieldDef)};
-            my $pos = 0;
-            $howmany = $#f + 1 if($howmany eq 'all');
-            while($pos < $howmany)
+
+            if($#f > -1) # without this, perl adds $#f + 1, it resolves to "1" when $#f = -1
             {
-                $marc->delete_field(@f[$pos]);
-                $pos++;
+                my $pos = 0;
+                $howmany = $#f + 1 if($howmany eq 'all');
+                while($pos < $howmany)
+                {
+                    $marc->delete_field(@f[$pos]);
+                    $pos++;
+                }
             }
         }
     }
