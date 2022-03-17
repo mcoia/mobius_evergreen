@@ -1110,6 +1110,7 @@ sub getmarcFromFTP
                     mode => 0755,
                     });
                 }
+                $log->addLogLine("Downloading $filename to $archivefolder/$filename");
                 my $worked = $ftp->get($filename,"$archivefolder/$filename");
                 if($worked)
                 {
@@ -1118,8 +1119,8 @@ sub getmarcFromFTP
             }
         }
     }
-    $ftp->quit
-    or die $log->addLogLine("Unable to close FTP connection");
+    $log->addLogLine("Closing FTP connection");
+    $ftp->quit;
     $log->addLogLine("**********FTP session closed ***************");
     $log->addLine(Dumper(\@ret));
     return \@ret;
