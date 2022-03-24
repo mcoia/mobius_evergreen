@@ -635,7 +635,7 @@ sub prepFiles
         my $thisfilename = lc($files[$b]);
         my $filenameForDB = $files[$b];
         updateJob("Processing","Parsing: $archivefolder/".$files[$b]);
-        if(! ( ($thisfilename =~ m/csv/) || ($thisfilename =~ m/tsv/) ) )
+        if(! ( ($thisfilename =~ m/\.csv/) || ($thisfilename =~ m/\.tsv/) ) )
         {
             my @fsp = split('\.',$thisfilename);
             my $fExtension = pop @fsp;
@@ -645,47 +645,62 @@ sub prepFiles
             $file = MARC::File::XML->in("$archivefolder/".$files[$b]) if $fExtension =~ m/xml/;
             my $isRemoval = compareStringToArray($thisfilename,$conf{'removalfiles'});
             my $isAuthority = compareStringToArray($thisfilename,$conf{'authorityfiles'});
-            while ( my $marc = $file->next() )
+            my $endOfFile = 0;
+            while(!$endOfFile)
             {
-                $dbInserts.="(";
-                $marc = add9($marc) if ( !$isRemoval && !$conf{'import_as_is'} );
-                my $importType = "importbib";
-                $importType = "removal" if $isRemoval;
-                $importType = "importauth" if $isAuthority;
-                my $z01 = getsubfield($marc,'001','');
-                my $t = getsubfield($marc,'245','a');
-                my $sha1 = calcSHA1($marc);
-                $sha1 .= ' '.calcSHA1($marc, 1); # append the baby SHA
-                my $thisXML = convertMARCtoXML($marc);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$filenameForDB);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$importBIBTagNameDB);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$z01);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$t);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$sha1);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$importType);
-                $dbInserts.="\$$dbValPos,";
-                $dbValPos++;
-                push(@vals,$thisXML);
-                $dbInserts.="\$$dbValPos";
-                $dbValPos++;
-                push(@vals,$jobid);
-                $dbInserts.="),\n";
-                $rowCount++;
-                ($dbInserts, $dbValPos, @vals) = dumpRowsIfFull($insertTop, $dbInserts, $dbValPos, \@vals);
-                $ret = 1;
-                last if $isAuthority; # Authority loads via external script and just needs the file name
+                local $@;
+                eval  # sometimes $file->next() wlil bomb. We need to skip a bad record
+                {
+                    while ( my $marc = $file->next() )
+                    {
+                        $dbInserts.="(";
+                        $marc = add9($marc) if ( !$isRemoval && !$conf{'import_as_is'} );
+                        my $importType = "importbib";
+                        $importType = "removal" if $isRemoval;
+                        $importType = "importauth" if $isAuthority;
+                        my $z01 = getsubfield($marc,'001','');
+                        my $t = getsubfield($marc,'245','a');
+                        my $sha1 = calcSHA1($marc);
+                        $sha1 .= ' '.calcSHA1($marc, 1); # append the baby SHA
+                        my $thisXML = convertMARCtoXML($marc);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$filenameForDB);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$importBIBTagNameDB);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$z01);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$t);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$sha1);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$importType);
+                        $dbInserts.="\$$dbValPos,";
+                        $dbValPos++;
+                        push(@vals,$thisXML);
+                        $dbInserts.="\$$dbValPos";
+                        $dbValPos++;
+                        push(@vals,$jobid);
+                        $dbInserts.="),\n";
+                        $rowCount++;
+                        ($dbInserts, $dbValPos, @vals) = dumpRowsIfFull($insertTop, $dbInserts, $dbValPos, \@vals);
+                        $ret = 1;
+                        last if $isAuthority; # Authority loads via external script and just needs the file name
+                    }
+                    $endOfFile = 1;
+                    1;
+                } or do
+                {
+                    $rowCount++;
+                    $log->addLine("$thisfilename:BAD RECORD $rowCount");
+                    print "$thisfilename:BAD RECORD $rowCount\n" if $debug;
+                };
             }
             $file->close();
             undef $file;
@@ -782,7 +797,9 @@ sub dumpRowsIfFull
         }
         updateJob("Processing","Dumping memory to DB $count $readyForStatusUpdate");
         $log->addLine("Final insert statement:\n$dbInserts") if $debug;
+        print "Dropping off in DB\n" if $debug;
         $dbHandler->updateWithParameters($dbInserts,\@vals);
+        print "Just got back from insert\n" if $debug;
         undef $dbInserts;
         my $dbInserts = $insertTop;
         undef @vals;
