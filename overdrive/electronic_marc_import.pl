@@ -649,7 +649,7 @@ sub prepFiles
             while(!$endOfFile)
             {
                 local $@;
-                eval  # sometimes $file->next() wlil bomb. We need to skip a bad record
+                eval  # sometimes $file->next() will bomb. We need to skip a bad record
                 {
                     while ( my $marc = $file->next() )
                     {
