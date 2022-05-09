@@ -1,0 +1,14 @@
+SITE CODE: SITECODE
+PRODUCT SELECTION LEVEL: SKYRIVER
+PRODUCT SELECTION LEVEL 2: IP Change/Access
+
+Please route this ticket to SkyRiver Support.
+
+New IPs to add for SkyRiver (Z39.50 access):
+!!!newIPs
+
+Old IPs to remove for SkyRiver (z39.50 access):
+!!!oldIPs
+
+Here is the complete list of active IPs:
+!!!completeIPs

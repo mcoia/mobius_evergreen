@@ -1,0 +1,68 @@
+= GCP Kubectl IP Collector
+
+This is a quick perl script that you can run on your GCP instance.
+
+This code expects that the OS user executing the code aleady has:
+
+. gcloud SDK installed
+. gcloud kubectl installed
+. kubectl authenticated with your GCP project.
+
+== INSTALLING gcloud SDK
+
+https://cloud.google.com/sdk/docs/install
+
+[source,bash]
+----
+sudo apt-get install apt-transport-https ca-certificates gnupg
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+sudo apt-get update && sudo apt-get install google-cloud-cli
+sudo apt-get install google-cloud-kubectl
+----
+
+
+== Authenticating with your gcloud project
+gcloud config set compute/zone us-east4-b
+gcloud config set project PROJECTID
+gcloud auth login
+
+
+=== kubectl setup
+
+[source,bash]
+----
+gcloud container --account GCPACCOUNT --project PROJECTID
+gcloud container clusters get-credentials CLUSTERNAME --zone us-east4-b --project PROJECTID
+----
+
+
+=== Test to see if your all set:
+
+[source,bash]
+----
+kubectl get svc
+----
+
+You should get the IP address of your cluster. Hopefully, no errors
+
+This project uses this command to discover the IP's of the active nodes:
+
+[source,bash]
+----
+kubectl describe node|grep ExternalIP|awk '{print \$2}'| uniq | sort
+----
+
+You can run that manually to see what the code will receive
+
+
+== Config file
+
+. Be sure and provide a path to a writable file where this code can stash the previously-discovered IP's.
+. The body of the email with three variables: 
+
+!!!newIPs (replaced with a list of IP's that have been added since last run)
+
+!!!oldIPs (replaced with a list of IP's that have been removed since last run)
+
+!!!completeIPs (replaced with the complete list of active IP's presently)
