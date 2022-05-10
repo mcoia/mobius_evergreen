@@ -46,6 +46,11 @@ if($conf)
         my @newIPs = @{ getCurrentIPs() };
         if(validateIPs(\@newIPs))
         {
+            if ($#oldIPs < 0) # catch the scenario where this script is run for the first time, and there is no history
+            {
+                recordIPs(\@newIPs, $conf->{"previous_ip_file"});
+                exit;
+            }
             my %diff = %{compareOldToNew(\@oldIPs, \@newIPs)};
             print Dumper(\%diff);
             my @new = @{$diff{'new'}};
@@ -164,7 +169,6 @@ sub compareOldToNew
     my @new = ();
     my %newMatches = ();
     my %ret = ();
-    return 0 if($#oldIPs != $#newIPs);
     foreach(@oldIPs)
     {
         my $thisOldIP = $_;
@@ -202,10 +206,11 @@ sub readOldIPFile
     if( -e $file)
     {
         my $oldfile = new Loghandler($file);
-        @ret = @{$oldfile->readFile()};
-        for my $i(0..$#ret) # the file can have extra line endings that wind up in the data
+        my @read = @{$oldfile->readFile()};
+        for my $i(0..$#read) # the file can have extra line endings that wind up in the data
         {
-            @ret[$i] = trim(@ret[$i]);
+            @read[$i] = trim(@read[$i]);
+            push @ret, @read[$i] if length(@read[$i]) > 7;
         }
         $log->addLogLine($_) foreach(@ret);
     }
