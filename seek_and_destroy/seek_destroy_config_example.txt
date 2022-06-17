@@ -27,6 +27,15 @@ dedupe_match_all_isbns = no
 # Anything other than "yes" is considered false
 dedupe_merge_isbns_to_lead = yes
 
+# This setting will cause the dedupe routine to not* automatically merge two bibs that have OCLC numbers on each but don't match
+# If one bib has an OCLC number and the other one doesn't: merge
+# If neither have OCLC numbers: merge
+# If both have OCLC numbers and they are the same: merge
+# If both have OCLC numbers but they are diffrent: DONT MERGE
+# This setting is only for the last case. Default is merge in the last case
+# Anything other than "yes" is considered false
+dedupe_check_oclc_on_both_bibs = yes
+
 tempdir = /path/to/tmp
 erroremaillist = example@example.org
 successemaillist = example@example.org, example2@example.org

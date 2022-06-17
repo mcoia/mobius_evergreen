@@ -3393,7 +3393,7 @@ sub additionalDedupeValidator
         push (@isbnMatches, [@isbns]) if $#isbns > -1; # at least one isbn, otherwise we don't add it to the array
     }
     return '1' if($#isbnMatches == -1);  # if neither record has an 020, then I guess we're a match.
-    return "no ISBNs in common" if($#isbnMatches < 1); # if one record has some 020s, the other one is required to have some too :)
+    return "1" if($#isbnMatches < 1); # if only one record has 020s then it's a match
     my $isbnMatch = 0;
     foreach( @{@isbnMatches[0]} )
     {
@@ -3408,6 +3408,46 @@ sub additionalDedupeValidator
     }
 
     return "no ISBNs in common" if(!$isbnMatch);
+
+    if( lc($conf{"dedupe_check_oclc_on_both_bibs"}) eq 'yes')
+    {
+        my @oclcMatches = ();
+        my $query = "select marc from biblio.record_entry where id in ($leadbib,$subbib)";
+        my @results = @{$dbHandler->query($query)};
+        foreach(@results)
+        {
+            my $row = $_;
+            my @row = @{$row};
+            my $marc = @row[0];
+            $marc =~ s/(<leader>.........)./${1}a/;
+            $marc = MARC::Record->new_from_xml($marc);
+            my %l035 = %{getOCLCFrom035($marc, 1)};
+            my @oclc = ();
+            while ((my $subfield, my $value ) = each(%l035))
+            {
+                foreach(@{$value})
+                {
+                    push @oclc, $_;
+                }
+            }
+            push (@oclcMatches, [@oclc]) if $#oclc > -1;
+        }
+        return '1' if($#oclcMatches < 1);  # if neither record has an OCLC, then I guess we're a match.
+        my $OCLCMatch = 0;
+        foreach( @{@oclcMatches[0]} )
+        {
+            last if $OCLCMatch;
+            my $outter = $_;
+            foreach( @{@oclcMatches[1]} )
+            {
+                $OCLCMatch = 1 if($outter eq $_);
+                last if $OCLCMatch;
+            }
+            undef $outter;
+        }
+        return "Mismatching OCLC numbers" if(!$OCLCMatch);
+    }
+
     return '1';
 }
 
@@ -5177,6 +5217,7 @@ sub mergeMARC035
 sub getOCLCFrom035
 {
     my $marc = shift;
+    my $digitsOnly = shift;
     my @l035s = $marc->field("035");
     my @subfield_list = ('a','z');
     my %ret = ();
@@ -5190,9 +5231,11 @@ sub getOCLCFrom035
             my @subs = $thisField->subfield($thisSubfield);
             foreach(@subs)
             {
-                if($_ =~ m/OCo{0,1}LC.*?\d+/)
+                if($_ =~ m/[Oo][Cc][Oo]{0,1}[Ll][Cc].*?\d+/)
                 {
-                    $temp{$_} = 1;
+                    my $v = $_;
+                    $v =~ s/^.*?(\d+).*$/\1/ if($digitsOnly);
+                    $temp{$v} = 1;
                 }
             }
             while ((my $internal, my $mvalue ) = each(%temp))
