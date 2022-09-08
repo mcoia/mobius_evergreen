@@ -112,8 +112,8 @@ VALUES ('starting','Starting up...');
 SELECT mymig.monograph_part_update_current_job('truncating mymig.monograph_part_conversion_manual');
 TRUNCATE mymig.monograph_part_conversion_manual;
 
-SELECT mymig.monograph_part_update_current_job('Reading file /mnt/evergreen/tmp/monograph_part_manual.csv');
-\COPY mymig.monograph_part_conversion_manual(original_label,new_label) FROM /mnt/evergreen/tmp/monograph_part_manual.csv
+-- SELECT mymig.monograph_part_update_current_job('Reading file /mnt/evergreen/tmp/monograph_part_manual.csv');
+-- \COPY mymig.monograph_part_conversion_manual(original_label,new_label) FROM /mnt/evergreen/tmp/monograph_part_manual.csv
 
 -- Clean it up
 SELECT mymig.monograph_part_update_current_job('Trimming white space from mymig.monograph_part_conversion_manual');
@@ -715,7 +715,7 @@ biblio.monograph_part
 where 
 label !~*'v\.'
 and
-label !~*'supp?l?\.'
+label !~*'supp?l?'
 and
 label !~*'pt\.'
 and
@@ -2060,8 +2060,7 @@ union all
 -- "10 1977 Aug."
 select
 label,regexp_replace(label,'^\s?\(?(\d{1,3})[\\/\s\:]+(\d{4})[\.\\/\-\s]*([^\d\.]*)[\s\.\-]?','Vol. \1, \2:\3','gi')
-, '
-, '' as res_query' as res_query
+, '10 1977 Aug.' as res_query
 from 
 biblio.monograph_part
 where 
@@ -2564,18 +2563,19 @@ mmpcm.record = bmp.record AND
 mmpcm.new_label = bmp.label;
 
 -- delete unused labels when we can
-select mymig.monograph_part_update_current_job('Deleting old/unused bmp labels where we can');
-UPDATE
-biblio.monograph_part bmp_outter
-SET
-deleted = TRUE
-FROM
-biblio.monograph_part bmp
-JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label AND mmpcm.job = mymig.monograph_part_get_current_job() )
-LEFT JOIN asset.copy_part_map acpm ON ( acpm.part=bmp.id )
-WHERE
-bmp_outter.id=bmp.id AND
-acpm.id IS NULL;
+-- This takes over 50 hours, disabling
+-- select mymig.monograph_part_update_current_job('Deleting old/unused bmp labels where we can');
+-- UPDATE
+-- biblio.monograph_part bmp_outter
+-- SET
+-- deleted = TRUE
+-- FROM
+-- biblio.monograph_part bmp
+-- JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label AND mmpcm.job = mymig.monograph_part_get_current_job() )
+-- LEFT JOIN asset.copy_part_map acpm ON ( acpm.part=bmp.id )
+-- WHERE
+-- bmp_outter.id=bmp.id AND
+-- acpm.id IS NULL;
 
 select mymig.monograph_part_update_current_job('Committing transaction');
 
