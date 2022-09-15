@@ -403,12 +403,19 @@ use email;
         $errored.="( ".@row[0]." ".@row[1]." ".@row[2]." ".@row[3]." ".@row[4]." ) ERROR = '".@row[5]."\n";
         $reporting{"Total with errors"}++;
     }
-    
+
+    # Finally, mark all of the rows dealt_with for next execution to ignore
+    # Closing these rows off before* the email gets sent, so that if the email
+    # doesn't work for some reason, these rows have been marked off
+    $query = "update $schema.patron_import set dealt_with=true where not dealt_with";
+    $log->addLine($query);
+    $dbHandler->update($query);
+
     my @toEmail = split(/,/,$toEmail);
     my %conf = ();
     $log->addLine("sending email. '$fromEmail' -> ".Dumper(\@toEmail));
     my $email = new email($fromEmail,\@toEmail,0,0,\%conf);
-    
+
     my $body = "
 Dear staff,
 
@@ -419,7 +426,7 @@ Your file(s) have been processed. These are the files:$inputFileFriendly\r\n\r\n
         $body.=$key.": ".$value;
     }
     $body.="\r\n\r\n";
-    
+
     my $lastReport = "";
     while ( (my $key, my $value) = each(%reporting) ) 
     {
@@ -427,7 +434,7 @@ Your file(s) have been processed. These are the files:$inputFileFriendly\r\n\r\n
         $lastReport .=$key.": ".$value."\n" if ($key =~ m/\*/g);
     }
     $body.="\r\n$lastReport";
-    
+
     $body.="\r\n\r\nHere are the errored records. Stat cat errors do not prevent the patron from importing.
 $errored" if $reporting{"Total with errors"} > 0;
     
@@ -435,12 +442,7 @@ $errored" if $reporting{"Total with errors"} > 0;
     my $fileCount = $#inputFiles;
     $fileCount++;
     $email->send("Evergreen Utility - Patron import results - $fileCount file(s)",$body);
-    
-    # Finally, mark all of the rows dealt_with for next execution to ignore
-    $query = "update $schema.patron_import set dealt_with=true where not dealt_with";
-    $log->addLine($query);
-    $dbHandler->update($query);
-    
+
     $log->addLogLine(" ---------------- Script Ending ---------------- ");
 
 sub installPatron
