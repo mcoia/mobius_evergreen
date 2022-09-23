@@ -32,15 +32,17 @@ if(! -e $xmlconf)
 	exit;
  }
 
-	our $mobUtil = new Mobiusutil();
-	our $dbHandler;
-	my $conf = $mobUtil->readConfFile($configFile);
-	our $jobid=DateTime->now;
-	our $log;
-	our %conf;
-	our $baseTemp;
-	our $libraryname;
-	our $fullDB;
+    our $mobUtil = new Mobiusutil();
+    our $dbHandler;
+    my $conf = $mobUtil->readConfFile($configFile);
+    our $jobid=DateTime->now;
+    our $log;
+    our %conf;
+    our $baseTemp;
+    our $libraryname;
+    our $fullDB;
+    our $fileOutputBuffer = '';
+    our $fileOutputBufferRecordCount = 0;
 	
   
  if($conf)
@@ -102,6 +104,7 @@ if(! -e $xmlconf)
             {
                 @isbns = @{getList($libraryname,$limit,$offset)};
                 $count+=(scalar @isbns);
+                $fileOutputBufferRecordCount = 30000 if($offset+$limit > $maxID); # Need to ensure that we write all of this last loop's data to the file
                 writeData($file,\@isbns);
                 $offset+=$limit;
             }
@@ -139,22 +142,34 @@ sub writeData
     my $file = @_[0];
     my @isbns = @{@_[1]};
     my $overwriteFile = @_[2] || 0;
-    my $outputFile = new Loghandler($file);
-    my $output = '';
+
     foreach(@isbns)
     {
         my $row = $_;
         my @row = @{$row};
-        $output.=join("\t",@row);
-        $output.="\n";        
+        $fileOutputBuffer .= join("\t",@row);
+        $fileOutputBuffer .= "\n";
+        $fileOutputBufferRecordCount++;
     }
-    $output = substr($output,0,-1) if $overwriteFile;
-    $outputFile->appendLine($output) if !$overwriteFile;
-    $outputFile->truncFile($output) if $overwriteFile;
-    undef $output;
-    undef $outputFile;
-    my $lines = scalar @isbns;
-    $log->addLogLine("wrote $lines lines to $file");
+    if($overwriteFile)
+    {
+        my $outputFile = new Loghandler($file);
+        $fileOutputBuffer = substr($fileOutputBuffer,0,-1);
+        $outputFile->truncFile($fileOutputBuffer);
+        $fileOutputBuffer = '';
+        $fileOutputBufferRecordCount = 0;
+        undef $outputFile;
+    }
+    # write to disk at a reasonable pace, 20000 lines at a time.
+    if($fileOutputBufferRecordCount > 20000)
+    {
+        my $outputFile = new Loghandler($file);
+        $outputFile->appendLine($fileOutputBuffer);
+        $log->addLogLine("wrote $fileOutputBufferRecordCount lines to $file");
+        $fileOutputBuffer = '';
+        $fileOutputBufferRecordCount = 0;
+        undef $outputFile;
+    }
 }
 
 
@@ -163,7 +178,7 @@ sub getList
 	my $libname = lc(@_[0]);
     my $limit = @_[1];
     my $offset = @_[2];
-    my $range = $offset+$limit;
+    my $range = $offset + $limit - 1; # the between sql statement includes the ending number in the return
     
     my @sp = split(/,/,$libname);
     my $libs = join ( '$$,$$', @sp);
@@ -178,7 +193,7 @@ concat(
     (case when acn.suffix > -1 then (select label||\$\$ \$\$ from asset.call_number_prefix where id=acn.suffix) else \$\$\$\$ end)
 ),
 a.record,
-string_agg(mtfe.value,\$\$ / \$\$ order by mtfe.value)
+string_agg(distinct mtfe.value,\$\$ / \$\$ order by mtfe.value)
 from
 (
 select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value
@@ -226,7 +241,7 @@ concat(
     (case when acn.suffix > -1 then (select label||\$\$ \$\$ from asset.call_number_prefix where id=acn.suffix) else \$\$\$\$ end)
 ),
 a.record,
-string_agg(mtfe.value,\$\$ / \$\$ order by mtfe.value)
+string_agg(distinct mtfe.value,\$\$ / \$\$ order by mtfe.value)
 from
 (
 select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value from metabib.real_full_rec where 
@@ -247,7 +262,7 @@ length(a.isbn) in(10,13)
 group by 1,2,3,4
 order by 1";
 	}
-	$log->addLine($query);
+	$log->addLine($query) if( ( int($offset / $limit) % 10) == 0 );  # only logging the query sometimes, it takes too much time;
 	my @results = @{$dbHandler->query($query)};
 
 	return \@results;
