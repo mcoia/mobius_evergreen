@@ -49,6 +49,12 @@ CONSTRAINT mymig_monograph_part_conversion_map_job FOREIGN KEY (job) REFERENCES 
 );
 
 
+CREATE INDEX IF NOT EXISTS mymig_monograph_part_conversion_map_record_idx
+  ON mymig.monograph_part_conversion_map
+  USING btree
+  (record);
+
+
 CREATE OR REPLACE FUNCTION mymig.monograph_part_get_current_job() RETURNS BIGINT AS
 $func$
 DECLARE
@@ -2563,19 +2569,18 @@ mmpcm.record = bmp.record AND
 mmpcm.new_label = bmp.label;
 
 -- delete unused labels when we can
--- This takes over 50 hours, disabling
--- select mymig.monograph_part_update_current_job('Deleting old/unused bmp labels where we can');
--- UPDATE
--- biblio.monograph_part bmp_outter
--- SET
--- deleted = TRUE
--- FROM
--- biblio.monograph_part bmp
--- JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label AND mmpcm.job = mymig.monograph_part_get_current_job() )
--- LEFT JOIN asset.copy_part_map acpm ON ( acpm.part=bmp.id )
--- WHERE
--- bmp_outter.id=bmp.id AND
--- acpm.id IS NULL;
+select mymig.monograph_part_update_current_job('Deleting old/unused bmp labels where we can');
+UPDATE
+biblio.monograph_part bmp_outter
+SET
+deleted = TRUE
+FROM
+biblio.monograph_part bmp
+JOIN mymig.monograph_part_conversion_map mmpcm ON ( bmp.record=mmpcm.record AND mmpcm.original_label = bmp.label AND mmpcm.job = mymig.monograph_part_get_current_job() )
+LEFT JOIN asset.copy_part_map acpm ON ( acpm.part=bmp.id )
+WHERE
+bmp_outter.id=bmp.id AND
+acpm.id IS NULL;
 
 select mymig.monograph_part_update_current_job('Committing transaction');
 

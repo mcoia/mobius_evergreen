@@ -163,7 +163,12 @@ sub getList
 	my $libname = lc(@_[0]);
     my $limit = @_[1];
     my $offset = @_[2];
+    my $range = $offset+$limit;
     
+    my @sp = split(/,/,$libname);
+    my $libs = join ( '$$,$$', @sp);
+    $libs = '$$' . $libs . '$$';
+
 	my $query = "
 select isbn,
 ac.barcode,
@@ -176,30 +181,32 @@ a.record,
 string_agg(mtfe.value,\$\$ / \$\$ order by mtfe.value)
 from
 (
-select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value from metabib.real_full_rec where 
+select record,regexp_replace(value,\$\$\\D\$\$,\$\$\$\$,\$\$g\$\$) \"isbn\",value
+from
+metabib.real_full_rec mrfr
+join biblio.record_entry bre on(bre.id=mrfr.record and not bre.deleted and mrfr.record between $offset and $range)
+where
 (
 record in
 (
-select record from asset.call_number where 
-owning_lib in(select id from actor.org_unit where lower(name)~\$\$$libname\$\$) and 
+select record from asset.call_number where
+record between $offset and $range and
+owning_lib in(select id from actor.org_unit where lower(shortname) in ($libs)) and 
 not deleted and 
-id in(select call_number from asset.copy where not deleted and circ_lib in(select id from actor.org_unit where lower(name)~\$\$$libname\$\$) )
+id in(select call_number from asset.copy where not deleted and circ_lib in(select id from actor.org_unit where lower(shortname) in ($libs)) )
 )
 or
 record in
 (
-select record from asset.call_number where 
-owning_lib in(select id from actor.org_unit where lower(name)~\$\$$libname\$\$) and 
+select record from asset.call_number where
+record between $offset and $range and
+owning_lib in(select id from actor.org_unit where lower(shortname) in ($libs)) and 
 not deleted and 
 label=\$\$##URI##\$\$
 )
 )
-and
-tag=\$\$020\$\$
-and
-record 
-in(select id from biblio.record_entry where not deleted order by id limit $limit offset $offset)
 ) as a
+join metabib.real_full_rec mrfr on(mrfr.record=a.record and mrfr.tag=\$\$020\$\$)
 left join metabib.title_field_entry mtfe on a.record=mtfe.source
 left join asset.call_number acn on(mtfe.source=acn.record and not acn.deleted)
 left join asset.copy ac on (ac.call_number=acn.id and not ac.deleted)
@@ -242,7 +249,7 @@ order by 1";
 	}
 	$log->addLine($query);
 	my @results = @{$dbHandler->query($query)};
-	
+
 	return \@results;
 	
 }
