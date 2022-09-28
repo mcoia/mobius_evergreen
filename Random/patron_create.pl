@@ -815,6 +815,7 @@ sub setupSchema
         error_message text DEFAULT \$\$\$\$,        
         dealt_with boolean default false,
         insert_date timestamp with time zone NOT NULL DEFAULT now()
+        CONSTRAINT patron_import_id_pkey PRIMARY KEY (id)
         )";
         
 		$dbHandler->update($query);
