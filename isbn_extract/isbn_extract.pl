@@ -224,9 +224,10 @@ label=\$\$##URI##\$\$
 join metabib.real_full_rec mrfr on(mrfr.record=a.record and mrfr.tag=\$\$020\$\$)
 left join metabib.title_field_entry mtfe on a.record=mtfe.source
 left join asset.call_number acn on(mtfe.source=acn.record and not acn.deleted)
-left join asset.copy ac on (ac.call_number=acn.id and not ac.deleted)
+left join asset.copy ac on (ac.call_number=acn.id and not ac.deleted and ac.circ_lib in(select id from actor.org_unit where lower(shortname) in ($libs)))
 where
-length(a.isbn) in(10,13)
+length(a.isbn) in(10,13) and
+ac.id is not null
 group by 1,2,3,4
 order by 1";
 
