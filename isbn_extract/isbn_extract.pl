@@ -223,7 +223,7 @@ label=\$\$##URI##\$\$
 ) as a
 join metabib.real_full_rec mrfr on(mrfr.record=a.record and mrfr.tag=\$\$020\$\$)
 left join metabib.title_field_entry mtfe on a.record=mtfe.source
-join asset.call_number acn on(a.record=acn.record and not acn.deleted and acn.owning_lib in(select id from actor.org_unit where lower(shortname) in ($$mar$$)) )
+join asset.call_number acn on(a.record=acn.record and not acn.deleted and acn.owning_lib in(select id from actor.org_unit where lower(shortname) in ($libs)) )
 left join asset.copy ac on (ac.call_number=acn.id and not ac.deleted)
 where
 length(a.isbn) in(10,13)
