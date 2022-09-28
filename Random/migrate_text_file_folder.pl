@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-
+use lib qw(./);
 use Loghandler;
 use Mobiusutil;
 use Data::Dumper;
@@ -65,7 +65,7 @@ if(!$schema)
     while (my $file = readdir($dh)) 
     {
         print "Checking $file\n";
-        push @dots, $file if ( !( $file =~ m/^\./) && -f "$data_dir$file" && ( $file =~ m/\.txt$/i) )
+        push @dots, $file if ( !( $file =~ m/^\./) && -f "$data_dir$file" && ( $file =~ m/\.migdat$/i) )
     }
     closedir $dh;
     
@@ -73,7 +73,7 @@ if(!$schema)
     {
         print $_;
         my $tablename = $_;
-        $tablename =~ s/\.txt//gi;
+        $tablename =~ s/\.migdat//gi;
         $tablename =~ s/\s/_/g;
         my $file = new Loghandler($data_dir.''.$_);
         my $insertFile = new Loghandler($data_dir.''.$_.'.insert');
@@ -98,16 +98,26 @@ sub setupTable
     $log->addLine($header);
     my @cols = split(/\t/,$header);
     $log->appendLine($_) foreach(@cols);
+    my %colTracker = ();
     for my $i (0.. $#cols)
 	{
         @cols[$i] =~ s/[\.\/\s\$!\-\(\)]/_/g;
         @cols[$i] =~ s/\_{2,50}/_/g;
         @cols[$i] =~ s/\_$//g;
         @cols[$i] =~ s/,//g;
+        @cols[$i] =~ s/\*//g;
         
         # Catch those naughty columns that don't have anything left to give
         $emptyHeaderName.='t' if(length(@cols[$i]) == 0);
         @cols[$i]=$emptyHeaderName if(length(@cols[$i]) == 0);
+        my $int = 1;
+        my $base = @cols[$i];
+        while($colTracker{@cols[$i]}) #Fix duplicate column names
+        {
+            @cols[$i] = $base."_".$int;
+            $int++;
+        }
+        $colTracker{@cols[$i]} = 1;
 	}
 	print "Gathering $tablename....";
 	$log->addLine(Dumper(\@cols));
@@ -163,7 +173,7 @@ sub setupTable
                         $thisline.=$value;
                         $insertString.=$value."\t";
                         #print "$value\n";
-                        $query.='$$'.$value.'$$,';
+                        $query.='$data$'.$value.'$data$,';
                         $valcount++;
                     }
                 }
