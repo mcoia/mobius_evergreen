@@ -11,7 +11,6 @@
 package email;
 
  use Email::MIME;
- use Email::Stuffer;
  use Data::Dumper;
  use Mobiusutil;
 
@@ -120,6 +119,7 @@ sub sendWithAttachments     #subject, body, @attachments
     my $subject = @_[1];
     my $body = @_[2];
     my @attachments = @{@_[3]};
+    use Email::Stuffer;
     my $log = $self->{'log'};
     my $fromEmail = $self->{fromEmailAddress};
     my @additionalEmails = @{$self->{emailRecipientArray}};
