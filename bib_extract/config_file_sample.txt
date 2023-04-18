@@ -48,7 +48,10 @@ maxdbconnections = 2
 #
 # FTP Server to drop off the marc output
 # In the case where MARCIVE is using HTTPS - leave the ftp settings blank and set the httpuploadurl
+# sendtype supports two options: sftp and ftp
+# if you use sftp, make sure that the executing linux user has the key pair setup if needed.
 
+sendtype = sftp
 ftphost = ftp.server.com
 ftplogin = loginname
 ftppass = ftppassword

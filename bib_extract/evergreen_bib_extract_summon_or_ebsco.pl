@@ -6,7 +6,7 @@
 # ./evergreen_bib_extract_summon_or_ebsco.pl conf_file.conf [adds / cancels] [ebsco / summon]
 #
 
- use lib qw(../);
+ use lib qw(./ ../ ../../);
  use strict;
  use Loghandler;
  use Mobiusutil;
@@ -24,7 +24,7 @@
  use MARC::File::USMARC;
  use MARC::Batch;
  use File::stat;
-
+ use Net::SFTP;
 
    #If you have weird control fields...
 
@@ -285,10 +285,18 @@
                                     if( length($conf{"ftphost"}) > 0 )
                                     {
                                         local $@;
-                                        eval{$mobUtil->sendftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$remoteDirectory,\@files,$log);};
-                                        if ($@)
+                                        my $ftpWorked = 0;
+                                        if($conf{"sendtype"} && $conf{"sendtype"} eq 'sftp')
                                         {
-                                            $log->addLogLine("FTP FAILED");
+                                            eval{$ftpWorked = send_sftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$remoteDirectory,\@files);};
+                                        }
+                                        else
+                                        {
+                                            eval{$mobUtil->sendftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$remoteDirectory,\@files,$log);};
+                                        }
+                                        if ($@ || $ftpWorked ne '1')
+                                        {
+                                            $log->addLogLine("FTP FAILED : $ftpWorked");
                                             my $email = new email($conf{"fromemail"},\@tolist,1,0,\%conf);
                                             $email->send("RMO $school - $platform $type FTP FAIL - Job # $dateString","I'm just going to apologize right now, I could not FTP the file to ".$conf{"ftphost"}." ! Remote directory: $remoteDirectory\r\n\r\nYou are going to have to do it by hand. Bummer.\r\n\r\nCheck the log located: ".$conf{"logfile"}." and you will know more about why. Please fix this so that I can FTP the file in the future!\r\n\r\n File:\r\n\r\n$marcOutFile\r\n$recCount record(s).  \r\n\r\n-MOBIUS Perl Squad-");
                                             $failString = "FTP Fail";
@@ -373,6 +381,38 @@
         print "Config file does not define 'logfile'\n";
     }
  }
+
+sub send_sftp {
+    my $hostname  = shift;
+    my $login     = shift;
+    my $pass      = shift;
+    my $remotedir = shift;
+    my $fileRef   = shift;
+    my @files     = @{$fileRef} if $fileRef;
+
+    $log->addLogLine( "**********SFTP starting -> $hostname with $login and $pass -> $remotedir" );
+    my $sftp = Net::SFTP->new(
+        $hostname,
+        debug    => 0,
+        user     => $login,
+        password => $pass
+    ) or return "Cannot connect to " . $hostname;
+
+    foreach my $file (@files) {
+        my $dest = $remotedir . "/" . getBareFileName($file);
+        $log->addLogLine( "Sending file $file -> $dest" );
+        $sftp->put( $file, $dest )
+          or return "Sending file $file failed";
+    }
+    $log->addLogLine( "**********SFTP session closed ***************" );
+    return 1;
+}
+
+sub getBareFileName {
+    my $fullFile = shift;
+    my @s        = split( /\//, $fullFile );
+    return pop @s;
+}
 
  sub splitMARC # This is needed with the vendor has a file size limit. Limit is expressed in Megabyts
  {
