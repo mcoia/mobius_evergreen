@@ -21,7 +21,7 @@
 # install Digest::SHA1
 # install REST::Client
 
-use lib qw(../);
+use lib qw(../../ ../ ./);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -1855,12 +1855,30 @@ sub calcSHA1
     my $marc = shift;
     my $babySHA = shift;
     my $sha1 = Digest::SHA1->new;
+    my $forHumans = '';
     $sha1->add(  length(getsubfield($marc,'007',''))>6 ? substr( getsubfield($marc,'007',''),0,6) : '' );
+    $forHumans .= length(getsubfield($marc,'007',''))>6 ? substr( getsubfield($marc,'007',''),0,6) : '';
     $sha1->add(getsubfield($marc,'245','h'));
+    $forHumans .= getsubfield($marc,'245','h');
     $sha1->add(getsubfield($marc,'001','')) if !$babySHA;
+    $forHumans .= getsubfield($marc,'001','') if !$babySHA;
     $sha1->add(getsubfield($marc,'245','a'));
+    $forHumans .= getsubfield($marc,'245','a');
     $sha1->add(getsubfield($marc,'245','b'));
+    $forHumans .= getsubfield($marc,'245','b');
     $sha1->add(getsubfield($marc,'100','a'));
+    $forHumans .= getsubfield($marc,'100','a');
+    # distinguish music explicit vs. non-explicit versions
+    $sha1->add(getsubfield($marc,'250','a'));
+    $forHumans .= getsubfield($marc,'250','a');
+    # distinguish comic books and the like with issue enumeration located in 245$n and 245$p
+    $sha1->add(getsubfield($marc,'245','n'));
+    $forHumans .= getsubfield($marc,'245','n');
+    $sha1->add(getsubfield($marc,'245','p'));
+    $forHumans .= getsubfield($marc,'245','p');
+
+    $log->addLine("sha string: '" . $forHumans . "'") if $debug;
+    undef $forHumans;
     return $sha1->hexdigest;
 }
 
@@ -2644,6 +2662,7 @@ sub getMatchingMARC
     my $type = shift;
     my @ret = ();
     updateJob("Processing","$query");
+    $log->addLogLine($query) if $debug;
     my @results = @{$dbHandler->query($query)};
     foreach(@results)
     {
@@ -3086,7 +3105,20 @@ sub getEvergreenMax
 sub convertMARCtoXML
 {
     my $marc = @_[0];
-    my $thisXML =  $marc->as_xml(); #decode_utf8();
+    my $thisXML = '';
+    local $@;
+    eval
+    {
+        # Turn on dying from warnings
+        # MARC::Charset can throw warnings here, and we don't want to continue if we get some
+        local $SIG{__WARN__} = sub { die @_; };
+        $thisXML = $marc->as_xml();
+        1;
+    } or do
+    {
+        $marc->encoding('UTF-8');
+        $thisXML = $marc->as_xml();
+    };
 
     #this code is borrowed from marc2bre.pl
     $thisXML =~ s/\n//sog;

@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-use lib qw(../);
+use lib qw(../ ./);
 use MARC::Record;
 use MARC::File;
 use MARC::File::XML (BinaryEncoding => 'utf8');
@@ -17,7 +17,6 @@ use DateTime;
 use LWP::Simple;
 use OpenILS::Application::AppUtils;
 use DateTime::Format::Duration;
-use Digest::SHA1;
 use XML::Simple;
 use Unicode::Normalize;
 use Getopt::Long;
@@ -177,8 +176,7 @@ if(! -e $xmlconf)
     }
     $audio_book_score_when_audiobooks_dont_belong = $conf{"audio_book_score_when_audiobooks_dont_belong"};
     $electronic_score_when_bib_is_considered_electronic = $conf{"electronic_score_when_bib_is_considered_electronic"};
-    #print "electronic_score_when_bib_is_considered_electronic = $electronic_score_when_bib_is_considered_electronic\n";
-    #print "audio_book_score_when_audiobooks_dont_belong = $audio_book_score_when_audiobooks_dont_belong\n";
+
     @electronicSearchPhrases = $conf{"electronicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"electronicsearchphrases"})} : ();
     @audioBookSearchPhrases = $conf{"audiobooksearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"audiobooksearchphrases"})} : ();
     @microficheSearchPhrases = $conf{"microfichesearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"microfichesearchphrases"})} : ();
@@ -234,9 +232,8 @@ if(! -e $xmlconf)
                 {
                     print "You can see what operation the software is executing with this query:\nselect * from  seekdestroy.job where id=$jobid\n";
 
-
-                    $dbHandler->update("truncate SEEKDESTROY.BIB_MATCH") if $resetScores;
-                    $dbHandler->update("truncate SEEKDESTROY.BIB_SCORE") if $resetScores;
+                    $dbHandler->update("TRUNCATE seekdestroy.bib_match") if $resetScores;
+                    $dbHandler->update("TRUNCATE seekdestroy.bib_score") if $resetScores;
 
                     cleanMetaRecords() if $runCleamMetarecords;
                     findInvalidElectronicMARC() if $runElectronic;
@@ -252,83 +249,6 @@ if(! -e $xmlconf)
 
                     findPossibleDups() if ($runDedupe || $runDedupeSample);
                     findInvalid856TOCURL() if $runFindElectronic856TOC;
-
-
-                    #######################################################
-                    #
-                    # Custom Hack code
-                    #
-                    #######################################################
-
-                    # tag902s();
-                    # my $problemPhrase = "MARC with audiobook phrases but incomplete marc";
-                    # my $subQueryConvert = $queries{"non_audiobook_bib_convert_to_audiobook"};
-                    # $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
-                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
-                    # my $problemPhrase = "MARC with music phrases but incomplete marc";
-                    # my $subQueryConvert = $queries{"non_music_bib_convert_to_music"};
-                    # $subQueryConvert =~ s/\$problemphrase/$problemPhrase/g;
-                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in($subQueryConvert)");
-
-                    # my $results = $dbHandler->query("select marc from biblio.record_entry where id=1362462")->[0];
-                    # determineWhichVideoFormat(1362462,$results->[0]);
-                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(244015)");
-                    # exit;
-                    # updateScoreWithQuery("select bibid,(select marc from biblio.record_entry where id=bibid) from
-                    # (
-                    # select distinct bib1 as \"bibid\" from SEEKDESTROY.BIB_MATCH
-                    # union
-                    # select distinct bib2 as \"bibid\" from SEEKDESTROY.BIB_MATCH
-                    # ) as a");
-                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select record from SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$MARC with audiobook phrases but incomplete marc\$\$)
-                    # and lower(marc) ~ \$\$abridge\$\$");
-
-                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id in
-                    # (select record from
-                    # SEEKDESTROY.bib_score where score_time < now() - '5 days'::interval) and not deleted
-                    # ");
-                    # exit;
-
-                    # updateScoreWithQuery("select distinct id,marc from biblio.record_entry where id in
-                    # (select record from
-                    # SEEKDESTROY.bib_score where winning_score~'video_score' and winning_score_score=0)");
-                    # updateScoreWithQuery("select id,marc from biblio.record_entry where id=243577");
-
-                    #updateScoreWithQuery("select id,marc from biblio.record_entry where id in(select oldleadbib from seekdestroy.undedupe)");
-
-                    #findItemsCircedAsAudioBooksButAttachedNonAudioBib(1242779);
-                    #findItemsNotCircedAsAudioBooksButAttachedAudioBib(0);
-                    # updateScoreCache();
-
-                    # 007 byte 4: v=DVD b=VHS s=Blueray
-                    # substr(007,4,1)
-                    # Blue-ray:
-                    # vd uscza-
-                    # DVD:
-                    # vd mvaizu
-                    # VHS:
-                    # vf-cbahou
-
-                    # Playaway query chunk:
-                    # (
-                            # (
-                            # split_part(marc,$$tag="007">$$,3) ~ 'sz'
-                            # and
-                            # split_part(marc,$$tag="007">$$,2) ~ 'cz'
-                            # )
-                        # or
-                            # (
-                            # split_part(marc,$$tag="007">$$,2) ~ 'sz'
-                            # and
-                            # split_part(marc,$$tag="007">$$,3) ~ 'cz'
-                            # )
-                        # )
-
-                        # Find Biblio.record_entry without opac icons:
-                    # select id from biblio.record_entry where not deleted and
-                    # id not in(select id from metabib.record_attr_flat where attr='icon_format')
-                    # 32115 rows
-
 
                 }
             }
@@ -2408,7 +2328,6 @@ sub addBibMatch
     my @takeActionWithTheseMatchingMethods = @{$queries{'takeActionWithTheseMatchingMethods'}};
     updateJob("Processing","addBibMatch  $searchQuery");
     my @results = @{$dbHandler->query($searchQuery)};
-    #$log->addLine(($#results+1)." Search Query results");
     foreach(@results)
     {
         my $matchedSomethingThisRound=0;
@@ -2504,33 +2423,6 @@ sub addRelatedBibScores
     updateJob("Processing","addRelatedBibScores  $query");
     #$log->addLine($query);
     updateScoreWithQuery($query);
-
-    # Pickup a few more bibs that contain the same title anywhere in the MARC
-    # This is very slow and it doesn't help get real matches
-    # This is disabled
-
-    if(0)
-    {
-        $query="
-        SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib";
-        updateJob("Processing","addRelatedBibScores  $query");
-        my @results = @{$dbHandler->query($query)};
-        foreach(@results)
-        {
-            my $row = $_;
-            my @row = @{$row};
-            my $title = @row[0];
-            if(length($title)>5)
-            {
-                $query =
-                "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE LOWER(MARC) ~ (SELECT LOWER(TITLE) FROM SEEKDESTROY.BIB_SCORE WHERE RECORD=$rootbib)";
-                updateJob("Processing","addRelatedBibScores  $query");
-                $log->addLine($query);
-                updateScoreWithQuery($query);
-            }
-        }
-    }
-
 }
 
 
@@ -2652,7 +2544,6 @@ sub moveCopiesOntoHighestScoringBibCandidate
     if($winner!=0)
     {
         undeleteBIB($winner);
-        #print "moveCopiesOntoHighestScoringBibCandidate from: $oldbib\n";
         if(!$moveOnlyCopies)
         {
             moveAllCallNumbers($oldbib,$winner,$matchReason);
@@ -2938,7 +2829,7 @@ sub findItemsNotCircedAsAudioBooksButAttachedAudioBib
     $queries{'ifaudioscoreabove'} = $audio_book_score_when_audiobooks_dont_belong;
     $queries{'problem'} = "Audiobook Bib with items that do not circulate as 'AudioBooks'";
     my @okmatchingreasons=("Non-AudioBooks attached to AudioBook Bib exact","Non-AudioBooks attached to AudioBook Bib exact minus date1");
-    $queries{'takeActionWithTheseMatchingMethods'}=(); #\@okmatchingreasons;
+    $queries{'takeActionWithTheseMatchingMethods'}=\@okmatchingreasons;
     # Find Bibs that are Audiobooks and have physical items that are not circed as audiobooks
     $queries{'searchQuery'} = "
     select bre.id,bre.marc,string_agg(ac.barcode,\$\$,\$\$) from biblio.record_entry bre, asset.copy ac, asset.call_number acn where
@@ -2948,7 +2839,7 @@ bre.id=acn.record and
 acn.id=ac.call_number and
 not acn.deleted and
 not ac.deleted and
-ac.circ_modifier not in ( \$\$AudioBooks\$\$,\$\$CD\$\$ )
+ac.circ_modifier not in ( \$\$AUDIOBOOK\$\$,\$\$CD\$\$ )
 group by bre.id,bre.marc
 limit 1000
     ";
@@ -3171,7 +3062,7 @@ sub findPossibleDups
             VALUES(\$1,\$2,\$3,\$4,\$5)";
             my @values = ($master_record,$record,"Duplicate SD Fingerprint",$hold,$jobid);
             $dbHandler->updateWithParameters($q,\@values);
-            print "Attempting to push into $master_record\n";
+            print "Attempting to push into $master_record\n" if $debug;
             my @temp = ($record);
             if(!$mergeMap{$master_record})
             {
@@ -3379,7 +3270,68 @@ sub additionalDedupeValidator
     }
 
     # ISBN's are required to have at least one in common
-    my @isbnMatches = ();
+    my @isbnMatches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getISBNDeduped($marc)')};
+    # if neither record has an 020, then we're a match.
+    # if only one record has 020s then it's a match
+    if($#isbnMatches == 1) # but if both records have 020s, then we need to go deeper
+    {
+        my $isbnMatch = hasMatchingValueBetweenTwoArrays(\@isbnMatches);
+        # we're configured to require at least one matching ISBN
+        return "no ISBNs in common" if ( (!$isbnMatch) and lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) ne 'yes' );
+        # we're configured to allow for non-matching ISBN's but instead require matching 245$h
+        if( (!$isbnMatch) and lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) eq 'yes' )
+        {
+            my @t245Matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getNormalized245h($marc)')};
+            return "no ISBNs in common and no 245h in common" if ($#t245Matches == 0); # meaning only one of the two bibs have a 245h
+            if($#t245Matches == 1) # If both bibs have a 245h, then we need to ensure they have a matching 245h
+            {
+                my $t245hnMatch = hasMatchingValueBetweenTwoArrays(\@t245Matches);
+                return "no ISBNs in common and no 245h in common" unless $t245hnMatch;
+            }
+        }
+    }
+
+    if( lc($conf{"dedupe_check_oclc_on_both_bibs"}) eq 'yes' )
+    {
+        my @oclcMatches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getOCLCFrom035($marc, 1, 1)')};
+        # if neither record has an OCLC, then we're a match.
+        if($#oclcMatches == 1) # if they both have an OCLC number, we go deeper
+        {
+            my $OCLCMatch = hasMatchingValueBetweenTwoArrays(\@oclcMatches);
+            return "Mismatching OCLC numbers" unless $OCLCMatch;
+        }
+    }
+
+    return '1';
+}
+
+sub hasMatchingValueBetweenTwoArrays
+{
+    my $arrayOfArraysRef = shift;
+    return 0 unless ref $arrayOfArraysRef eq 'ARRAY';
+    my @arrays = @{$arrayOfArraysRef};
+    my $match = 0;
+    foreach( @{@arrays[0]} )
+    {
+        last if $match;
+        my $outter = $_;
+        foreach( @{@arrays[1]} )
+        {
+            $match = 1 if($outter eq $_);
+            last if $match;
+        }
+        undef $outter;
+    }
+    return $match;
+}
+
+sub generateArrayForProvidedBIBPairAndProvidedPerlSub
+{
+    my $leadbib = shift;
+    my $subbib = shift;
+    my $func = shift;
+    my @ret = ();
+    return \@ret unless ($leadbib and $subbib and $func);
     my $query = "select marc from biblio.record_entry where id in($leadbib,$subbib)";
     my @results = @{$dbHandler->query($query)};
     foreach(@results)
@@ -3389,66 +3341,13 @@ sub additionalDedupeValidator
         my $marc = @row[0];
         $marc =~ s/(<leader>.........)./${1}a/;
         $marc = MARC::Record->new_from_xml($marc);
-        my @isbns = @{getISBNDeduped($marc)};
-        push (@isbnMatches, [@isbns]) if $#isbns > -1; # at least one isbn, otherwise we don't add it to the array
+        my $perl_eval = '$funcRet = ' . $func . ';';
+        my $funcRet;
+        eval $perl_eval;
+        my @thisBibArray = @{$funcRet};
+        push (@ret, [@thisBibArray]) if $#thisBibArray > -1; # at least one isbn, otherwise we don't add it to the array
     }
-    return '1' if($#isbnMatches == -1);  # if neither record has an 020, then I guess we're a match.
-    return "1" if($#isbnMatches < 1); # if only one record has 020s then it's a match
-    my $isbnMatch = 0;
-    foreach( @{@isbnMatches[0]} )
-    {
-        last if $isbnMatch;
-        my $outter = $_;
-        foreach( @{@isbnMatches[1]} )
-        {
-            $isbnMatch = 1 if($outter eq $_);
-            last if $isbnMatch;
-        }
-        undef $outter;
-    }
-
-    return "no ISBNs in common" if(!$isbnMatch);
-
-    if( lc($conf{"dedupe_check_oclc_on_both_bibs"}) eq 'yes')
-    {
-        my @oclcMatches = ();
-        my $query = "select marc from biblio.record_entry where id in ($leadbib,$subbib)";
-        my @results = @{$dbHandler->query($query)};
-        foreach(@results)
-        {
-            my $row = $_;
-            my @row = @{$row};
-            my $marc = @row[0];
-            $marc =~ s/(<leader>.........)./${1}a/;
-            $marc = MARC::Record->new_from_xml($marc);
-            my %l035 = %{getOCLCFrom035($marc, 1)};
-            my @oclc = ();
-            while ((my $subfield, my $value ) = each(%l035))
-            {
-                foreach(@{$value})
-                {
-                    push @oclc, $_;
-                }
-            }
-            push (@oclcMatches, [@oclc]) if $#oclc > -1;
-        }
-        return '1' if($#oclcMatches < 1);  # if neither record has an OCLC, then I guess we're a match.
-        my $OCLCMatch = 0;
-        foreach( @{@oclcMatches[0]} )
-        {
-            last if $OCLCMatch;
-            my $outter = $_;
-            foreach( @{@oclcMatches[1]} )
-            {
-                $OCLCMatch = 1 if($outter eq $_);
-                last if $OCLCMatch;
-            }
-            undef $outter;
-        }
-        return "Mismatching OCLC numbers" if(!$OCLCMatch);
-    }
-
-    return '1';
+    return \@ret;
 }
 
 sub mergeBibsWithMetarecordHoldsInMind
@@ -3537,6 +3436,9 @@ sub mergeBibsWithMetarecordHoldsInMind
 
     #Merge the 020's if preferred
     $leadmarc = mergeMARC020($leadmarc,$submarc) if( lc($conf{"dedupe_merge_isbns_to_lead"}) eq 'yes');
+
+    #Merge any other fields as specified by dedupe_copy_field_list
+    $leadmarc = mergeMARCOtherCopyList($leadmarc, $submarc);
 
     $leadmarc = convertMARCtoXML($leadmarc);
 
@@ -4039,79 +3941,6 @@ sub recordAssetCopyMove
     }
 }
 
-sub moveAssetCopyToPreviouslyDedupedBib
-{
-    # This function is site specific. No calls to it
-    my $currentBibID = @_[0];
-    my %possibles;
-    my $query = "select mmm.sub_bibid,bre.marc from m_dedupe.merge_map mmm, biblio.record_entry bre
-    where lead_bibid=$currentBibID and bre.id=mmm.sub_bibid
-    and
-    bre.marc !~ \$\$tag=\"008\">.......................[oqs]\$\$
-    and
-    bre.marc !~ \$\$tag=\"006\">......[oqs]\$\$
-    ";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-    #print $query."\n";
-    my @results = @{$dbHandler->query($query)};
-    my $winner=0;
-    my $currentWinnerElectricScore=10000;
-    my $currentWinnerMARCScore=0;
-    foreach(@results)
-    {
-        my @row = @{$_};
-        my $prevmarc = @row[1];
-        $prevmarc =~ s/(<leader>.........)./${1}a/;
-        $prevmarc = MARC::Record->new_from_xml($prevmarc);
-        my @temp=($prevmarc,determineElectricScore($prevmarc),scoreMARC($prevmarc));
-        #need to initialize the winner values
-        $winner=@row[0];
-        $currentWinnerElectricScore = @temp[1];
-        $currentWinnerMARCScore = @temp[2];
-        $possibles{@row[0]}=\@temp;
-    }
-
-    #choose the best deleted bib - we want the lowest electronic bib score in this case because we want to attach the
-    #items to the *most physical bib
-    while ((my $bib, my $attr) = each(%possibles))
-    {
-        my @atts = @{$attr};
-        if(@atts[1]<$currentWinnerElectricScore)
-        {
-            $winner=$bib;
-            $currentWinnerElectricScore=@atts[1];
-            $currentWinnerMARCScore=@atts[2];
-        }
-        elsif(@atts[1]==$currentWinnerElectricScore && @atts[2]>$currentWinnerMARCScore)
-        {
-            $winner=$bib;
-            $currentWinnerElectricScore=@atts[1];
-            $currentWinnerMARCScore=@atts[2];
-        }
-    }
-    if($winner!=0)
-    {
-        undeleteBIB($winner);
-        #find all of the eligible call_numbers
-        $query = "SELECT ID FROM ASSET.CALL_NUMBER WHERE RECORD=$currentBibID AND LABEL!= \$\$##URI##\$\$";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-        my @results = @{$dbHandler->query($query)};
-        foreach(@results)
-        {
-            my @row = @{$_};
-            my $acnid = @row[0];
-            my $callNID = moveCallNumber($acnid,$currentBibID,$winner,"Dedupe pool");
-            $query =
-            "INSERT INTO seekdestroy.undedupe(oldleadbib,undeletedbib,undeletedbib_electronic_score,undeletedbib_marc_score,moved_call_number,job)
-            VALUES($currentBibID,$winner,$currentWinnerElectricScore,$currentWinnerMARCScore,$callNID,$jobid)";
-updateJob("Processing","moveAssetCopyToPreviouslyDedupedBib  $query");
-            $log->addLine($query);
-            $dbHandler->update($query);
-        }
-        moveHolds($currentBibID,$winner);
-    }
-}
-
 sub undeleteBIB
 {
     my $bib = @_[0];
@@ -4131,7 +3960,7 @@ sub undeleteBIB
             {
                 $query = "select count(*) from biblio.record_entry where tcn_value = \$\$$tcn_value\$\$ and id != $bib";
                 $log->addLine($query);
-updateJob("Processing","undeleteBIB  $query");
+                updateJob("Processing","undeleteBIB  $query");
                 my @results = @{$dbHandler->query($query)};
                 foreach(@results)
                 {
@@ -5087,17 +4916,6 @@ sub field_length
     return $len;
 }
 
-sub calcSHA1
-{
-    my $marc = @_[0];
-    my $sha1 = Digest::SHA1->new;
-    $sha1->add(  length(getsubfield($marc,'007',''))>6 ? substr( getsubfield($marc,'007',''),0,6) : '' );
-    $sha1->add(getsubfield($marc,'245','h'));
-    $sha1->add(getsubfield($marc,'001',''));
-    $sha1->add(getsubfield($marc,'245','a'));
-    return $sha1->hexdigest;
-}
-
 sub getsubfield
 {
     my $marc = @_[0];
@@ -5174,6 +4992,35 @@ sub mergeMARC020
     return $leadMarc;
 }
 
+sub mergeMARCOtherCopyList
+{
+    my $leadMarc = @_[0];
+    my $subMarc = @_[1];
+    my %append = ();
+    my $settingText = $conf{"dedupe_copy_field_list"};
+    if($settingText)
+    {
+        my @copyFields = split(/,/, $settingText);
+        foreach(@copyFields)
+        {
+            my $thisCopyField = $mobUtil->trim($_);
+            # fields need to be 3 digits
+            if($thisCopyField =~ /^\d{3}$/)
+            {
+                my @subCopyFields = $subMarc->field($thisCopyField);
+                foreach(@subCopyFields)
+                {
+                    $leadMarc->insert_grouped_field($_);
+                }
+                undef @subCopyFields;
+            }
+            undef $thisCopyField;
+        }
+        undef @copyFields;
+    }
+    return $leadMarc;
+}
+
 sub mergeMARC035
 {
     my $leadMarc = @_[0];
@@ -5218,9 +5065,11 @@ sub getOCLCFrom035
 {
     my $marc = shift;
     my $digitsOnly = shift;
+    my $doNotincludeSubfieldInReturn = shift;
     my @l035s = $marc->field("035");
     my @subfield_list = ('a','z');
     my %ret = ();
+    my @nonSubfieldRet = ();
     foreach(@l035s)
     {
         my $thisField = $_;
@@ -5246,12 +5095,32 @@ sub getOCLCFrom035
                     $ret{$thisSubfield} = \@a;
                 }
                 push(@{$ret{$thisSubfield}}, $internal);
+                push @nonSubfieldRet, $internal;
             }
             undef %temp;
             undef @subs;
         }
     }
-    return \%ret;
+    return \%ret unless $doNotincludeSubfieldInReturn;
+    return \@nonSubfieldRet;
+}
+
+sub getNormalized245h
+{
+    my $record = shift;
+    my @ret = ();
+
+    if($record->field('245'))
+    {
+        my @h = $record->field('245')->subfield('h');
+        foreach(@h)
+        {
+            my $thisH = normalizeMarcTextField( $_ );
+            push @ret, $thisH;
+            undef $thisH;
+        }
+    }
+    return \@ret;
 }
 
 sub mergeMARC856
@@ -5405,12 +5274,14 @@ sub getFingerprints
       $marc{bib_lvl}, $marc{title}, $marc{subtitle}.$marc{subtitlep}, $marc{author} ? $marc{author} : '',
       $marc{audioformat}, $marc{videoformat}
       );
-     $fingerprints{alternate} = join("\t",
+    $fingerprints{alternate} = join("\t",
       $marc{item_form}, $marc{date1}, $marc{record_type},
       $marc{bib_lvl}, $marc{title}, $marc{subtitle}.$marc{subtitlep}, $marc{author} ? $marc{author} : '',
       $marc{audioformat}, $marc{videoformat}, $marc{pubyear}
       );
     $fingerprints{alternate} .= "\t" . $marc{normalizedisbns} if( lc($conf{"dedupe_match_all_isbns"}) eq 'yes');
+    $fingerprints{alternate} .= "\t" . $marc{t245n} if( lc($conf{"dedupe_match_245n"}) eq 'yes');
+
 
     $fingerprints{item_form} = $marc{item_form};
     $fingerprints{date1} = $marc{date1};
@@ -5548,6 +5419,9 @@ sub populate_marc {
     $marc{subtitlep} = $record->field('245')->subfield('p')
       if $record->field('245');
 
+    $marc{t245n} = $record->field('245')->subfield('n')
+      if $record->field('245');
+
     $marc{edition} = $record->field('250')->subfield('a')
       if $record->field('250');
     if ($record->field('260')) {
@@ -5621,28 +5495,16 @@ sub normalize_marc {
 
     $marc->{record_type }= 'a' if ($marc->{record_type} eq ' ');
     if ($marc->{title}) {
-        $marc->{title} = NFD($marc->{title});
-        $marc->{title} =~ s/[\x{80}-\x{ffff}]//go;
-        $marc->{title} = lc($marc->{title});
-        $marc->{title} =~ s/\W+$//go;
-        $marc->{title} =~ s/\s//go;
-        $marc->{title} =~ s/\t//go;
+        $marc->{title} = normalizeMarcTextField($marc->{title});
     }
     if ($marc->{subtitle}) {
-        $marc->{subtitle} = NFD($marc->{subtitle});
-        $marc->{subtitle} =~ s/[\x{80}-\x{ffff}]//go;
-        $marc->{subtitle} = lc($marc->{subtitle});
-        $marc->{subtitle} =~ s/\W+$//go;
-        $marc->{subtitle} =~ s/\s//go;
-        $marc->{subtitle} =~ s/\t//go;
+        $marc->{subtitle} = normalizeMarcTextField($marc->{subtitle});
     }
     if ($marc->{subtitlep}) {
-        $marc->{subtitlep} = NFD($marc->{subtitlep});
-        $marc->{subtitlep} =~ s/[\x{80}-\x{ffff}]//go;
-        $marc->{subtitlep} = lc($marc->{subtitlep});
-        $marc->{subtitlep} =~ s/\W+$//go;
-        $marc->{subtitlep} =~ s/\s//go;
-        $marc->{subtitlep} =~ s/\t//go;
+        $marc->{subtitlep} = normalizeMarcTextField($marc->{subtitlep});
+    }
+    if ($marc->{t245n}) {
+        $marc->{t245n} = normalizeMarcTextField($marc->{t245n});
     }
     if ($marc->{author}) {
         $marc->{author} = NFD($marc->{author});
@@ -5663,6 +5525,18 @@ sub normalize_marc {
         }
     }
     return $marc;
+}
+
+sub normalizeMarcTextField
+{
+    my $data = shift;
+    $data = NFD($data);
+    $data =~ s/[\x{80}-\x{ffff}]//go;
+    $data = lc($data);
+    $data =~ s/\W+$//go;
+    $data =~ s/\s//go;
+    $data =~ s/\t//go;
+    return $data;
 }
 
 sub marc_isvalid {

@@ -23,9 +23,20 @@ dedupe_preserve_oclc_from_sub = yes
 # Anything other than "yes" is considered false
 dedupe_match_all_isbns = no
 
+# This setting will allow the two bibs to not have any* ISBN's in common
+# but if the two bibs have differing 245$h's, they would not be allwoed to merge
+# By default, the softawre requires at least one ISBN in common
+# Anything other than "yes" is considered false
+dedupe_allow_no_isbn_match_if_245h_match = yes
+
 # This setting will cause the dedupe routine to copy over any 020's from the subordinate bib upon dedupe
 # Anything other than "yes" is considered false
 dedupe_merge_isbns_to_lead = yes
+
+# List of fields that you want to copy over from the subordinate bib upon dedupe
+# comma seperated
+dedupe_copy_field_list = 086, 037
+
 
 # This setting will cause the dedupe routine to not* automatically merge two bibs that have OCLC numbers on each but don't match
 # If one bib has an OCLC number and the other one doesn't: merge
@@ -35,6 +46,10 @@ dedupe_merge_isbns_to_lead = yes
 # This setting is only for the last case. Default is merge in the last case
 # Anything other than "yes" is considered false
 dedupe_check_oclc_on_both_bibs = yes
+
+# Consider the first 245$n when matching bibs.
+dedupe_match_245n = yes
+
 
 tempdir = /path/to/tmp
 erroremaillist = example@example.org
