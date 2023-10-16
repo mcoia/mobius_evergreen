@@ -80,10 +80,10 @@ use XML::Simple;
                 my @tolist = ($conf{"alwaysemail"});
                 my $dt   = DateTime->now(time_zone => "local");
                 my $fdate = $dt->ymd();
+                my $remoteDirectory = $conf{"ftpremotedir"} || "/";
                 if( length($conf{"ftphost"}) > 0 )
                 {
                     local $@;
-                    my $remoteDirectory = $conf{"ftpremotedir"} || "/";
                     eval{$mobUtil->sendftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$remoteDirectory,\@files,$log);};
                     if ($@)
                     {
