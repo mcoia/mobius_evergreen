@@ -239,7 +239,7 @@ package evergreenScraper;
     my $offset = $min;
     my $increment = $min+$chunkGoal;
 
-    my @dumpedFiles = (0);
+    my @dumpedFiles = ();
     my $finishedRecordCount=0;
     my @threadTracker = ();
     my $userCount = scalar @dbUsers;
