@@ -288,7 +288,7 @@
                                         my $ftpWorked = 0;
                                         if($conf{"sendtype"} && $conf{"sendtype"} eq 'sftp')
                                         {
-                                            eval{$ftpWorked = send_sftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$remoteDirectory,\@files);};
+                                            eval{$ftpWorked = send_sftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$conf{"ftpport"},$remoteDirectory,\@files);};
                                         }
                                         else
                                         {
@@ -386,23 +386,31 @@ sub send_sftp {
     my $hostname  = shift;
     my $login     = shift;
     my $pass      = shift;
+    my $ftpPort   = shift || '22';
     my $remotedir = shift;
     my $fileRef   = shift;
     my @files     = @{$fileRef} if $fileRef;
 
     $log->addLogLine( "**********SFTP starting -> $hostname with $login and $pass -> $remotedir" );
+
     my $sftp = Net::SFTP->new(
         $hostname,
         debug    => 0,
         user     => $login,
-        password => $pass
+        password => $pass,
+        ssh_args => [ port => $ftpPort ]
     ) or return "Cannot connect to " . $hostname;
 
     foreach my $file (@files) {
         my $dest = $remotedir . "/" . getBareFileName($file);
         $log->addLogLine( "Sending file $file -> $dest" );
-        $sftp->put( $file, $dest )
-          or return "Sending file $file failed";
+        if(!$sftp->put( $file, $dest ))
+        {
+            #try scp
+            my $cmd = "scp -P $ftpPort '$file' '$login'\@'$hostname':$remotedir";
+            $log->addLogLine( "Failover to scp\n$cmd" );
+            system($cmd) == 0 or return $?;
+        }
     }
     $log->addLogLine( "**********SFTP session closed ***************" );
     return 1;
