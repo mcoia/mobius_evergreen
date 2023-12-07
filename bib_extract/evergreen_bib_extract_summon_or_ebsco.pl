@@ -289,6 +289,12 @@
                                         if($conf{"sendtype"} && $conf{"sendtype"} eq 'sftp')
                                         {
                                             eval{$ftpWorked = send_sftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$conf{"ftpport"},$remoteDirectory,\@files);};
+                                            if ($@)
+                                            {
+                                                undef $@;
+                                                # force SCP method
+                                                eval{$ftpWorked = send_sftp($conf{"ftphost"},$conf{"ftplogin"},$conf{"ftppass"},$conf{"ftpport"},$remoteDirectory,\@files,1);};
+                                            }
                                         }
                                         else
                                         {
@@ -389,22 +395,27 @@ sub send_sftp {
     my $ftpPort   = shift || '22';
     my $remotedir = shift;
     my $fileRef   = shift;
+    my $forceSCP  = shift;
     my @files     = @{$fileRef} if $fileRef;
 
     $log->addLogLine( "**********SFTP starting -> $hostname with $login and $pass -> $remotedir" );
 
-    my $sftp = Net::SFTP->new(
-        $hostname,
-        debug    => 0,
-        user     => $login,
-        password => $pass,
-        ssh_args => [ port => $ftpPort ]
-    ) or return "Cannot connect to " . $hostname;
+    my $sftp;
+    if(!$forceSCP)
+    {
+       $sftp = Net::SFTP->new(
+            $hostname,
+            debug    => 0,
+            user     => $login,
+            password => $pass,
+            ssh_args => [ port => $ftpPort ]
+        ) or return "Cannot connect to " . $hostname;
+    }
 
     foreach my $file (@files) {
         my $dest = $remotedir . "/" . getBareFileName($file);
         $log->addLogLine( "Sending file $file -> $dest" );
-        if(!$sftp->put( $file, $dest ))
+        if($forceSCP || !$sftp->put( $file, $dest ))
         {
             #try scp
             my $cmd = "scp -P $ftpPort '$file' '$login'\@'$hostname':$remotedir";
