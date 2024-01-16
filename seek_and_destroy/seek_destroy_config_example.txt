@@ -45,12 +45,21 @@ dedupe_copy_field_list = 086, 037
 # If both have OCLC numbers but they are diffrent: DONT MERGE
 # This setting is only for the last case. Default is merge in the last case
 # Anything other than "yes" is considered false
-dedupe_check_oclc_on_both_bibs = yes
+# dedupe_check_oclc_on_both_bibs = yes
 
 # Consider the first 245$n when matching bibs.
 dedupe_match_245n = yes
 
 
+# Dedupe branch rule:
+# This software imposes a rule where two bibs are not merged if the same library
+# has attached items onto both bibs
+# This is where you can specify a smaller list of branches that break the merge
+# instead of all* the branches, here, specify a list of shortnames that will be
+# the only branches that break the merge.
+# If either* bib contains any of the specified branches, the bibs will not merge
+# comment out if you want the default behavior (same branch having copies on both will break merge)
+dedupe_specified_branch_copies_break_merge = BR1,BR2
 tempdir = /path/to/tmp
 erroremaillist = example@example.org
 successemaillist = example@example.org, example2@example.org

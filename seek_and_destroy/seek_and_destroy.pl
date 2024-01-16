@@ -2157,7 +2157,8 @@ sub updateBibCircsScore
         (\$1,\$2,\$3)";
         my @values = ($record,$circmod,$jobid);
         $allcircs.=$circmod.',';
-        $dbHandler->updateWithParameters($q,\@values);
+        # We're not currently utilizing this table in this code, commenting out for speed
+        # $dbHandler->updateWithParameters($q,\@values);
     }
     $allcircs=substr($allcircs,0,-1);
     my $opacicons='';
@@ -2209,7 +2210,8 @@ sub updateBibCallLabelsScore
         (\$1,\$2,\$3,\$4)";
         my @values = ($record,$calllabel,$#results+1,$jobid);
         $allcalls.=$calllabel.',';
-        $dbHandler->updateWithParameters($q,\@values);
+        # We're not currently utilizing this table in this code, commenting out for speed
+        # $dbHandler->updateWithParameters($q,\@values);
     }
     $allcalls=substr($allcalls,0,-1);
 
@@ -2250,7 +2252,8 @@ sub updateBibCopyLocationsScore
         (\$1,\$2,\$3,\$4)";
         my @values = ($record,$location,$#results+1,$jobid);
         $alllocs.=$location.',';
-        $dbHandler->updateWithParameters($q,\@values);
+        # We're not currently utilizing this table in this code, commenting out for speed
+        # $dbHandler->updateWithParameters($q,\@values);
     }
     $alllocs=substr($alllocs,0,-1);
 
@@ -2900,6 +2903,12 @@ sub findPossibleDups
 {
 
     my @formatAssignmentsBefore = ();
+    my $branchBreakMerge;
+    # gather up branch breakers if specified
+    if($conf{"dedupe_specified_branch_copies_break_merge"})
+    {
+        $branchBreakMerge = fleshOrgUnitIDsFromShortnameCommaSeparated($conf{"dedupe_specified_branch_copies_break_merge"});
+    }
 
     if(!$dryrun)
     {
@@ -3053,7 +3062,7 @@ sub findPossibleDups
             $current_fp=$fingerprint;
             $master_record = $record;
             $outs.=" to $master_record";
-            $log->addLine($outs);
+            # $log->addLine($outs);
         }
         else
         {
@@ -3062,7 +3071,6 @@ sub findPossibleDups
             VALUES(\$1,\$2,\$3,\$4,\$5)";
             my @values = ($master_record,$record,"Duplicate SD Fingerprint",$hold,$jobid);
             $dbHandler->updateWithParameters($q,\@values);
-            print "Attempting to push into $master_record\n" if $debug;
             my @temp = ($record);
             if(!$mergeMap{$master_record})
             {
@@ -3100,6 +3108,7 @@ sub findPossibleDups
     1,2,3,4,5,6,7
     order by 1,2';
 
+    $log->addLogLine($query);
     my @results = @{$dbHandler->query($query)};
     my $autoList;
     my $needsHumans;
@@ -3108,7 +3117,7 @@ sub findPossibleDups
         my $row = $_;
         my @row = @{$row};
         my $out = join(';',@row);
-        my $validator = additionalDedupeValidator(@row[0], @row[1], @row[5], @row[6]);
+        my $validator = additionalDedupeValidator(@row[0], @row[1], @row[5], @row[6], $branchBreakMerge);
         if($validator eq '1')
         {
             $autoList .= $out . "\n";
@@ -3219,6 +3228,7 @@ sub additionalDedupeValidator
     my $subbib = shift;
     my $leadbib_format = shift;
     my $subbib_format = shift;
+    my $branchBreakMerge = shift;
     my @notAllowedMergedFormats =
     (
         'dvd',
@@ -3260,12 +3270,25 @@ sub additionalDedupeValidator
         my $sublist = @row[1];
         my $bigger = length($leadlist) > length($sublist) ? $leadlist : $sublist;
         my $smaller = length($leadlist) > length($sublist) ? $sublist : $leadlist;
-        #Wrap it in commas so we can delimit exactly
-        $bigger = ',' . $bigger . ',';
-        my @vals = split(/,/,$smaller);
-        foreach(@vals)
+        #Join them all together for this routine, don't need to cross compare
+        $bigger = ',' . $bigger . ',' . $smaller . ',';
+        if($branchBreakMerge)
         {
-            return "branch with copies on both" if $bigger =~ m/,$_,/;
+            #Wrap it in commas so we can delimit exactly
+            $smaller = ',' . $smaller . ',';
+            my @vals = split(/,/,$branchBreakMerge);
+            foreach(@vals)
+            {
+                return "specified branch breaker exists" if $bigger =~ m/,$_,/;
+            }
+        }
+        else
+        {
+            my @vals = split(/,/,$smaller);
+            foreach(@vals)
+            {
+                return "branch with copies on both" if $bigger =~ m/,$_,/;
+            }
         }
     }
 
@@ -3302,7 +3325,57 @@ sub additionalDedupeValidator
         }
     }
 
+    if( $conf{"dedupe_added_match_field_list"} )
+    {
+        my @list = split(/,/,$conf{"dedupe_added_match_field_list"});
+        foreach(@list)
+        {
+            my $thisCustomMatchTag = $_; # EG: 610a
+            $thisCustomMatchTag =~ s/\s//g;
+            $thisCustomMatchTag =~ s/\t//g;
+            # little error checking on the user-supplied field
+            if($thisCustomMatchTag =~ /^\d\d\d[0-9A-z]$/)
+            {
+                my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getFirstFieldsSpecifiedTag($marc, $extraData)', $thisCustomMatchTag)};
+                # if neither record has an OCLC, then we're a match.
+                if($#matches == 1) # if they both have the custom specified tag/subfield, we go deeper
+                {
+                    my $match = hasMatchingValueBetweenTwoArrays(\@matches);
+                    return "Mismatching custom tag: $thisCustomMatchTag" unless $match;
+                }
+            }
+            else
+            {
+                $log->addLine("Warning: '$thisCustomMatchTag' is not a valid tag definition");
+            }
+        }
+    }
+
     return '1';
+}
+
+sub fleshOrgUnitIDsFromShortnameCommaSeparated
+{
+    my $shortnameList = shift;
+    my $ret = '';
+    my @shortnames = split(/,/,$shortnameList);
+    my $query = "select string_agg(distinct id::text, \$\$,\$\$) from actor.org_unit where lower(shortname) in(";
+    foreach (@shortnames)
+    {
+        my $thisName = lc $mobUtil->trim($_);
+        $query .='$$'.$thisName.'$$,';
+    }
+    $query = substr($query,0,-1) . ")";
+    $log->addLine($query);
+    my @results = @{$dbHandler->query($query)};
+    # should just be one row
+    foreach(@results)
+    {
+        my $row = $_;
+        my @row = @{$row};
+        $ret = @row[0];
+    }
+    return $ret;
 }
 
 sub hasMatchingValueBetweenTwoArrays
@@ -3330,6 +3403,7 @@ sub generateArrayForProvidedBIBPairAndProvidedPerlSub
     my $leadbib = shift;
     my $subbib = shift;
     my $func = shift;
+    my $extraData = shift;
     my @ret = ();
     return \@ret unless ($leadbib and $subbib and $func);
     my $query = "select marc from biblio.record_entry where id in($leadbib,$subbib)";
@@ -3342,10 +3416,14 @@ sub generateArrayForProvidedBIBPairAndProvidedPerlSub
         $marc =~ s/(<leader>.........)./${1}a/;
         $marc = MARC::Record->new_from_xml($marc);
         my $perl_eval = '$funcRet = ' . $func . ';';
+        $log->addLine($perl_eval) if $debug;
         my $funcRet;
         eval $perl_eval;
-        my @thisBibArray = @{$funcRet};
-        push (@ret, [@thisBibArray]) if $#thisBibArray > -1; # at least one isbn, otherwise we don't add it to the array
+        if(ref $funcRet eq 'ARRAY')
+        {
+            my @thisBibArray = @{$funcRet};
+            push (@ret, [@thisBibArray]) if $#thisBibArray > -1; # at least one element, otherwise we don't add it to the array
+        }
     }
     return \@ret;
 }
@@ -5103,6 +5181,24 @@ sub getOCLCFrom035
     }
     return \%ret unless $doNotincludeSubfieldInReturn;
     return \@nonSubfieldRet;
+}
+
+sub getFirstFieldsSpecifiedTag
+{
+    my $marc = shift;
+    my $tag = shift;
+    my @ret = ();
+    if($tag =~ /^\d\d\d[0-9A-z]$/)
+    {
+        my $subfield = chop($tag);
+        my $fieldOb = $marc->field($tag);
+        if($fieldOb)
+        {
+            my $first = $fieldOb->subfield($subfield);
+            push (@ret, normalizeMarcTextField( $first )) if $first;
+        }
+    }
+    return \@ret;
 }
 
 sub getNormalized245h
