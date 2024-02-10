@@ -3336,7 +3336,7 @@ sub additionalDedupeValidator
             # little error checking on the user-supplied field
             if($thisCustomMatchTag =~ /^\d\d\d[0-9A-z]$/)
             {
-                my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getFirstFieldsSpecifiedTag($marc, $extraData)', $thisCustomMatchTag)};
+                my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getSpecifiedTag($marc, $extraData)', $thisCustomMatchTag)};
                 # if neither record has an OCLC, then we're a match.
                 if($#matches == 1) # if they both have the custom specified tag/subfield, we go deeper
                 {
@@ -5183,7 +5183,7 @@ sub getOCLCFrom035
     return \@nonSubfieldRet;
 }
 
-sub getFirstFieldsSpecifiedTag
+sub getSpecifiedTag
 {
     my $marc = shift;
     my $tag = shift;
@@ -5191,10 +5191,10 @@ sub getFirstFieldsSpecifiedTag
     if($tag =~ /^\d\d\d[0-9A-z]$/)
     {
         my $subfield = chop($tag);
-        my $fieldOb = $marc->field($tag);
-        if($fieldOb)
+        my @fieldOb = $marc->field($tag);
+        foreach(@fieldOb)
         {
-            my $first = $fieldOb->subfield($subfield);
+            my $first = $_->subfield($subfield);
             push (@ret, normalizeMarcTextField( $first )) if $first;
         }
     }
