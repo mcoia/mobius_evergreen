@@ -1685,7 +1685,7 @@ union all
 
 -- Part Z, Series X, Vol. Y
 select
-label,regexp_replace(label,'^\s?\(?ser[^,\.\:]?i?e?s?[,\.\:\s]+([^\s,\.\\/\-]+)[\s,\.\\/\-]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)[,\.\:\s]+p[^,\.\:]*[,\.\:\s]+([^\s,]+)$','Series \1, Vol. \2,Part \3','gi')
+label,regexp_replace(label,'^\s?\(?ser[^,\.\:]?i?e?s?[,\.\:\s]+([^\s,\.\\/\-]+)[\s,\.\\/\-]+v[^,\.\:]*[,\.\:\s]+([^\s,]+)[,\.\:\s]+p[^,\.\:]*[,\.\:\s]+([^\s,]+)$','Series \1, Vol. \2, Part \3','gi')
 , 'Part Z, Series X, Vol. Y' as res_query
 from 
 biblio.monograph_part
