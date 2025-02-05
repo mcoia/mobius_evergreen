@@ -33,6 +33,11 @@ dedupe_allow_no_isbn_match_if_245h_match = yes
 # Anything other than "yes" is considered false
 dedupe_merge_isbns_to_lead = yes
 
+# This setting will cause the dedupe routine to copy over any 024's from the subordinate bib upon dedupe
+# ONLY FOR VIDEO FORMATS
+# Anything other than "yes" is considered false
+dedupe_merge_video_024_to_lead = yes
+
 # List of fields that you want to copy over from the subordinate bib upon dedupe
 # comma seperated
 dedupe_copy_field_list = 086, 037
@@ -50,6 +55,13 @@ dedupe_copy_field_list = 086, 037
 # Consider the first 245$n when matching bibs.
 dedupe_match_245n = yes
 
+# Consider the first occurance of a list of field/subfield.
+# Comma separated. Standard fields only
+# Example: 700a, 610a
+# The software already uses a fairly reliable set of marc fields/subfields for matching
+# But you can add your own custom field/subfields for consideration
+# The more you add, the fewer matches
+dedupe_added_match_field_list = 700a
 
 # Dedupe branch rule:
 # This software imposes a rule where two bibs are not merged if the same library

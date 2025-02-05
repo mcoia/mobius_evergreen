@@ -1088,38 +1088,45 @@ sub tag902s
 sub findInvalid856TOCURL
 {
     my $query = "
-select id,marc from biblio.record_entry where not deleted and
-lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">table of contents.+?</datafield>\$\$
-or
-lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">publisher description.+?</datafield>\$\$
+SELECT id,marc,(CASE WHEN sbs.id IS NULL THEN 0 ELSE 1 END) FROM biblio.record_entry bre
+LEFT JOIN seekdestroy.bib_score sbs ON (bre.id=sbs.record)
+WHERE
+NOT bre.deleted AND
+LOWER(bre.marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">table of contents.+?</datafield>\$\$
+OR
+LOWER(bre.marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\"><subfield code=\"3\">publisher description.+?</datafield>\$\$
     ";
 
     my @results = @{$dbHandler->query($query)};
+    my @scoreSet = ();
+    my $insertValues = '';
+    my $pgPointer = 1;
+    my @values = ();
     foreach(@results)
     {
-        my $row = $_;
-        my @row = @{$row};
-        my $id = @row[0];
-        my $marc = @row[1];
-        if(!isScored( $id))
+        $insertValues .= '($' . $pgPointer++ . ',$' . $pgPointer++ . ',$' . $pgPointer++ . '),';
+        push(@values, $_->[0], "MARC with table of contents E-Links", $jobid);
+        if(!$_->[2])
         {
-            my @scorethis = ($id,$marc);
-            my @st = ([@scorethis]);
-            updateScoreCache(\@st);
+            my %pair =
+            (
+                'id' => $_->[0],
+                'marc' => $_->[1]
+            );
+            push(@scoreSet, \%pair);
         }
-        $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-        my @values = ($id,"MARC with table of contents E-Links",$jobid);
-        $dbHandler->updateWithParameters($query,\@values);
     }
+    updateScoreCache(\@scoreSet);
+    $insertValues = substr($insertValues, 0, -1);
+    $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES $insertValues";
+    $dbHandler->updateWithParameters($query,\@values);
 }
 
 sub setMARCForm
 {
     my $marc = @_[0];
     my $char = @_[1];
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
     my $replacement;
@@ -1164,9 +1171,7 @@ sub updateMARCSetElectronic
     my $bibid = @_[0];
     my $marc = @_[1];
     $marc = setMARCForm($marc,'s');
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
     # we have to remove the 007s because they conflict for playaway.
@@ -1195,9 +1200,7 @@ sub determineWhichAudioBookFormat
     my $query = "select circ_mods,copy_locations,call_labels from seekdestroy.bib_score where record=$bibid";
     my @results = @{$dbHandler->query($query)};
     my $cass=0;
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $flatmarc = $marcob->as_formatted;
     foreach(@results)
     {
@@ -1226,9 +1229,7 @@ sub updateMARCSetCassetteAudiobook
     my $bibid = @_[0];
     my $marc = @_[1];
     $marc = setMARCForm($marc,' ');
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
     my $replacement;
@@ -1271,9 +1272,7 @@ sub updateMARCSetCDAudioBook
     my $bibid = @_[0];
     my $marc = @_[1];
     $marc = setMARCForm($marc,' ');
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
     my $replacement;
@@ -1320,9 +1319,7 @@ sub determineWhichVideoFormat
     my $dvd=0;
     my $vhs=0;
     my $blu=0;
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $flatmarc = $marcob->as_formatted;
     foreach(@results)
     {
@@ -1388,9 +1385,7 @@ sub updateMARCSetVideoFormat
     );
     $type = 'default' if !$data{$type}; # Default is DVD if type isn't in the array
     $marc = setMARCForm($marc,' ');
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
     my $replacement;
@@ -1469,8 +1464,7 @@ sub determineWhichMusicFormat
     my $query = "select circ_mods,copy_locations,call_labels from seekdestroy.bib_score where record=$bibid";
     my @results = @{$dbHandler->query($query)};
     my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    $marcob = createMARCObjectFromXML($marc);
     my $autowin = 0;
     my $flatmarc = $marcob->as_formatted;
     foreach(@results)
@@ -1558,8 +1552,7 @@ sub updateMARCSetMusicFormat
     $type = 'default' if !$data{$type}; # Default is DVD if type isn't in the array
     $marc = setMARCForm($marc,' ');
     my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    $marcob = createMARCObjectFromXML($marc);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
     my $replacement;
@@ -1605,8 +1598,7 @@ sub updateMARCSetLargePrint
     my $bibid = @_[0];
     my $marc = @_[1];
     $marc = setMARCForm($marc,'d');
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
+    my $marcob = createMARCObjectFromXML($marc);
     $marcob = MARC::Record->new_from_xml($marcob);
     my $marcr = populate_marc($marcob);
     my %marcr = %{normalize_marc($marcr)};
@@ -1634,9 +1626,7 @@ sub fingerprintScriptMARC
 {
     my $marc = @_[0];
     my $note = @_[1];
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my @n902 = $marcob->field('903');
     my $altered = 0;
     my $dt = DateTime->now(time_zone => "local");
@@ -1670,9 +1660,7 @@ sub updateMARCSetSpecifiedLeaderByte
     my $marc = @_[1];
     my $leaderByte = @_[2];     #1 based
     my $value = @_[3];
-    my $marcob = $marc;
-    $marcob =~ s/(<leader>.........)./${1}a/;
-    $marcob = MARC::Record->new_from_xml($marcob);
+    my $marcob = createMARCObjectFromXML($marc);
     my $leader = $marcob->leader();
     #print $leader."\n";
     $leader=$mobUtil->insertDataIntoColumn($leader,$value,$leaderByte);
@@ -1823,7 +1811,7 @@ sub findInvalidMARC
     my @marcSearchPhrases = @{@_[7]};
 
 
-    my $query = "DELETE FROM SEEKDESTROY.PROBLEM_BIBS WHERE PROBLEM=\$\$$problemPhrase\$\$";
+    my $query = "DELETE FROM seekdestroy.problem_bibs WHERE problem=\$\$$problemPhrase\$\$";
     if(!$doNotRunFullReEval)  # This can take DAYS to finish on large datasets - hence the switch.
     {
         updateJob("Processing","findInvalidMARC  $query");
@@ -1938,76 +1926,105 @@ sub updateProblemBibs
     my $typeName = @_[2];
     my @results = @{$dbHandler->query($query)};
     $log->addLine(($#results+1)." possible invalid $typeName MARC\n\n\n");
+    my @scoreSet = ();
+    my $insertValues = '';
+    my $pgPointer = 1;
+    my @values = ();
+    my $count = 0;
     foreach(@results)
     {
-        my $row = $_;
-        my @row = @{$row};
-        my $id = @row[0];
-        my $marc = @row[1];
-
-        my @scorethis = ($id,$marc);
-        my @st = ([@scorethis]);
-        updateScoreCache(\@st);
-
-        $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,JOB) VALUES (\$1,\$2,\$3)";
-        my @values = ($id,$problemphrase,$jobid);
-        $dbHandler->updateWithParameters($query,\@values);
+        $count++;
+        $insertValues .= '($' . $pgPointer++ . ',$' . $pgPointer++ . ',$' . $pgPointer++ . '),';
+        push(@values, $_->[0], $problemphrase, $jobid);
+        my %pair =
+        (
+            'id' => $_->[0],
+            'marc' => $_->[1]
+        );
+        push(@scoreSet, \%pair);
+        if($count % 500 == 0)
+        {
+            $insertValues = substr($insertValues, 0, -1);
+            $dbHandler->updateWithParameters("INSERT INTO seekdestroy.problem_bibs(record,problem,job) VALUES $insertValues", \@values);
+            updateScoreCache(\@scoreSet);
+            @scoreSet = ();
+            $insertValues = '';
+            $pgPointer = 1;
+            @values = ();
+        }
     }
-}
-
-sub isScored
-{
-    my $bibid = @_[0];
-    my $query = "SELECT ID FROM SEEKDESTROY.BIB_SCORE WHERE RECORD = $bibid";
-    my @results = @{$dbHandler->query($query)};
-    if($#results>-1)
+    if($#scoreSet > -1)
     {
-        return 1;
+        $insertValues = substr($insertValues, 0, -1);
+        $dbHandler->updateWithParameters("INSERT INTO seekdestroy.problem_bibs(record,problem,job) VALUES $insertValues", \@values);
+        updateScoreCache(\@scoreSet);
     }
-    return 0;
+    undef @scoreSet;
+    undef $insertValues;
+    undef $pgPointer;
+    undef @values;
 }
 
 sub updateScoreCache
 {
-    my @newIDs;
-    my @newAndUpdates;
-    my @updateIDs;
-    if(@_[0])
+    my $idMARCPairs = shift;
+    my @scorePairs = $idMARCPairs ? @{$idMARCPairs} : @{identifyBibsToScore()};
+    my @scoreOrder = qw/electricScore audioBookScore largeprint_score video_score microfilm_score microfiche_score music_score playaway_score winning_score winning_score_score winning_score_distance second_place_score/;
+    my @fingerprintOrder = qw/item_form date1 record_type bib_lvl title author baseline audioformat videoformat alternate tag902/;
+    my $bibids = '';
+    my $insertValues = '';
+    my @data = ();
+    my $pgPointer = 1;
+    my $count = 0;
+    $log->addLogLine("Scoring " . ($#scorePairs + 1) ." bibs");
+
+    foreach(@scorePairs)
     {
-        @newIDs=@{@_[0]};
-    }
-    else
-    {
-        @newAndUpdates = @{identifyBibsToScore($dbHandler)};
-        @newIDs = @{@newAndUpdates[0]};
-    }
-    ##print Dumper(@newIDs);
-    #$log->addLine("Found ".($#newIDs+1)." new Bibs to be scored");
-    if(@newAndUpdates[1])
-    {
-        @updateIDs = @{@newAndUpdates[1]};
-        #$log->addLine("Found ".($#updateIDs+1)." new Bibs to update score");
-    }
-    foreach(@newIDs)
-    {
-        my @thisone = @{$_};
-        my $bibid = @thisone[0];
-        #$log->addLine("Adding Score ".$bibid);
-        my $marc = @thisone[1];
-        #print "bibid = $bibid";
-        #print "marc = $marc";
-        my $query = "DELETE FROM SEEKDESTROY.BIB_SCORE WHERE RECORD = $bibid";
-        $dbHandler->update($query);
-        my $marcob = $marc;
-        $marcob =~ s/(<leader>.........)./${1}a/;
-        $marcob = MARC::Record->new_from_xml($marcob);
+        $count++;
+        $bibids .= $_->{'id'} . ',';
+        my $marcob = createMARCObjectFromXML($_->{'marc'});
         my $score = scoreMARC($marcob);
+        $insertValues .= "\n(\$" . $pgPointer++ . ',$' . $pgPointer++;
+        push(@data, $_->{'id'}, $score);
         my %allscores = %{getAllScores($marcob)};
         my %fingerprints = %{getFingerprints($marcob)};
-        #$log->addLine(Dumper(%fingerprints));
-        my $query = "INSERT INTO SEEKDESTROY.BIB_SCORE
-        (RECORD,
-        SCORE,
+        foreach(@scoreOrder)
+        {
+            $insertValues .= ',$' . $pgPointer++;
+            push(@data, $allscores{$_});
+        }
+        foreach(@fingerprintOrder)
+        {
+            $insertValues .= ',$' . $pgPointer++;
+            push(@data, $fingerprints{$_});
+        }
+        $insertValues .= '),';
+        if($count % 500 == 0) # 500 row chunks
+        {
+            updateBibScoreChunk($bibids, $insertValues, \@data);
+            @data = ();
+            $insertValues = '';
+            $bibids = '';
+            $pgPointer = 1;
+        }
+    }
+    updateBibScoreChunk($bibids, $insertValues, \@data) if($bibids ne '');
+    undef @data;
+    undef $insertValues;
+    undef $bibids;
+    undef $idMARCPairs;
+}
+
+sub updateBibScoreChunk
+{
+    my $bibids = shift;
+    my $insertValues = shift;
+    my $valueRef = shift;
+    $log->addLogLine("Saving Score Cache Chunk");
+    my $queryTemplate  = <<'multilinestring';
+    INSERT INTO seekdestroy.bib_score
+        (record,
+        score,
         ELECTRONIC,
         audiobook_score,
         largeprint_score,
@@ -2029,281 +2046,91 @@ sub updateScoreCache
         sd_fingerprint,
         audioformat,
         videoformat,
-        eg_fingerprint,
         sd_alt_fingerprint,
         tag902)
-        VALUES($bibid,$score,
-        $allscores{'electricScore'},
-        $allscores{'audioBookScore'},
-        $allscores{'largeprint_score'},
-        $allscores{'video_score'},
-        $allscores{'microfilm_score'},
-        $allscores{'microfiche_score'},
-        $allscores{'music_score'},
-        $allscores{'playaway_score'},
-        E'$allscores{'winning_score'}',
-        $allscores{'winning_score_score'},
-        $allscores{'winning_score_distance'},
-        E'$allscores{'second_place_score'}',
-        \$1,\$2,\$3,\$4,\$5,\$6,\$7,\$8,\$9,(SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),\$10,\$11
-        )";
-        my @values = (
-        $fingerprints{item_form},
-        $fingerprints{date1},
-        $fingerprints{record_type},
-        $fingerprints{bib_lvl},
-        $fingerprints{title},
-        $fingerprints{author},
-        $fingerprints{baseline},
-        $fingerprints{audioformat},
-        $fingerprints{videoformat},
-        $fingerprints{alternate},
-        $fingerprints{tag902}
-        );
-        # $log->addLine($query);
-        # $log->addLine(Dumper(\@values));
-        $dbHandler->updateWithParameters($query,\@values);
-        updateBibCircsScore($bibid);
-        updateBibCallLabelsScore($bibid);
-        updateBibCopyLocationsScore($bibid);
-    }
-    foreach(@updateIDs)
-    {
-        my @thisone = @{$_};
-        my $bibid = @thisone[0];
-        $log->addLine("Updating Score ".@thisone[0]);
-        my $marc = @thisone[1];
-        my $bibscoreid = @thisone[2];
-        my $oldscore = @thisone[3];
-        my $marcob = $marc;
-        $marcob =~ s/(<leader>.........)./${1}a/;
-        $marcob = MARC::Record->new_from_xml($marcob);
-        my $score = scoreMARC($marcob);
-        my %allscores = %{getAllScores($marcob)};
-        my %fingerprints = %{getFingerprints($marcob)};
-        my $improved = $score - $oldscore;
-        my $query = "UPDATE SEEKDESTROY.BIB_SCORE SET IMPROVED_SCORE_AMOUNT = $improved, SCORE = $score, SCORE_TIME=NOW(),
-        ELECTRONIC=$allscores{'electricScore'},
-        audiobook_score=$allscores{'audioBookScore'},
-        largeprint_score=$allscores{'largeprint_score'},
-        video_score=$allscores{'video_score'},
-        microfilm_score=$allscores{'microfilm_score'},
-        microfiche_score=$allscores{'microfiche_score'},
-        music_score=$allscores{'music_score'},
-        playaway_score=$allscores{'playaway_score'},
-        winning_score=E'$allscores{'winning_score'}',
-        winning_score_score=$allscores{'winning_score_score'},
-        winning_score_distance=$allscores{'winning_score_distance'},
-        second_place_score=E'$allscores{'second_place_score'}',
-        item_form = \$1,
-        date1 = \$2,
-        record_type = \$3,
-        bib_lvl = \$4,
-        title = \$5,
-        author = \$6,
-        sd_fingerprint = \$7,
-        audioformat = \$8,
-        videoformat = \$9,
-        eg_fingerprint = (SELECT FINGERPRINT FROM BIBLIO.RECORD_ENTRY WHERE ID=$bibid),
-        sd_alt_fingerprint = \$10,
-        tag902 = \$11
-        WHERE ID=$bibscoreid";
-        my @values = (
-        $fingerprints{item_form},
-        $fingerprints{date1},
-        $fingerprints{record_type},
-        $fingerprints{bib_lvl},
-        $fingerprints{title},
-        $fingerprints{author},
-        $fingerprints{baseline},
-        $fingerprints{audioformat},
-        $fingerprints{videoformat},
-        $fingerprints{alternate},
-        $fingerprints{tag902}
-        );
-        $dbHandler->updateWithParameters($query,\@values);
-        updateBibCircsScore($bibid);
-        updateBibCallLabelsScore($bibid);
-        updateBibCopyLocationsScore($bibid);
-    }
-}
+        VALUES
+multilinestring
 
-sub updateBibCircsScore
-{
-    my $bibid = @_[0];
-    my $query = "DELETE FROM seekdestroy.bib_item_circ_mods WHERE RECORD=$bibid";
-    $dbHandler->update($query);
-
-    $query = "
-    select ac.circ_modifier,acn.record from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
-    acn.id=ac.call_number and
-    bre.id=acn.record and
-    acn.record = $bibid and
-    not acn.deleted and
-    not bre.deleted and
-    not ac.deleted
-    group by ac.circ_modifier,acn.record
-    order by record";
-    my $allcircs='';
-    my @results = @{$dbHandler->query($query)};
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        my $circmod = @row[0];
-        my $record = @row[1];
-        my $q="INSERT INTO seekdestroy.bib_item_circ_mods(record,circ_modifier,job)
-        values
-        (\$1,\$2,\$3)";
-        my @values = ($record,$circmod,$jobid);
-        $allcircs.=$circmod.',';
-        # We're not currently utilizing this table in this code, commenting out for speed
-        # $dbHandler->updateWithParameters($q,\@values);
-    }
-    $allcircs=substr($allcircs,0,-1);
-    my $opacicons='';
-    # get opac icon string
-    $query = "select string_agg(value,\$\$,\$\$) from metabib.record_attr_flat where attr=\$\$icon_format\$\$ and id=$bibid";
-    my @results = @{$dbHandler->query($query)};
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        $opacicons = @row[0];
-    }
-    $query = "UPDATE SEEKDESTROY.BIB_SCORE SET OPAC_ICON=\$1,CIRC_MODS=\$2 WHERE RECORD=$bibid";
-    my @values = ($opacicons,$allcircs);
-    #$log->addLine($query);
-    #$log->addLine("$opacicons $allcircs");
-    $dbHandler->updateWithParameters($query,\@values);
-
-}
-
-sub updateBibCallLabelsScore
-{
-    my $bibid = @_[0];
-    my $query = "DELETE FROM seekdestroy.bib_item_call_labels WHERE RECORD=$bibid";
-    $dbHandler->update($query);
-
-    $query = "
-    select
-    (select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
-    from asset.copy ac,asset.call_number acn,biblio.record_entry bre where
-    acn.id=ac.call_number and
-    bre.id=acn.record and
-    acn.record = $bibid and
-    not acn.deleted and
-    not bre.deleted and
-    not ac.deleted
-    group by (select label from asset.call_number_prefix where id=acn.prefix)||acn.label||(select label from asset.call_number_suffix where id=acn.suffix),acn.record
-    order by record";
-    my $allcalls='';
-    my @results = @{$dbHandler->query($query)};
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        my $calllabel = @row[0];
-        my $record = @row[1];
-        my $q="INSERT INTO seekdestroy.bib_item_call_labels(record,call_label,different_call_labels,job)
-        values
-        (\$1,\$2,\$3,\$4)";
-        my @values = ($record,$calllabel,$#results+1,$jobid);
-        $allcalls.=$calllabel.',';
-        # We're not currently utilizing this table in this code, commenting out for speed
-        # $dbHandler->updateWithParameters($q,\@values);
-    }
-    $allcalls=substr($allcalls,0,-1);
-
-    $query = "UPDATE SEEKDESTROY.BIB_SCORE SET CALL_LABELS=\$1 WHERE RECORD=$bibid";
-    my @values = ($allcalls);
-    $dbHandler->updateWithParameters($query,\@values);
-}
-
-sub updateBibCopyLocationsScore
-{
-    my $bibid = @_[0];
-    my $query = "DELETE FROM seekdestroy.bib_item_locations WHERE RECORD=$bibid";
-    $dbHandler->update($query);
-
-    $query = "
-    select
-    acl.name,acn.record
-    from asset.copy ac,asset.call_number acn,biblio.record_entry bre,asset.copy_location acl where
-    acl.id=ac.location and
-    acn.id=ac.call_number and
-    bre.id=acn.record and
-    acn.record = $bibid and
-    not acn.deleted and
-    not bre.deleted and
-    not ac.deleted
-    group by acl.name,acn.record
-    order by record";
-    my $alllocs='';
-    my @results = @{$dbHandler->query($query)};
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        my $location = @row[0];
-        my $record = @row[1];
-        my $q="INSERT INTO seekdestroy.bib_item_locations(record,location,different_locations,job)
-        values
-        (\$1,\$2,\$3,\$4)";
-        my @values = ($record,$location,$#results+1,$jobid);
-        $alllocs.=$location.',';
-        # We're not currently utilizing this table in this code, commenting out for speed
-        # $dbHandler->updateWithParameters($q,\@values);
-    }
-    $alllocs=substr($alllocs,0,-1);
-
-    $query = "UPDATE SEEKDESTROY.BIB_SCORE SET COPY_LOCATIONS=\$1 WHERE RECORD=$bibid";
-    my @values = ($alllocs);
-    $dbHandler->updateWithParameters($query,\@values);
-}
-
-sub findPhysicalItemsOnElectronicBooksUnDedupe
-{
-    # Find Electronic bibs with physical items and in the dedupe project
-    # This function is site specific. No calls to it
-
-    my $query = "
-    select id,marc from biblio.record_entry where not deleted and lower(marc) ~ \$\$<datafield tag=\"856\" ind1=\"4\" ind2=\"0\">\$\$
-    and id in
+    $insertValues = substr($insertValues, 0, -1); # strip trialing comma
+    $bibids = substr($bibids, 0, -1); # strip trialing comma
+    $dbHandler->update("DELETE FROM seekdestroy.bib_score WHERE record IN($bibids)");
+    # $log->addLine($queryTemplate . $insertValues);
+    $dbHandler->updateWithParameters($queryTemplate . $insertValues, $valueRef);
+    my $circQuery = <<"multilinestring";
+    UPDATE seekdestroy.bib_score sbs2
+    SET
+    circ_mods = circmap.circmods,
+    opac_icon = opacmap.icons,
+    call_labels = callmap.callnums,
+    copy_locations = locationmap.locations,
+    eg_fingerprint = egfingerprintmap.egfingerprint
+    FROM
+    seekdestroy.bib_score sbs
+    LEFT JOIN
     (
-    select record from asset.call_number where not deleted and id in(select call_number from asset.copy where not deleted)
-    )
-    and id in
-    (select lead_bibid from m_dedupe.merge_map)
-    and
+        SELECT sbs.id,string_agg(DISTINCT ac.circ_modifier,\$\$,\$\$) "circmods"
+        FROM
+        seekdestroy.bib_score sbs
+        JOIN biblio.record_entry bre ON (bre.id=sbs.record AND NOT bre.deleted)
+        JOIN asset.call_number acn ON (bre.id=acn.record AND NOT acn.deleted)
+        JOIN asset.copy ac ON (acn.id=ac.call_number AND NOT ac.deleted)
+        WHERE
+        bre.id IN($bibids)
+        GROUP BY 1
+    ) AS "circmap" ON (circmap.id=sbs.id)
+    LEFT JOIN
     (
-        marc ~ \$\$tag=\"008\">.......................[oqs]\$\$
-        or
-        marc ~ \$\$tag=\"006\">......[oqs]\$\$
-    )
-    and
+        SELECT sbs.id,string_agg(DISTINCT acl.name,\$\$,\$\$) "locations"
+        FROM
+        seekdestroy.bib_score sbs
+        JOIN biblio.record_entry bre ON (bre.id=sbs.record AND NOT bre.deleted)
+        JOIN asset.call_number acn ON (bre.id=acn.record AND NOT acn.deleted)
+        JOIN asset.copy ac ON (acn.id=ac.call_number AND NOT ac.deleted)
+        JOIN asset.copy_location acl on(acl.id=ac.location)
+        WHERE
+        bre.id IN($bibids)
+        GROUP BY 1
+    ) AS "locationmap" ON (locationmap.id=sbs.id)
+    LEFT JOIN
     (
-        marc ~ \$\$<leader>......[at]\$\$
-    )
-    and
+        SELECT sbs.id,string_agg(DISTINCT mraf.value,\$\$,\$\$) "icons"
+        FROM
+        seekdestroy.bib_score sbs
+        JOIN biblio.record_entry bre ON (bre.id=sbs.record AND NOT bre.deleted)
+        JOIN metabib.record_attr_flat mraf ON(mraf.attr=\$\$icon_format\$\$ AND mraf.id=bre.id AND mraf.id IN($bibids))
+        GROUP BY 1
+    ) AS "opacmap" ON (opacmap.id=sbs.id)
+    LEFT JOIN
     (
-        marc ~ \$\$<leader>.......[acdm]\$\$
-    )
-    ";
-    updateJob("Processing","findPhysicalItemsOnElectronicBooksUnDedupe  $query");
-    my @results = @{$dbHandler->query($query)};
-    $log->addLine(($#results+1)." Bibs with physical Items attached from the dedupe");
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        my $bibid = @row[0];
-        my $marc = @row[1];
-        my @scorethis = ($bibid,$marc);
-        my @st = ([@scorethis]);
-        updateScoreCache(\@st);
-        recordAssetCopyMove($bibid);
-    }
+        SELECT sbs.id,STRING_AGG(DISTINCT BTRIM(COALESCE(acnp.label,'')||' '||acn.label||' '||COALESCE(acns.label,'')),\$\$,\$\$) "callnums"
+        FROM
+        seekdestroy.bib_score sbs
+        JOIN biblio.record_entry bre ON (bre.id=sbs.record AND NOT bre.deleted)
+        JOIN asset.call_number acn ON (bre.id=acn.record AND NOT acn.deleted)
+        JOIN asset.copy ac ON (acn.id=ac.call_number AND NOT ac.deleted)
+        LEFT JOIN asset.call_number_prefix acnp ON (acnp.id=acn.prefix)
+        LEFT JOIN asset.call_number_suffix acns ON (acns.id=acn.suffix)
+        WHERE
+        bre.id IN($bibids)
+        GROUP BY 1
+    ) AS "callmap" ON (callmap.id=sbs.id)
+    LEFT JOIN
+    (
+        SELECT sbs.id,bre.fingerprint "egfingerprint"
+        FROM
+        seekdestroy.bib_score sbs
+        JOIN biblio.record_entry bre ON (bre.id=sbs.record AND NOT bre.deleted)
+        WHERE
+        bre.id IN($bibids) AND
+        btrim(bre.fingerprint) != \$\$\$\$
+    ) AS "egfingerprintmap" ON (egfingerprintmap.id=sbs.id)
+    WHERE
+    sbs.id=sbs2.id AND
+    sbs.record IN($bibids)
+
+multilinestring
+        # $log->addLine($circQuery);
+        $dbHandler->update($circQuery);
 }
 
 sub getBibScores
@@ -2340,9 +2167,14 @@ sub addBibMatch
         my $bibAudioScore = getBibScores($bibid,'audiobook_score');
         my $marc = @row[1];
         my $extra = @row[2] ? @row[2] : '';
-        my @scorethis = ($bibid,$marc);
-        my @st = ([@scorethis]);
-        updateScoreCache(\@st);
+        my %pair = (
+            'id' => $bibid,
+            'marc' => $marc
+        );
+        my @scorethis = (\%pair);
+        updateScoreCache(\@scorethis);
+        undef @scorethis;
+        undef %pair;
         my $query="INSERT INTO SEEKDESTROY.PROBLEM_BIBS(RECORD,PROBLEM,EXTRA,JOB) VALUES (\$1,\$2,\$3,\$4)";
         updateJob("Processing","addBibMatch  $query");
         my @values = ($bibid,$problem,$extra,$jobid);
@@ -2669,9 +2501,14 @@ sub findPhysicalItemsOnElectronicAudioBooksUnDedupe
         my @row = @{$row};
         my $bibid = @row[0];
         my $marc = @row[1];
-        my @scorethis = ($bibid,$marc);
-        my @st = ([@scorethis]);
-        updateScoreCache(\@st);
+        my %pair = (
+            'id' => $bibid,
+            'marc' => $marc
+        );
+        my @scorethis = (\%pair);
+        updateScoreCache(\@scorethis);
+        undef @scorethis;
+        undef %pair;
         recordAssetCopyMove($bibid);
     }
 
@@ -2886,17 +2723,16 @@ sub updateScoreWithQuery
 {
     my $query = @_[0];
     my @results = @{$dbHandler->query($query)};
+    my @scoreSet = ();
     foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        my $bibid = @row[0];
-        my $marc = @row[1];
-        my @scorethis = ($bibid,$marc);
-        # $log->addLine("Scoring: $bibid");
-        my @st = ([@scorethis]);
-        updateScoreCache(\@st);
+    {   
+        my %pair = (
+            'id' => $_->[0],
+            'marc' => $_->[1]
+        );
+        push(@scoreSet, \%pair);
     }
+    updateScoreCache(\@scoreSet);
 }
 
 sub findPossibleDups
@@ -2970,6 +2806,7 @@ sub findPossibleDups
                 WHERE
                 NOT bre.deleted AND
                 bre.id > -1 AND
+                fingerprint != \$\$\$\$ AND
                 sbss.record IS NULL
                 GROUP BY fingerprint
                 HAVING count(*) > 1
@@ -2990,21 +2827,25 @@ sub findPossibleDups
     my %alreadycached=();
     my $deleteoldscorecache="";
     updateJob("Processing","findPossibleDups  looping results");
+    my @scoreSet = ();
     foreach(@results)
     {
         my $row = $_;
         my @row = @{$row};
         my $id = @row[0];
-        my $fingerprint = @row[1];
         my $marc = @row[2];
         if(!$alreadycached{$id})
         {
+            my %pair = (
+                'id' => $id,
+                'marc' => $marc
+            );
+            push(@scoreSet, \%pair);
             $alreadycached{$id}=1;
-            my @scorethis = ($id,$marc);
-            push(@st,[@scorethis]);
             $deleteoldscorecache.="$id,";
         }
     }
+    updateScoreCache(\@scoreSet) if $#scoreSet > -1;
     undef %alreadycached;
 
     if(length($deleteoldscorecache) > 0)
@@ -3015,8 +2856,6 @@ sub findPossibleDups
         $dbHandler->update($q);
     }
     updateJob("Processing","findPossibleDups updating scorecache selectively");
-    updateScoreCache(\@st);
-
 
     my $query="
     select
@@ -3084,17 +2923,20 @@ sub findPossibleDups
             }
         }
     }
-    my $query = 'select bib1,bib2,
+    my $query = 'select
+    bib1,
+    bib2,
     $$'.$domainname.'eg/opac/record/$$||bib1||$$?expand=marchtml$$ "leadlink",
     $$'.$domainname.'eg/opac/record/$$||bib2||$$?expand=marchtml$$ "sublink",
-    has_holds,
     (select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib1) "leadicon",
     (select string_agg(value,$$,$$) from metabib.record_attr_flat where attr=$$icon_format$$ and id=sbm.bib2) "subicon",
     string_agg(distinct aou_bib1.shortname,\',\'),
     string_agg(distinct aou_bib2.shortname,\',\'),
-    string_agg(distinct mtfe.value,\' !! \') "title"
+    string_agg(distinct mtfe.value,\' !! \') "title",
+    bre1.marc,
+    bre2.marc
     from
-    seekdestroy.bib_match sbm
+    (select * from seekdestroy.bib_match where job = '.$jobid.' !!orderlimit!!) sbm
     left join asset.call_number acn_bib1 on (acn_bib1.record=sbm.bib1 and not acn_bib1.deleted)
     left join asset.call_number acn_bib2 on (acn_bib2.record=sbm.bib2 and not acn_bib2.deleted)
     left join actor.org_unit aou_bib1 on (aou_bib1.id=acn_bib1.owning_lib)
@@ -3102,42 +2944,69 @@ sub findPossibleDups
     join biblio.record_entry bre1 on (sbm.bib1=bre1.id and not bre1.deleted)
     join biblio.record_entry bre2 on (sbm.bib2=bre2.id and not bre2.deleted)
     left join metabib.title_field_entry mtfe on (mtfe.source=sbm.bib1)
-    where
-    job='.$jobid.'
     group by
-    1,2,3,4,5,6,7
+    1,2,3,4,10,11
     order by 1,2';
 
     $log->addLogLine($query);
-    my @results = @{$dbHandler->query($query)};
-    my $autoList;
-    my $needsHumans;
+    my @results = @{getDBChunked($query)};
+    my $autoList = "";
+    my $needsHumans = "";
     foreach(@results)
     {
-        my $row = $_;
-        my @row = @{$row};
-        my $out = join(';',@row);
-        my $validator = additionalDedupeValidator(@row[0], @row[1], @row[5], @row[6], $branchBreakMerge);
+        my %row = (
+            'leadbib_id'                => $_->[0],
+            'subbib_id'                 => $_->[1],
+            'lead_link'                 => $_->[2],
+            'sub_link'                  => $_->[3],
+            'leadicon'                  => $_->[4],
+            'subicon'                   => $_->[5],
+            'lead_libs_with_items'      => $_->[6],
+            'sub_libs_with_items'       => $_->[7],
+            'title'                     => $_->[8],
+            'lead_marc_xml'             => $_->[9],
+            'sub_marc_xml'              => $_->[10],
+            'lead_marcobject'           => createMARCObjectFromXML($_->[9]),
+            'sub_marcobject'            => createMARCObjectFromXML($_->[10])
+        );
+        # hack to make the output semicolon delimited, easy to import into spreadsheets
+        my $out =
+            $row{'leadbib_id'}            . "\t" .
+            $row{'subbib_id'}             . "\t" .
+            $row{'lead_link'}             . "\t" .
+            $row{'sub_link'}              . "\t" .
+            $row{'leadicon'}              . "\t" .
+            $row{'subicon'}               . "\t" .
+            $row{'lead_libs_with_items'}  . "\t" .
+            $row{'sub_libs_with_items'}   . "\t" .
+            $row{'title'};
+
+        my $validator = additionalDedupeValidator(\%row, $branchBreakMerge);
         if($validator eq '1')
         {
             $autoList .= $out . "\n";
             if(!$dryrun)
             {
                 # Now let's merge!
-                mergeBibsWithMetarecordHoldsInMind(@row[0],@row[1],"Merge Matching");
+                mergeBibsWithMetarecordHoldsInMind(\%row, "Merge Matching");
             }
         }
         else
         {
-            $needsHumans .= "$validator;" . $out . "\n";
+            $needsHumans .= "$validator\t" . $out . "\n";
         }
         undef $out;
+        undef %row;
     }
 
     $log->addLogLine("These were automatically merged:");
-    $log->addLine($autoList);
+    $log->addLine("=========== AUTO LIST START ===========\n" . $autoList . "=========== AUTO LIST END ===========\n");
     $log->addLogLine("These were leftover for humans:");
-    $log->addLine($needsHumans);
+    $log->addLine("=========== HUMANS LIST START ===========\n" . $needsHumans . "=========== HUMANS LIST END ===========\n");
+    my $spreadsheetOutput = new Loghandler($baseTemp . "dedupe_auto.tsv");
+    $spreadsheetOutput->truncFile($autoList);
+    $spreadsheetOutput = new Loghandler($baseTemp . "dedupe_humans.tsv");
+    $spreadsheetOutput->truncFile($needsHumans);
     undef $autoList;
     undef $needsHumans;
 
@@ -3164,7 +3033,6 @@ sub findPossibleDups
             my $out = join(';',@row);
             $log->addLine($out);
         }
-
 
         my $query = "select ahr.id, ahr.current_copy
                     from
@@ -3222,28 +3090,74 @@ sub findPossibleDups
     }
 }
 
+sub getDBChunked
+{
+    my $queryTemplate = shift;
+    my $offset = 0;
+    my @ret = ();
+    my $limit = 50;
+    if ($queryTemplate =~ /!!orderlimit!!/)
+    {
+        $queryTemplate =~ s/!!orderlimit!!/ORDER BY 1 LIMIT $limit OFFSET !OFFSET!/g ;
+    }
+    else
+    {
+        $queryTemplate.="\nORDER BY 1\n LIMIT $limit OFFSET !OFFSET!";
+    }
+    my $loops = 0;
+    my $data = 1;
+
+    while($data)
+    {
+        my $query = $queryTemplate;
+        $query =~ s/!OFFSET!/$offset/g;
+        $log->addLogLine($offset);
+        updateJob("Processing", "getDBChunked  $query", 'no');
+        my @theseRows = @{$dbHandler->query($query)};
+        $data = 0 if($#theseRows < 0 );
+        push @ret, @theseRows if ($#theseRows > -1 );
+        $loops++;
+        $offset = ($loops * $limit);
+        undef @theseRows;
+    }
+    return \@ret;
+}
+
+
 sub additionalDedupeValidator
 {
-    my $leadbib = shift;
-    my $subbib = shift;
-    my $leadbib_format = shift;
-    my $subbib_format = shift;
+    my $data = shift;
     my $branchBreakMerge = shift;
-    my @notAllowedMergedFormats =
-    (
-        'dvd',
-        'vhs',
-        'blu-ray',
-        'serial',
-        'microform'
-    );
-
-    return "different formats" if $leadbib_format ne $subbib_format;
-    foreach(@notAllowedMergedFormats)
+    my @leadIcons = split(/,/,$data->{'leadicon'});
+    my @videoFormats = ('dvd', 'vhs', 'blu-ray', 'four-k-blu-ray');
+    my @allowedMergedFormats =('blu-ray','book','casaudiobook','casmusic','cdaudiobook','cdmusic','dvd','eaudio','ebook','evideo','four-k-blu-ray','lpbook','music','phonomusic','phonospoken','vhs');
+    my $is_video = 0;
+    foreach(@videoFormats)
     {
-        return "Format not allowed to merge: $_" if $leadbib_format eq $_;
+        my $thisFormat = $_;
+        foreach(@leadIcons)
+        {
+            $is_video = 1 if $thisFormat eq $_;
+            last if $is_video;
+        }
+        last if $is_video;
     }
+    return "different formats" if $data->{'leadicon'} ne $data->{'subicon'};
+    my $is_allowed = 0;
+    foreach(@leadIcons)
+    {
+        my $thisFormat = $_;
+        foreach(@allowedMergedFormats)
+        {
+            $is_allowed = 1 if $thisFormat eq $_;
+            last if $is_allowed;
+        }
+        last if $is_allowed;
+    }
+    return "Format not allowed to merge: " . $data->{'leadicon'} if !$is_allowed;
 
+    my $leadbib = $data->{'leadbib_id'};
+    my $subbib = $data->{'subbib_id'};
     my $query = "
     select
     lead_list.list,sub_list.list
@@ -3270,16 +3184,14 @@ sub additionalDedupeValidator
         my $sublist = @row[1];
         my $bigger = length($leadlist) > length($sublist) ? $leadlist : $sublist;
         my $smaller = length($leadlist) > length($sublist) ? $sublist : $leadlist;
-        #Join them all together for this routine, don't need to cross compare
-        $bigger = ',' . $bigger . ',' . $smaller . ',';
         if($branchBreakMerge)
         {
-            #Wrap it in commas so we can delimit exactly
-            $smaller = ',' . $smaller . ',';
+            #Join them all together for this routine, don't need to cross compare
+            $bigger = ',' . $bigger . ',' . $smaller . ',';
             my @vals = split(/,/,$branchBreakMerge);
             foreach(@vals)
             {
-                return "specified branch breaker exists" if $bigger =~ m/,$_,/;
+                return "specified branch breaker exists: $_" if $bigger =~ m/,$_,/;
             }
         }
         else
@@ -3292,31 +3204,35 @@ sub additionalDedupeValidator
         }
     }
 
-    # ISBN's are required to have at least one in common
-    my @isbnMatches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getISBNDeduped($marc)')};
-    # if neither record has an 020, then we're a match.
-    # if only one record has 020s then it's a match
-    if($#isbnMatches == 1) # but if both records have 020s, then we need to go deeper
+    # Video Formats are exempt from ISBN Tests
+    if(!$is_video)
     {
-        my $isbnMatch = hasMatchingValueBetweenTwoArrays(\@isbnMatches);
-        # we're configured to require at least one matching ISBN
-        return "no ISBNs in common" if ( (!$isbnMatch) and lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) ne 'yes' );
-        # we're configured to allow for non-matching ISBN's but instead require matching 245$h
-        if( (!$isbnMatch) and lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) eq 'yes' )
+        # ISBN's are required to have at least one in common
+        my @isbnMatches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getDedupedField($marc, "020")')};
+        # if neither record has an 020, then we're a match.
+        # if only one record has 020s then it's a match
+        if($#isbnMatches == 1) # but if both records have 020s, then we need to go deeper
         {
-            my @t245Matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getNormalized245h($marc)')};
-            return "no ISBNs in common and no 245h in common" if ($#t245Matches == 0); # meaning only one of the two bibs have a 245h
-            if($#t245Matches == 1) # If both bibs have a 245h, then we need to ensure they have a matching 245h
+            my $isbnMatch = hasMatchingValueBetweenTwoArrays(\@isbnMatches);
+            # we're configured to require at least one matching ISBN
+            return "no ISBNs in common" if ( (!$isbnMatch) and lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) ne 'yes' );
+            # we're configured to allow for non-matching ISBN's but instead require matching 245$h
+            if( (!$isbnMatch) and lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) eq 'yes' )
             {
-                my $t245hnMatch = hasMatchingValueBetweenTwoArrays(\@t245Matches);
-                return "no ISBNs in common and no 245h in common" unless $t245hnMatch;
+                my @t245Matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getNormalized245h($marc)')};
+                return "no ISBNs in common and no 245h in common" if ($#t245Matches == 0); # meaning only one of the two bibs have a 245h
+                if($#t245Matches == 1) # If both bibs have a 245h, then we need to ensure they have a matching 245h
+                {
+                    my $t245hnMatch = hasMatchingValueBetweenTwoArrays(\@t245Matches);
+                    return "no ISBNs in common and no 245h in common" unless $t245hnMatch;
+                }
             }
         }
     }
 
     if( lc($conf{"dedupe_check_oclc_on_both_bibs"}) eq 'yes' )
     {
-        my @oclcMatches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getOCLCFrom035($marc, 1, 1)')};
+        my @oclcMatches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getOCLCFrom035($marc, 1, 1)')};
         # if neither record has an OCLC, then we're a match.
         if($#oclcMatches == 1) # if they both have an OCLC number, we go deeper
         {
@@ -3336,7 +3252,7 @@ sub additionalDedupeValidator
             # little error checking on the user-supplied field
             if($thisCustomMatchTag =~ /^\d\d\d[0-9A-z]$/)
             {
-                my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($leadbib, $subbib, 'getSpecifiedTag($marc, $extraData)', $thisCustomMatchTag)};
+                my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData)', $thisCustomMatchTag)};
                 # if neither record has an OCLC, then we're a match.
                 if($#matches == 1) # if they both have the custom specified tag/subfield, we go deeper
                 {
@@ -3351,6 +3267,77 @@ sub additionalDedupeValidator
         }
     }
 
+    # Video format specific rules
+    if($is_video)
+    {
+        # we don't want "rental" video's to merge with non-rentals
+        # "rental" is the term we're looking for, but that can appear as a substring for things like "parental"
+        # So, we're going to restrict it to only the 250a and the 500a
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,500a')};
+        my @phrases = ('[^\w]rental','^rental');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "video rental in one but not both" if !$pass;
+
+        # fullscreen
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,500a,538a')};
+        my @phrases = ('full[\-|\s]*screen');
+        my @negPhrases = ('wide[\-|\s]*screen');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases, \@negPhrases);
+        return "video fullscreen in one but not both" if !$pass;
+
+        # widescreen
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,500a,538a')};
+        my @phrases = ('wide[\-|\s]*screen');
+        my @negPhrases = ('full[\-|\s]*screen');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases, \@negPhrases);
+        return "video widescreen in one but not both" if !$pass;
+
+        # 3d
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,500a,538a')};
+        my @phrases = ('3[\-]*d[^\w]','3[\-]*d$');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "video 3D in one but not both" if !$pass;
+
+        # ultra 4k
+        # not using "ultra" - too many false positives
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,500a,538a')};
+        my @phrases = ('4k');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "video 4k in one but not both" if !$pass;
+
+        # extended
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,521a')};
+        my @phrases = ('extended');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "video extended in one but not both" if !$pass;
+
+        # directors cut
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,500a')};
+        my @phrases = ('director\'?s\s*cut');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "video directors cut in one but not both" if !$pass;
+
+        # uncut
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a,521a')};
+        my @phrases = ('un\-*cut');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "video uncut in one but not both" if !$pass;
+
+        # color
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '300b')};
+        my @phrases = ('[^\w]col\.','color','[^\w]col[^\w]','[^\w]col$');
+        my @negPhrases = ('black\s*and\s*white','black\s*&\s*white');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases, \@negPhrases);
+        return "video color in one but not both" if !$pass;
+
+        # black and white
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '300b')};
+        my @phrases = ('black\s*and\s*white','black\s*&\s*white');
+        my @negPhrases = ('[^\w]col\.','color','[^\w]col[^\w]','[^\w]col$');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases, \@negPhrases);
+        return "video black and white in one but not both" if !$pass;
+
+    }
     return '1';
 }
 
@@ -3398,23 +3385,72 @@ sub hasMatchingValueBetweenTwoArrays
     return $match;
 }
 
+sub hasMatchingSpecifiedValueBetweenTwoArrays
+{
+    my $arrayOfArraysRef = shift;
+    my $valuesRef = shift;
+    my $negativeValuesRef = shift;
+    return 0 unless ref $arrayOfArraysRef eq 'ARRAY';
+    return 0 unless ref $valuesRef eq 'ARRAY';
+    my @arrays = @{$arrayOfArraysRef};
+    my @values = @{$valuesRef};
+    my @negatives = ();
+    @negatives = @{$negativeValuesRef} if ($negativeValuesRef && ref $negativeValuesRef eq 'ARRAY');
+    my @found = (0, 0);
+    my $pos = 0;
+    foreach(@arrays)
+    {
+        my @thisBib = @{$_};
+        foreach(@thisBib)
+        {
+            my $thisBibValue = lc $_;
+            foreach(@values)
+            {
+                my $lower = lc $_;
+                @found[$pos] = 1 if $thisBibValue =~ /$lower/;
+            }
+        }
+        $pos++;
+    }
+    # it passes if neither have any of the phrases or both have any of the phrases, but not when one does and the other doesn't
+    my $ret = ((!@found[0] && !@found[1]) or (@found[0] && @found[1]));
+    # If it's not a passing grade, we might still pass it. As long as the opposite bib doesn't have a "negative" values
+    # AKA, "color" on one bib, and "black and white" on othe other bib
+    # or, "widescreen" on one bib, and "fullscreen" on othe other bib
+    my @negFound = (0, 0);
+    my $pos = 0;
+    if(!$ret && ref $negativeValuesRef eq 'ARRAY')
+    {
+        foreach(@arrays)
+        {
+            my @thisBib = @{$_};
+            foreach(@thisBib)
+            {
+                my $thisBibValue = lc $_;
+                foreach(@negatives)
+                {
+                    my $lower = lc $_;
+                    @negFound[$pos] = 1 if $thisBibValue =~ /$lower/;
+                }
+            }
+            $pos++;
+        }
+        $ret = ((!@negFound[0] && @found[1]) or (!@negFound[1] && @found[0]));
+    }
+    return $ret;
+}
+
 sub generateArrayForProvidedBIBPairAndProvidedPerlSub
 {
-    my $leadbib = shift;
-    my $subbib = shift;
+    my $data = shift;
     my $func = shift;
     my $extraData = shift;
     my @ret = ();
-    return \@ret unless ($leadbib and $subbib and $func);
-    my $query = "select marc from biblio.record_entry where id in($leadbib,$subbib)";
-    my @results = @{$dbHandler->query($query)};
-    foreach(@results)
+    return \@ret unless ($data->{'lead_marcobject'} and $data->{'sub_marcobject'} and $func);
+    my @do = ($data->{'lead_marcobject'}, $data->{'sub_marcobject'});
+    foreach(@do)
     {
-        my $row = $_;
-        my @row = @{$row};
-        my $marc = @row[0];
-        $marc =~ s/(<leader>.........)./${1}a/;
-        $marc = MARC::Record->new_from_xml($marc);
+        my $marc = $_;
         my $perl_eval = '$funcRet = ' . $func . ';';
         $log->addLine($perl_eval) if $debug;
         my $funcRet;
@@ -3424,22 +3460,24 @@ sub generateArrayForProvidedBIBPairAndProvidedPerlSub
             my @thisBibArray = @{$funcRet};
             push (@ret, [@thisBibArray]) if $#thisBibArray > -1; # at least one element, otherwise we don't add it to the array
         }
+        undef $marc;
     }
     return \@ret;
 }
 
 sub mergeBibsWithMetarecordHoldsInMind
 {
-    my $leadbib = @_[0];
-    my $subbib = @_[1];
-    my $reason = @_[2];
+    my $data = shift;
+    my $reason = shift;
+    my $leadbib = $data->{'leadbib_id'};
+    my $subbib = $data->{'subbib_id'};
+    my $leadmarc = $data->{'lead_marcobject'};
+    my $submarc = $data->{'sub_marcobject'};
     my $submetarecord = -1;
     my $leadmetarecord = -1;
     my $leadmetarecordafterupdate = -1;
     my @metarecordsinsubgroup = ();
     my @metarecordsinleadgroup = ();
-    my $leadmarc = 0;
-    my $submarc = 0;
 
     # Get the metarecord ID for the leadbib
     my $query = "select metarecord,source from metabib.metarecord_source_map where source in($subbib,$leadbib)";
@@ -3485,35 +3523,18 @@ sub mergeBibsWithMetarecordHoldsInMind
         }
     }
 
-    # READ MARC FOR THE TWO BIBS
-    my $query = "select id,marc from biblio.record_entry where id in($subbib,$leadbib)";
-    my @results = @{$dbHandler->query($query)};
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        if(@row[0] == $leadbib)
-        {
-            $leadmarc = @row[1];
-            $leadmarc =~ s/(<leader>.........)./${1}a/;
-            $leadmarc = MARC::Record->new_from_xml($leadmarc);
-        }
-        if(@row[0] == $subbib)
-        {
-            $submarc = @row[1];
-            $submarc =~ s/(<leader>.........)./${1}a/;
-            $submarc = MARC::Record->new_from_xml($submarc);
-        }
-    }
-
     #Merge the 856s
-    $leadmarc = mergeMARC856($leadmarc,$submarc);
+    $leadmarc = mergeMARC856($leadmarc, $submarc);
 
     #Merge the 035's if preferred
-    $leadmarc = mergeMARC035($leadmarc,$submarc) if( lc($conf{"dedupe_preserve_oclc_from_sub"}) eq 'yes');
+    $leadmarc = mergeMARC035($leadmarc, $submarc) if( lc($conf{"dedupe_preserve_oclc_from_sub"}) eq 'yes');
 
     #Merge the 020's if preferred
-    $leadmarc = mergeMARC020($leadmarc,$submarc) if( lc($conf{"dedupe_merge_isbns_to_lead"}) eq 'yes');
+    $leadmarc = mergeMARCSpecifiedField($leadmarc, $submarc, '020') if( lc($conf{"dedupe_merge_isbns_to_lead"}) eq 'yes');
+
+    #Merge the 024's if format video and preferred
+    my $is_video = $data->{'leadicon'} eq 'dvd' || $data->{'leadicon'} eq 'vhs' || $data->{'leadicon'} eq 'blu-ray' || 0;
+    $leadmarc = mergeMARCSpecifiedField($leadmarc, $submarc, '024') if( lc($conf{"dedupe_merge_video_024_to_lead"}) eq 'yes' and $is_video );
 
     #Merge any other fields as specified by dedupe_copy_field_list
     $leadmarc = mergeMARCOtherCopyList($leadmarc, $submarc);
@@ -3522,9 +3543,9 @@ sub mergeBibsWithMetarecordHoldsInMind
 
     moveAllCallNumbers($subbib,$leadbib,$reason);
     $query = "update biblio.record_entry set marc=\$1 where id=\$2";
-    my @values = ($leadmarc,$leadbib);
+    my @values = ($leadmarc, $leadbib);
     updateJob("Processing",$query);
-    $dbHandler->updateWithParameters($query,\@values);
+    $dbHandler->updateWithParameters($query, \@values);
 
     # Check to see if the lead record was assigned a new metarecord group
 
@@ -3672,7 +3693,7 @@ updateJob("Processing",$query);
         my $holdid = @row[4];
         recordMetaRecordChange($source,$dest,$fingerprint,"null",$holdid,"Hold pointed to orphaned metarecord");
         $query = "update action.hold_request set target=$dest where id=$holdid and target=$source";
-updateJob("Processing",$query);
+        updateJob("Processing",$query);
         $dbHandler->update($query);
     }
 
@@ -4109,7 +4130,7 @@ sub recordCallNumberMove
     {
         $log->addLine("tobib is null - \$callnumber=$callnumber, FROMBIB=$record, \$matchReason=$matchReason");
     }
-    my $query="INSERT INTO SEEKDESTROY.CALL_NUMBER_MOVE(CALL_NUMBER,FROMBIB,TOBIB,EXTRA,JOB) VALUES(\$1,\$2,\$3,\$4,\$5)";
+    my $query="INSERT INTO seekdestroy.call_number_move(call_number,frombib,tobib,extra,job) VALUES(\$1,\$2,\$3,\$4,\$5)";
     my @values = ($callnumber,$record,$destrecord,$matchReason,$jobid);
     $log->addLine($query);
     $dbHandler->updateWithParameters($query,\@values);
@@ -4124,9 +4145,9 @@ sub moveCallNumber
     my $matchReason = @_[3];
 
     my $finalCallNumber = $callnumberid;
-    my $query = "SELECT ID,LABEL,RECORD FROM ASSET.CALL_NUMBER WHERE RECORD = $destbib
-    AND LABEL=(SELECT LABEL FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid )
-    AND OWNING_LIB=(SELECT OWNING_LIB FROM ASSET.CALL_NUMBER WHERE ID = $callnumberid ) AND NOT DELETED";
+    my $query = "SELECT id,label,record FROM asset.call_number WHERE record = $destbib
+    AND label=(SELECT label FROM asset.call_number WHERE id = $callnumberid )
+    AND owning_lib=(SELECT owning_lib FROM asset.call_number WHERE id = $callnumberid ) AND NOT deleted";
 
     my $moveCopies=0;
     my @results = @{$dbHandler->query($query)};
@@ -4142,7 +4163,7 @@ sub moveCallNumber
         my $destcall = @row[0];
         $log->addLine("Call number $callnumberid had a match on the destination bib $destbib and we will be moving the copies to the call number instead of moving the call number");
         recordCopyMove($callnumberid,$destcall,$matchReason);
-        $query = "UPDATE ASSET.COPY SET CALL_NUMBER=$destcall WHERE CALL_NUMBER=$callnumberid";
+        $query = "UPDATE asset.copy SET call_number=$destcall WHERE call_number=$callnumberid";
         updateJob("Processing","moveCallNumber  $query");
         $log->addLine("Moving copies from $callnumberid call number to $destcall");
         if(!$dryrun)
@@ -4846,37 +4867,37 @@ sub identifyBibsToScore
 {
     my @ret;
 #This query finds bibs that have not received a score at all
-    my $query = "SELECT ID,MARC FROM BIBLIO.RECORD_ENTRY WHERE ID NOT IN(SELECT RECORD FROM SEEKDESTROY.BIB_SCORE) AND DELETED IS FALSE
-    -- LIMIT 100
-    ";
+    my $query = "
+    SELECT
+    bre.id,bre.marc
+    FROM
+    biblio.record_entry bre
+    LEFT JOIN seekdestroy.bib_score sbs ON (sbs.record=bre.id)
+    WHERE
+    sbs.id IS NULL and
+    not bre.deleted
+    
+    UNION ALL
+    
+    SELECT
+    bre.id,bre.marc
+    FROM
+    biblio.record_entry bre
+    JOIN seekdestroy.bib_score sbs ON (sbs.record=bre.id and sbs.score_time < bre.edit_date)
+    WHERE
+    not bre.deleted
+    limit 10";
+
     my @results = @{$dbHandler->query($query)};
-    my @news;
-    my @updates;
+    my @updates = ();
     foreach(@results)
     {
-        my $row = $_;
-        my @row = @{$row};
-        my $id = @row[0];
-        my $marc = @row[1];
-        my @temp = ($id,$marc);
-        push (@news, [@temp]);
+        my %pairs = (
+            'id' => $_->[0],
+            'marc' => $_->[1]
+        );
+        push (@ret, \%pairs);
     }
-#This query finds bibs that have received but the marc has changed since the last score
-    $query = "SELECT SBS.RECORD,BRE.MARC,SBS.ID,SCORE FROM SEEKDESTROY.BIB_SCORE SBS,BIBLIO.RECORD_ENTRY BRE WHERE SBS.score_time < BRE.EDIT_DATE AND SBS.RECORD=BRE.ID";
-    @results = @{$dbHandler->query($query)};
-    foreach(@results)
-    {
-        my $row = $_;
-        my @row = @{$row};
-        my $rec = @row[0];
-        my $marc = @row[1];
-        my $id = @row[2];
-        my $score = @row[3];
-        my @temp = ($rec,$marc,$id,$score);
-        push (@updates, [@temp]);
-    }
-    push(@ret,[@news]);
-    push(@ret,[@updates]);
     return \@ret;
 }
 
@@ -5018,12 +5039,13 @@ sub getsubfield
 
 }
 
-sub mergeMARC020
+sub mergeMARCSpecifiedField
 {
-    my $leadMarc = @_[0];
-    my $subMarc = @_[1];
-    my @lead020 = @{getISBNDeduped($leadMarc)};
-    my @sub020 = @{getISBNDeduped($subMarc)};
+    my $leadMarc = shift;
+    my $subMarc = shift;
+    my $specField = shift;
+    my @lead020 = @{getDedupedField($leadMarc, $specField)};
+    my @sub020 = @{getDedupedField($subMarc, $specField)};
 
     my %needFromSub = ();
     my $need = 0;
@@ -5044,17 +5066,17 @@ sub mergeMARC020
     {
         # copying the whole field, all subfields and whatnot. Which means we need to re-read the whole thing and
         # find the ones that we need
-        my @sub020s = $subMarc->field('020');
+        my @sub020s = $subMarc->field($specField);
         foreach(@sub020s)
         {
             my $field = $_;
-            my @all = $field->subfield('a'); #I realize there could be more than 1 a, but too bad, we're getting the first one
+            my @all = $field->subfield('a');
             foreach(@all)
             {
                 my $thisone = $_;
                 if($thisone)
                 {
-                    $thisone = normalizeISBN($thisone);
+                    $thisone = ($specField eq '020' ? normalizeISBN($thisone) : $thisone);
                     if( $needFromSub{$thisone} )
                     {
                         $needFromSub{$thisone} = 0; # stop matching this, prevent copying multiple 020 fields with the same ISBN (in the case when the sub bib has duplicates)
@@ -5065,8 +5087,10 @@ sub mergeMARC020
             }
             undef $field;
         }
-
+        undef @sub020s;
     }
+    undef %needFromSub;
+    undef $need;
     return $leadMarc;
 }
 
@@ -5186,16 +5210,25 @@ sub getOCLCFrom035
 sub getSpecifiedTag
 {
     my $marc = shift;
-    my $tag = shift;
+    my $search_tags = shift;
+    my $noNormalize = shift || 0;
     my @ret = ();
-    if($tag =~ /^\d\d\d[0-9A-z]$/)
+    my @tags = split(/,/, $search_tags);
+    for my $tag (@tags)
     {
-        my $subfield = chop($tag);
-        my @fieldOb = $marc->field($tag);
-        foreach(@fieldOb)
+        if($tag =~ /^\d\d\d[0-9A-z]$/)
         {
-            my $first = $_->subfield($subfield);
-            push (@ret, normalizeMarcTextField( $first )) if $first;
+            my $subfield = chop($tag);
+            my @fieldOb = $marc->field($tag);
+            foreach(@fieldOb)
+            {
+                my $first = $_->subfield($subfield);
+                if ($first)
+                {
+                    $first = $noNormalize ? $first : normalizeMarcTextField( $first );
+                    push (@ret, $first) ;
+                }
+            }
         }
     }
     return \@ret;
@@ -5529,46 +5562,46 @@ sub populate_marc {
 
     # ISBN Business
     $marc{normalizedisbns} = '';
-    my @isbns = @{getISBNDeduped($record)};
+    my @isbns = @{getDedupedField($record, '020')};
     $marc{normalizedisbns}.=$_.' ' foreach(@isbns);
     $marc{normalizedisbns} = substr($marc{normalizedisbns},0,-1) if(length($marc{normalizedisbns})>0);
 
     return \%marc;
 }
 
-sub getISBNDeduped
+sub getDedupedField
 {
     my $marc = shift;
-    my @isbns = ();
-    my @isbnfields = $marc->field('020');
-    foreach(@isbnfields)
+    my $field = shift;
+    my @fieldDeduped = ();
+    my @fields = $marc->field($field);
+    foreach(@fields)
     {
         my @subs = $_->subfield('a');
-        push (@isbns, @subs);
+        push (@fieldDeduped, @subs);
         undef @subs;
     }
-    undef @isbnfields;
-    my %finalISBNs = ();
-    foreach(@isbns)
+    undef @fields;
+    my %final = ();
+    foreach(@fieldDeduped)
     {
-        my $thisone = normalizeISBN($_);
-        $finalISBNs{$thisone} = 1;
+        my $thisone = ($field eq '020' ? normalizeISBN($_) : $_);
+        $final{$thisone} = 1;
     }
-    undef @isbns;
-    my @isbns = ();
-    while ((my $internal, my $mvalue ) = each(%finalISBNs))
+    undef @fieldDeduped;
+    my @fieldDeduped = ();
+    while ((my $internal, my $mvalue ) = each(%final))
     {
-        push (@isbns, $internal);
+        push (@fieldDeduped, $internal);
     }
-    @isbns = sort(@isbns);
+    @fieldDeduped = sort(@fieldDeduped);
 
-    # $log->addLine(Dumper($marc{normalizedisbns}));
-    # $log->addLine(Dumper(\%marc));
+    # $log->addLine(Dumper(\%final));
 
     # clean the memory
-    undef %finalISBNs;
+    undef %final;
 
-    return \@isbns;
+    return \@fieldDeduped;
 }
 
 sub normalizeISBN
@@ -5640,6 +5673,14 @@ sub marc_isvalid {
     return 1 if ($marc->{item_form} and ($marc->{date1} =~ /\d{4}/) and
                  $marc->{record_type} and $marc->{bib_lvl} and $marc->{title});
     return 0;
+}
+
+sub createMARCObjectFromXML
+{
+    my $marc = shift;
+    $marc =~ s/(<leader>.........)./${1}a/;
+    $marc = MARC::Record->new_from_xml($marc);
+    return $marc;
 }
 
 sub setupSchema
@@ -6020,11 +6061,13 @@ sub seedTattleSystemIndex
 
 sub updateJob
 {
-    my $status = @_[0];
-    my $action = @_[1];
-    $log->addLine($action);
-    my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status='$status', CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action='$action' where id=$jobid";
-    my $results = $dbHandler->update($query);
+    my $status = shift;
+    my $action = shift;
+    my $writeLog = shift || '1';
+    $log->addLine($action) if $writeLog ne 'no';
+    my $query = "UPDATE seekdestroy.job SET last_update_time=now(),status=\$1, CURRENT_ACTION_NUM = CURRENT_ACTION_NUM+1,current_action=\$2 where id=\$3";
+    my @vars = ($status, $action, $jobid);
+    my $results = $dbHandler->updateWithParameters($query, \@vars);
     return $results;
 }
 
