@@ -94,7 +94,9 @@ if($conf)
 
             my $query = "SELECT ated.id,ated.name,
             (SELECT shortname FROM actor.org_unit WHERE id=ated.owner),
-            (CASE WHEN lower(delay::TEXT)!~'day' THEN (SELECT delay FROM action_trigger.event_definition WHERE owner=ated.owner AND reactor='MarkItemLost' AND hook='checkout.due' LIMIT 1) else delay end)
+            (CASE WHEN lower(delay::TEXT)!~'day' THEN (SELECT delay FROM action_trigger.event_definition WHERE owner=ated.owner AND reactor='MarkItemLost' AND hook='checkout.due' LIMIT 1) else delay end),
+            message_template,
+            message_library_path
             FROM action_trigger.event_definition ated
             WHERE
             (ated.granularity~\$\$".$conf{"granularity_name"}."\$\$
@@ -112,8 +114,13 @@ if($conf)
                 my $name=@row[1];
                 my $owning_ou=@row[2];
                 my $delay=@row[3];
-                #$delay =~ s/[\D\s]//g;
-                #print "delay: $delay\n";
+
+                my $specifiedXSLPath = @row[4] || '';
+                $specifiedXSLPath = trim($specifiedXSLPath);
+                $specifiedXSLPath = $conf{"path_to_xsl_template"} if( ! ( -f $specifiedXSLPath) );
+                $specifiedXSLPath = fileNameEscape($specifiedXSLPath);
+
+                my $xmlOnly = @row[5] || '';
                 $daysrepeat = $resetDaysRepeat;
                 while($daysrepeat > -1)
                 {
@@ -125,7 +132,9 @@ if($conf)
                     {
                         my $path = $conf{"outputroot"};
                         $path =~ s/\/+$//; #remove trailing slashes
-                        my $system = lc(getSystemShortCode($internal));
+                        my $system = lc($owning_ou);
+                        $system = lc(getSystemShortCode($internal)) if($internal ne 'combined');
+
                         $path.="/$system";
                         $affectedDirectories{$path}=1;
                         if(!-d $path)
@@ -142,40 +151,38 @@ if($conf)
                             mode => 0755,
                             });
                         }
-                        my $tempxmlfile = $mobUtil->chooseNewFileName($conf{"temp_space"},"temp-$internal-".@date[0],"xml");
-                        my $tempfofile = $mobUtil->chooseNewFileName($conf{"temp_space"},"temp-$internal-".@date[0],"fo");
-                        my $finalpdffile = $path."/$owning_ou $internal-$name-".@date[0].".pdf";                        
-                        my $fopstandardoutput = $conf{"temp_space"}."/fopstandardoutput.out";
+                        my $tempxmlfile = fileNameEscape( $mobUtil->chooseNewFileName($conf{"temp_space"},"temp-$internal-".@date[0],"xml") );
+                        my $tempfofile = fileNameEscape( $mobUtil->chooseNewFileName($conf{"temp_space"},"temp-$internal-".@date[0],"fo") );
+                        my $finalpdffile = fileNameEscape( $path."/$owning_ou $internal-$name-".@date[0].".pdf" );
+                        my $finalxmlfile = fileNameEscape( $path."/$owning_ou $internal-$name-".@date[0].".xml" );
+                        my $fopstandardoutput = fileNameEscape( $conf{"temp_space"}."/fopstandardoutput.out" );
+
                         my $write = new Loghandler($tempxmlfile);
                         $write->addLine("<?xml version='1.0' encoding='UTF-8'?>\n<file type='notice' date='".@date[0]."'>$value</file>");
-                        # gotta escape the space character when working on the bash prompt
-                        $tempxmlfile =~s/\s/\\ /g;
-                        $tempfofile =~s/\s/\\ /g;
-                        $finalpdffile =~s/\s/\\ /g;
-                        $fopstandardoutput=~s/\s/\\ /g;
-                        # gotta remove the ampersand character when working on the bash prompt
-                        $tempxmlfile =~s/&/_/g;
-                        $tempfofile =~s/&/_/g;
-                        $finalpdffile =~s/&/_/g;
-                        $fopstandardoutput=~s/&/_/g;
-                        # gotta remove the parentheses characters when working on the bash prompt
-                        $tempxmlfile =~s/\)/_/g;
-                        $tempfofile =~s/\)/_/g;
-                        $finalpdffile =~s/\)/_/g;
-                        $fopstandardoutput=~s/\)/_/g;
-                        $tempxmlfile =~s/\(/_/g;
-                        $tempfofile =~s/\(/_/g;
-                        $finalpdffile =~s/\(/_/g;
-                        $fopstandardoutput=~s/\(/_/g;
-                        #print "Unlinking $finalpdffile\n";
+
                         unlink $finalpdffile;
-                        $log->addLine( $conf{"xsltproc_binary"}." --stringparam gendate \"".@date[1]."\" --stringparam delayvalue \"$delay\" ".$conf{"path_to_xsl_template"}." $tempxmlfile > $tempfofile");
-                        system($conf{"xsltproc_binary"}." --stringparam gendate \"".@date[1]."\" --stringparam delayvalue \"$delay\" ".$conf{"path_to_xsl_template"}." $tempxmlfile > $tempfofile");
-                        $log->addLine($conf{"fop_binary"}." $tempfofile $finalpdffile > $fopstandardoutput");
-                        system($conf{"fop_binary"}." $tempfofile $finalpdffile > $fopstandardoutput");
-                        if($debug)
+                        my $outputFile = $tempfofile;
+                        $outputFile = $finalxmlfile if($xmlOnly =~ /xmlonly/);
+                        my $xslCMD = $conf{"xsltproc_binary"}." --stringparam gendate \"".@date[1]."\" --stringparam delayvalue \"$delay\" " . $specifiedXSLPath . " $tempxmlfile > $outputFile";
+
+
+                        # Run the XSL template over the data
+                        $log->addLine( $xslCMD );
+                        system($xslCMD);
+
+                        # put the regular spaces back into the path
+                        $outputFile =~s/\\\s/ /g;
+                        $log->addLine("$owning_ou $internal-$name @date[0]");
+                        $log->addLine(checkXMLOutputXSLResult($outputFile));
+                        # it's possible for the output to not have any data. Let's surpress those
+                        unlink $outputFile if( !(checkXMLOutputXSLResult($outputFile)) );
+
+
+                        if(!($xmlOnly =~ /xmlonly/) && -f $outputFile )
                         {
-                            print "Creating $finalpdffile\n";
+                            # Create the PDF File from the XSL output (FO file)
+                            $log->addLine($conf{"fop_binary"}." $tempfofile $finalpdffile > $fopstandardoutput");
+                            system($conf{"fop_binary"}." $tempfofile $finalpdffile > $fopstandardoutput");
                         }
 
                         if(!$debug)
@@ -209,6 +216,42 @@ if($conf)
     }
 }
 
+sub checkXMLOutputXSLResult
+{
+    my $outputFile = shift;
+    my $xs = new XML::Simple;
+    my $data = $xs->XMLin($outputFile);
+    my $datacount = -2; # There should be 2 by default. 2 means no data.
+    if(ref $data eq 'HASH')
+    {
+        while ((my $internal, my $value ) = each(%{$data}))
+        {
+            $datacount++;
+        }
+    }
+    elsif(ref $data eq 'ARRAY')
+    {
+        foreach(@{$data})
+        {
+            $datacount++;
+        }
+    }
+    return $datacount;
+}
+
+sub fileNameEscape
+{
+    my $name = shift;
+    # gotta escape the space character when working on the bash prompt
+    $name =~ s/\s/\\ /g;
+    # gotta remove the ampersand character when working on the bash prompt
+    $name =~ s/&/_/g;
+    # gotta remove the parentheses characters when working on the bash prompt
+    $name =~ s/\)/_/g;
+    $name =~ s/\(/_/g;
+    return $name;
+}
+
 sub reIndex
 {
     my $path = $conf{"outputroot"};
@@ -239,7 +282,7 @@ sub setupIndexForAffectedDirectories
             # We only want files
             next unless (-f "$dir/$file");
             # Use a regular expression to find files ending in .pdf
-            next unless (lc$file =~ m/\.pdf$/);
+            next unless (lc$file =~ m/\.[px][dm][fl]$/);
             push(@files,$file);
         }
         closedir(DIR);
@@ -249,6 +292,7 @@ sub setupIndexForAffectedDirectories
 
         my $branchName = "";
         my $reportName = "";
+        $content.="<br>\n<a href=\"#combined\">Jump to combined notices</a>\n<br>";
         $content.="<ul>\n";
         foreach(@files)
         {
@@ -257,12 +301,23 @@ sub setupIndexForAffectedDirectories
             my @s = split(/\s/,$file);
             my @s2 = split(/-/,@s[1]);
             my $reportNameTest = pop @s2;
-            my $bname = getBranchName(join("-",@s2));           
+            my $shortcode = join("-",@s2);
+            my $bname = $shortcode;
+            if($shortcode eq 'combined'){
+                $bname = 'Combined Notices';
+            }
+            else{
+                $bname = getBranchName($shortcode);
+            }
             if($branchName ne $bname)
             {
                 $branchName = $bname;
                 $reportName = $reportNameTest;
+                $content.="<a name=\"$shortcode\"></a>";
                 $content.="<h2>$branchName</h2>";
+                if($shortcode eq 'combined'){
+                $content.="<div>These documents contain all of the branches' notices combined.</div>";
+                }
             }
             elsif($reportName ne $reportNameTest)
             {
@@ -313,7 +368,6 @@ sub getSystemShortCode
 sub getBranchName
 {
     my $shortcode = @_[0];
-    my $ret = "Unidentified";
     if(!$branch_names{$shortcode})
     {
         my $query = "SELECT NAME FROM ACTOR.ORG_UNIT WHERE LOWER(SHORTNAME)=LOWER(\$\$$shortcode\$\$)";
@@ -335,7 +389,7 @@ sub gatherDB
 {
     my $templateID = @_[0];
     my $date = @_[1];
-    my $query = "SELECT array_to_string(array_accum(coalesce(data, '')),'') FROM action_trigger.event_output where id in (select template_output from action_trigger.event where event_def = $templateID AND run_time::date = '$date');";   
+    my $query = "SELECT array_to_string(array_agg(coalesce(data, '')),'') FROM action_trigger.event_output where id in (select template_output from action_trigger.event where event_def = $templateID AND run_time::date = '$date');";
     $log->addLine($query);
     my @results = @{$dbHandler->query($query)};
     foreach(@results)
@@ -343,7 +397,17 @@ sub gatherDB
         my $row = $_;
         my @row = @{$row};
         my $data="<?xml version='1.0' encoding='UTF-8'?>\n<file type='notice'>".@row[0]."</file>";
-        parseXML($data);
+        eval
+        {
+            parseXML($data);
+            1;
+        }
+        or do {
+            my $error = $@ || 'Unknown failure';
+            my $errormsg = "XML error occured: ".$error." XML: ".$data;
+            warn $errormsg;
+            $log->addLine($errormsg);
+        };
     }
 }
 
@@ -373,8 +437,12 @@ sub parseXML
         foreach (@{$data{'notice'}})
         {
             my %notice = %{$_};
+            my $notice_interval = $notice{'notify_interval'} ? "notify_interval='".$notice{'notify_interval'}."'" : '';
+            my $total_notice_fines = $notice{'total_notice_fines'} ? "total_notice_fines='".$notice{'total_notice_fines'}."'" : '';
+            my $xml = createXML(\%notice,'');
             my $location=$notice{location}{shortname};
-            $lib_notices{$location}.="<notice>".createXML(\%notice,'')."</notice>";     
+            $lib_notices{$location}.="<notice $notice_interval $total_notice_fines>".$xml."</notice>";
+            $lib_notices{'combined'}.="<notice $notice_interval $total_notice_fines>".$xml."</notice>";
             $i++;
         }
     }
@@ -384,9 +452,13 @@ sub parseXML
         $log->addLine("Looping \%{\$data{'notice'}}");
         my %notice = %{$data{'notice'}};
         my $location=$notice{location}{shortname};
-        $lib_notices{$location}.="<notice>".createXML(\%notice,'')."</notice>";     
+        my $xml = createXML(\%notice,'');
+        my $notice_interval = $notice{'notify_interval'} ? "notify_interval='".$notice{'notify_interval'}."'" : '';
+        my $total_notice_fines = $notice{'total_notice_fines'} ? "total_notice_fines='".$notice{'total_notice_fines'}."'" : '';
+
+        $lib_notices{$location}.="<notice $notice_interval $total_notice_fines>".$xml."</notice>";
+        $lib_notices{'combined'}.="<notice $notice_interval $total_notice_fines>".$xml."</notice>";
         $i++;
-        
     }
 }
 
@@ -402,8 +474,7 @@ sub createXML
         # $log->addLine("$element is HASH");
         while ((my $internal, my $value ) = each(%{$test}))
         {
-                
-             my $t = substr($xml,(-1*(length("<$internal>"))));         
+            # my $t = substr($xml,(-1*(length("<$internal>"))));
             my $thisref = ref($value);
             if(substr($xml,(-1*(length("<$internal>")))) ne "<$internal>")
             {
@@ -446,12 +517,20 @@ sub createXML
     }
     else
     {
-        #$log->addLine("$element is $ref");
+        $log->addLine("$element is $ref") if $debug;
         my $esc = $test;
         $esc =~ s/&/&amp;/g;
         $xml.="$esc";
     }
     return $xml;
+}
+
+sub trim
+{
+    my $string = shift;
+    $string =~ s/^\s+//;
+    $string =~ s/\s+$//;
+    return $string;
 }
 
 sub getDBconnects
