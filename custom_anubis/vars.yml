@@ -1,0 +1,11 @@
+---
+  anubis_branch: origin/release/v1.21.1
+## this setting is dependent on the OS version. 22.04 can install 1.24
+  golang_tarball: https://go.dev/dl/go1.24.5.linux-amd64.tar.gz
+  golang_tarfilename: "{{ golang_tarball|regex_replace('.*/', '') }}"
+# if you have a load balancer and more than one brick, you'll want the bricks to use the same secret key-hex-file
+# Generate the key and put it somewhere in a shared location
+# AKA: openssl rand -hex 32 > /mnt/evergreen/tmp/anubis_key.txt
+  anubis_shared_secret_key_path:
+  anubis_start_cmd: /home/opensrf/repos/anubis/var/anubis --target "https://localhost:7443" --target-insecure-skip-verify --use-remote-address {% if anubis_shared_secret_key_path| d(False) %}--ed25519-private-key-hex-file {{anubis_shared_secret_key_path}}{% endif %}
+...

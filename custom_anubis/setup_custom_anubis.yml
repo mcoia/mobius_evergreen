@@ -1,0 +1,92 @@
+---
+
+- hosts: localhost
+  connection: local
+  remote_user: user
+  become_method: sudo
+  vars_files:
+    - vars.yml
+  tasks:
+
+  - block:
+    - name: See if we've already cloned the repo
+      stat:
+        path: /home/opensrf/repos/anubis
+      register: anubis_repo
+
+    - name: Clone Anubis repo
+      become: yes
+      become_user: opensrf
+      shell: mkdir -p /home/opensrf/repos ; cd /home/opensrf/repos && git clone https://github.com/TecharoHQ/anubis.git anubis
+      when: not anubis_repo.stat.exists
+
+    - name: See if we've already checked out the branch
+      become: yes
+      become_user: opensrf
+      shell: cd /home/opensrf/repos/anubis && git branch|head -n 1
+      register: anubis_checked_out_branch
+
+    - name: Tell the user what the anubis branch is
+      ignore_errors: yes
+      debug:
+        msg: "{{ (anubis_checked_out_branch | regex_search(anubis_branch))  }}"
+
+    - name: Switch branches if we're not on the right branch
+      become: yes
+      become_user: opensrf
+      shell: cd /home/opensrf/repos/anubis && git checkout {{ anubis_branch }}
+      when: (anubis_checked_out_branch | regex_search(anubis_branch)) == None
+
+    - name: Run through the apt install of go to get the dependencies
+      apt:
+        name: golang-1.23
+        state: present
+
+    - name: Now remove golang to make way for the tarball install
+      apt:
+        name: golang-1.23
+        state: absent
+
+    - name: See if we've already downloaded the tarball
+      stat:
+        path: /root/{{ golang_tarfilename }}
+      register: golang_downloaded
+
+    - name: Install tarball from internet
+      shell: cd /root && wget {{ golang_tarball }} ; rm -rf /usr/local/go ; tar -C /usr/local -xzf /root/{{ golang_tarfilename }}
+      when: not golang_downloaded.stat.exists
+
+    - name: Make sure go is added to the user path environment
+      lineinfile:
+        dest: /home/opensrf/.bashrc
+        state: present
+        regexp: '\/usr\/local\/go\/bin'
+        line: 'export PATH=$PATH:/usr/local/go/bin'
+
+    - name: Modify the css
+      lineinfile:
+        dest: /home/opensrf/repos/anubis/web/index.templ
+        state: present
+        regexp: 'display: flex;'
+        line: '           display: none;'
+        backup: yes
+
+    - name: Install some anubis go dependencies
+      apt:
+        name: zstd
+        state: present
+
+    - name: Install some anubis go dependencies
+      apt:
+        name: brotli
+        state: present
+
+    - name: Compile anubis
+      become: yes
+      become_user: opensrf
+      shell: cd /home/opensrf/repos/anubis/ && make
+      environment:
+        PATH: "{{ ansible_env.PATH }}:/usr/local/go/bin"
+    when: anubis_branch != None
+
+...
