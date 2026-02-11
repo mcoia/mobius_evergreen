@@ -323,7 +323,7 @@ and record not in
 and record not in (select record from seekdestroy.bib_score where circ_mods ~$$BOOK$$ and opac_icon=$$book$$)
 and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$ and second_place_score~$$music_score$$)
 and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ and second_place_score~$$music$$ and (copy_locations~*$$cd$$ or copy_locations~*$$music$$ or call_labels~*$$cd$$ or call_labels~*$$music$$))
-and record not in ( select record from seekdestroy.bib_score where opac_icon~$$dvd$$)
+and record not in ( select record from seekdestroy.bib_score where opac_icon~$$dvd$$ or opac_icon~$$blu\-ray$$ or opac_icon~$$four\-k\-blu\-ray$$ or opac_icon~$$vhs$$)
 and not circ_mods~$$KIT$$
 and not winning_score~$$audioBookScore$$
 and winning_score_score!=0
@@ -398,7 +398,7 @@ and record not in
 and record not in (select record from seekdestroy.bib_score where circ_mods ~$$BOOK$$ and opac_icon=$$book$$)
 and record not in ( select record from seekdestroy.bib_score where opac_icon~$$score$$ and second_place_score~$$music_score$$)
 and record not in ( select record from seekdestroy.bib_score where opac_icon~$$music$$ and second_place_score~$$music$$ and (copy_locations~*$$cd$$ or copy_locations~*$$music$$ or call_labels~*$$cd$$ or call_labels~*$$music$$))
-and record not in ( select record from seekdestroy.bib_score where opac_icon~$$dvd$$)
+and record not in ( select record from seekdestroy.bib_score where opac_icon~$$dvd$$ or opac_icon~$$blu\-ray$$ or opac_icon~$$four\-k\-blu\-ray$$ or opac_icon~$$vhs$$)
 and not circ_mods~$$KIT$$
 and not winning_score~$$audioBookScore$$
 and winning_score_score!=0

@@ -146,6 +146,8 @@ if(! -e $xmlconf)
     our @musicSearchPhrases;
     our @musicSearchPhrasesAddition;
     our @playawaySearchPhrases;
+    our @allowedMergeFormats;
+    our @videoFormats;
     our @seekdestroyReportFiles =();
     our %queries;
     our %conf;
@@ -186,6 +188,8 @@ if(! -e $xmlconf)
     @musicSearchPhrases = $conf{"musicsearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"musicsearchphrases"})} : ();
     @musicSearchPhrasesAddition = $conf{"musicsearchphrasesaddition"} ? @{$mobUtil->makeArrayFromComma($conf{"musicsearchphrasesaddition"})} : ();
     @playawaySearchPhrases = $conf{"playawaysearchphrases"} ? @{$mobUtil->makeArrayFromComma($conf{"playawaysearchphrases"})} : ();
+    @allowedMergeFormats = $conf{"dedupe_allowed_merge_formats"} ? @{$mobUtil->makeArrayFromComma($conf{"dedupe_allowed_merge_formats"})} : ();
+    @videoFormats = $conf{"dedupe_video_formats"} ? @{$mobUtil->makeArrayFromComma($conf{"dedupe_video_formats"})} : ();
 
     if ($conf{"logfile"})
     {
@@ -2725,7 +2729,7 @@ sub updateScoreWithQuery
     my @results = @{$dbHandler->query($query)};
     my @scoreSet = ();
     foreach(@results)
-    {   
+    {
         my %pair = (
             'id' => $_->[0],
             'marc' => $_->[1]
@@ -3129,8 +3133,6 @@ sub additionalDedupeValidator
     my $data = shift;
     my $branchBreakMerge = shift;
     my @leadIcons = split(/,/,$data->{'leadicon'});
-    my @videoFormats = ('dvd', 'vhs', 'blu-ray', 'four-k-blu-ray');
-    my @allowedMergedFormats =('blu-ray','book','casaudiobook','casmusic','cdaudiobook','cdmusic','dvd','eaudio','ebook','evideo','four-k-blu-ray','lpbook','music','phonomusic','phonospoken','vhs');
     my $is_video = 0;
     foreach(@videoFormats)
     {
@@ -3147,7 +3149,7 @@ sub additionalDedupeValidator
     foreach(@leadIcons)
     {
         my $thisFormat = $_;
-        foreach(@allowedMergedFormats)
+        foreach(@allowedMergeFormats)
         {
             $is_allowed = 1 if $thisFormat eq $_;
             last if $is_allowed;
@@ -3337,6 +3339,85 @@ sub additionalDedupeValidator
         my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases, \@negPhrases);
         return "video black and white in one but not both" if !$pass;
 
+    }
+    if( lc($conf{"dedupe_allow_no_isbn_match_if_245h_match"}) eq 'yes' )
+    {
+        # checking on "Edition statments"
+        my @matches = @{generateArrayForProvidedBIBPairAndProvidedPerlSub($data, 'getSpecifiedTag($marc, $extraData, 1)', '250a')};
+
+        # abridged
+        my @phrases = ('[^n]abridged');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - abridged in one but not both" if !$pass;
+
+        # unabridged
+        my @phrases = ('unabridged');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - unabridged in one but not both" if !$pass;
+
+        # color
+        my @phrases = ('[^\w]col\.','color','[^\w]col[^\w]','[^\w]col$');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+
+        # black and white
+        my @phrases = ('black\s*and\s*white','black\s*&\s*white');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - black and white in one but not both" if !$pass;
+
+        # large print
+        my @phrases = ('large\s*print');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - large print in one but not both" if !$pass;
+
+        # board book
+        my @phrases = ('board\s*book');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - board book in one but not both" if !$pass;
+
+        # vox
+        my @phrases = ('vox');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - vox in one but not both" if !$pass;
+
+        # wonderbook
+        my @phrases = ('wonder\s*book');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - wonderbook in one but not both" if !$pass;
+
+        # 1st
+        my @phrases = ('first','1st');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - first in one but not both" if !$pass;
+
+        # 2nd
+        my @phrases = ('second','2nd','2d');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - second in one but not both" if !$pass;
+
+        # 3rd
+        my @phrases = ('third','3rd');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - third in one but not both" if !$pass;
+
+        # 4th
+        my @phrases = ('fourth','4th');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - fourth in one but not both" if !$pass;
+
+        # revised
+        my @phrases = ('revised');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - revised in one but not both" if !$pass;
+
+        # updated
+        my @phrases = ('updated');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - updated in one but not both" if !$pass;
+
+        # illustrated
+        my @phrases = ('illustrated');
+        my $pass = hasMatchingSpecifiedValueBetweenTwoArrays(\@matches, \@phrases);
+        return "edition breaker - illustrated in one but not both" if !$pass;
     }
     return '1';
 }
@@ -4876,9 +4957,9 @@ sub identifyBibsToScore
     WHERE
     sbs.id IS NULL and
     not bre.deleted
-    
+
     UNION ALL
-    
+
     SELECT
     bre.id,bre.marc
     FROM

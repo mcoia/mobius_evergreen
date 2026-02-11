@@ -14,6 +14,11 @@ audio_book_score_when_audiobooks_dont_belong = 6
 electronic_score_when_bib_is_considered_electronic = 6
 queryfile=/path/to/query_file_sample.sql
 
+# Dedupe list of video formats
+# Teaches this tool, which of the formats are considered "video" and will be treated as such
+# comma separated
+dedupe_video_formats = dvd, vhs, blu-ray
+
 # This setting will cause the software (when ran with --runDedupe) to copy any 035 OCLC symbol from the sub bib to the lead bib
 # Anything other than "yes" is considered false
 dedupe_preserve_oclc_from_sub = yes
@@ -39,9 +44,8 @@ dedupe_merge_isbns_to_lead = yes
 dedupe_merge_video_024_to_lead = yes
 
 # List of fields that you want to copy over from the subordinate bib upon dedupe
-# comma seperated
+# comma separated
 dedupe_copy_field_list = 086, 037
-
 
 # This setting will cause the dedupe routine to not* automatically merge two bibs that have OCLC numbers on each but don't match
 # If one bib has an OCLC number and the other one doesn't: merge
@@ -72,6 +76,23 @@ dedupe_added_match_field_list = 700a
 # If either* bib contains any of the specified branches, the bibs will not merge
 # comment out if you want the default behavior (same branch having copies on both will break merge)
 dedupe_specified_branch_copies_break_merge = BR1,BR2
+
+# Dedupe allowed formats
+# Explicit list of formats that this tool is allowed to merge when running the dedupe operation
+# For reference, here's the full list:
+# cdmusic,evideo,preloadedaudio,score,braille,equip,casmusic,blu-ray,phonospoken,microform,phonomusic,music,
+# picture,cdaudiobook,kit,playaway,dvd,serial,software,casaudiobook,map,book,four-k-blu-ray,ebook,eserial,vhs,lpbook,eaudio
+# If blank, we won't merge anything
+# comma separated
+dedupe_allowed_merge_formats = blu-ray, dvd, eaudio, vhs, ebook, evideo, eserial, eaudio
+
+# Dedupe Check edition statement
+# Turning this feature on will incorporate the 250a for specific "edition" statements
+# These are the statements:
+# abridged,unabridged,color,black and white,large print,board book,vox,wonderbook,1st,2nd,3rd,4th,revised,updated,illustrated
+# Anything other than "yes" is considered false
+dedupe_check_edition_statements = yes
+
 tempdir = /path/to/tmp
 erroremaillist = example@example.org
 successemaillist = example@example.org, example2@example.org
